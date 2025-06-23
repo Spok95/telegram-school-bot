@@ -33,7 +33,13 @@ func main() {
 	}
 
 	bot.Handle("/start", handlers.StartHandler)
+	bot.Handle(&handlers.BtnOpenMenu, handlers.MenuHandler)
+	bot.Handle("/menu", handlers.MenuHandler)
 	bot.Handle("/setrole", handlers.SetRoleHandler)
+	bot.Handle("/my_score", handlers.MyScoreHandler)
+	handlers.InitMenu(bot)
+	handlers.InitSetRole(bot)
+	handlers.InitAwardHandler(bot)
 
 	log.Println("Bot is running")
 	bot.Start()

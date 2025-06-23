@@ -14,6 +14,6 @@ type User struct {
 	TelegramID int64
 	Name       string
 	Role       Role
-	ClassID    int
+	ClassID    *int64
 	ChildID    *int64
 }
