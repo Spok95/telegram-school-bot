@@ -10,10 +10,12 @@ const (
 )
 
 type User struct {
-	ID         int64
-	TelegramID int64
-	Name       string
-	Role       Role
-	ClassID    *int64
-	ChildID    *int64
+	ID          int64   `db:"id"`
+	TelegramID  int64   `db:"telegram_id"`
+	Name        string  `db:"name"`
+	Role        *Role   `db:"role"`
+	ClassID     *int64  `db:"class_id"`
+	ChildID     *int64  `db:"child_id"`
+	PendingRole *string `db:"pending_role"`
+	IsActive    bool    `db:"is_active"`
 }

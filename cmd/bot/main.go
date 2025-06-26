@@ -3,44 +3,69 @@ package main
 import (
 	"github.com/Spok95/telegram-school-bot/internal/bot/handlers"
 	"github.com/Spok95/telegram-school-bot/internal/db"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/joho/godotenv"
-	"gopkg.in/telebot.v3"
 	"log"
 	"os"
-	"time"
 )
 
 func main() {
-	err := godotenv.Load()
+	// Загрузка переменных окружения
+	if err := godotenv.Load(); err != nil {
+		log.Println("Не удалось загрузить .env файл, используем переменные окружения")
+	}
+
+	botToken := os.Getenv("BOT_TOKEN")
+	if botToken == "" {
+		log.Fatal("BOT_TOKEN не задан")
+	}
+
+	// Инициализация Telegram бота
+	bot, err := tgbotapi.NewBotAPI(botToken)
 	if err != nil {
-		log.Fatal("Error loading .env file")
+		log.Fatalf("Ошибка запуска бота: %v", err)
 	}
+	bot.Debug = true
+	log.Printf("Бот запущен как %s", bot.Self.UserName)
 
-	db.InitDB()
-	db.Migrate()
-
-	token := os.Getenv("TELEGRAM_TOKEN")
-	if token == "" {
-		log.Fatal("TELEGRAM_TOKEN environment variable not set")
-	}
-
-	bot, err := telebot.NewBot(telebot.Settings{
-		Token:  token,
-		Poller: &telebot.LongPoller{Timeout: 10 * time.Second},
-	})
+	// Инициализация БД через db.Init()
+	database, err := db.Init()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Ошибка подключения к БД: %v", err)
+	}
+	defer database.Close()
+
+	if err := db.Migrate(database); err != nil {
+		log.Fatal("Миграция не удалась:", err)
 	}
 
-	bot.Handle("/start", handlers.StartHandler)
-	bot.Handle(&handlers.BtnOpenMenu, handlers.MenuHandler)
-	bot.Handle("/menu", handlers.MenuHandler)
-	bot.Handle("/setrole", handlers.SetRoleHandler)
-	bot.Handle("/my_score", handlers.MyScoreHandler)
-	handlers.InitMenu(bot)
-	handlers.InitSetRole(bot)
-	handlers.InitAwardHandler(bot)
+	u := tgbotapi.NewUpdate(0)
+	u.Timeout = 60
+	updates := bot.GetUpdatesChan(u)
 
-	log.Println("Bot is running")
-	bot.Start()
+	// Маршрутизация команд
+	for update := range updates {
+		if update.Message == nil {
+			continue
+		}
+		if update.CallbackQuery != nil {
+			handlers.HandleRoleCallback(bot, database, update.CallbackQuery)
+			handlers.HandlePendingRoleCallback(bot, database, update.CallbackQuery)
+			continue
+		}
+
+		switch update.Message.Command() {
+		case "start":
+			handlers.HandleStart(bot, database, update.Message)
+		case "setrole":
+			handlers.HandleSetRoleRequest(bot, database, update.Message)
+		case "pending_roles":
+			handlers.HandlePendingRoles(bot, database, update.Message)
+		case "myscore":
+			handlers.HandleMyScore(bot, database, update.Message)
+		default:
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "⚠️ Неизвестная команда. Используйте /start")
+			bot.Send(msg)
+		}
+	}
 }

@@ -1,10 +1,10 @@
 module github.com/Spok95/telegram-school-bot
 
-go 1.23.1
+go 1.24.4
 
 require (
+	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
 	github.com/joho/godotenv v1.5.1
-	gopkg.in/telebot.v3 v3.3.8
 	modernc.org/sqlite v1.38.0
 )
 
@@ -20,3 +20,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+replace github.com/go-telegram-bot-api/telegram-bot-api => github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1

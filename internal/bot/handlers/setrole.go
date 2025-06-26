@@ -1,41 +1,58 @@
 package handlers
 
 import (
+	"database/sql"
 	"fmt"
-	"github.com/Spok95/telegram-school-bot/internal/db"
-	"github.com/Spok95/telegram-school-bot/internal/models"
-	"gopkg.in/telebot.v3"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"log"
 )
 
-var (
-	SetRoleKeyboard = &telebot.ReplyMarkup{}
-	btnStudent      = SetRoleKeyboard.Data("Ученик", "setrole_student", "student")
-	btnTeacher      = SetRoleKeyboard.Data("Учитель", "setrole_teacher", "teacher")
-	btnParent       = SetRoleKeyboard.Data("Родитель", "setrole_parent", "parent")
-	btnAdmin        = SetRoleKeyboard.Data("Админ", "setrole_admin", "admin")
-)
-
-func SetRoleHandler(c telebot.Context) error {
-	SetRoleKeyboard.Inline(
-		SetRoleKeyboard.Row(btnStudent, btnTeacher),
-		SetRoleKeyboard.Row(btnParent, btnAdmin),
+func HandleSetRoleRequest(bot *tgbotapi.BotAPI, db *sql.DB, msg *tgbotapi.Message) {
+	// Inline-кнопки с выбором роли
+	buttons := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("Ученик", "role_student"),
+			tgbotapi.NewInlineKeyboardButtonData("Родитель", "role_parent"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("Учитель", "role_teacher"),
+		),
 	)
-	return c.Send("Выберите вашу роль:", SetRoleKeyboard)
+
+	msgOut := tgbotapi.NewMessage(msg.Chat.ID, "🧭 Выберите свою роль:")
+	msgOut.ReplyMarkup = buttons
+	bot.Send(msgOut)
 }
 
-func InitSetRole(bot *telebot.Bot) {
-	handle := func(role models.Role) func(c telebot.Context) error {
-		return func(c telebot.Context) error {
-			user := c.Sender()
-			err := db.SetUserRole(user.ID, user.FirstName+" "+user.LastName, role)
-			if err != nil {
-				return c.Send("Ошибка при сохранении роли.")
-			}
-			return c.Send(fmt.Sprintf("Ваша роль установлена: %s", role))
+func HandleRoleCallback(bot *tgbotapi.BotAPI, db *sql.DB, cb *tgbotapi.CallbackQuery) {
+	telegramID := cb.From.ID
+	var role string
+
+	switch cb.Data {
+	case "role_student":
+		role = "student"
+	case "role_teacher":
+		role = "teacher"
+	case "role_parent":
+		role = "parent"
+	default:
+		_, err := bot.Request(tgbotapi.NewCallback(cb.ID, "Ошибка выбора"))
+		if err != nil {
+			log.Println(err)
 		}
+		return
 	}
-	bot.Handle(&btnStudent, handle(models.Student))
-	bot.Handle(&btnTeacher, handle(models.Teacher))
-	bot.Handle(&btnParent, handle(models.Parent))
-	bot.Handle(&btnAdmin, handle(models.Admin))
+
+	_, err := db.Exec(`UPDATE users SET pending_role = ? WHERE telegram_id = ?`, role, telegramID)
+	if err != nil {
+		log.Println("Ошибка сохранения pending_role:", err)
+		bot.Send(tgbotapi.NewMessage(cb.Message.Chat.ID, "❌ Не удалось сохранить выбор."))
+		return
+	}
+
+	_, err = bot.Request(tgbotapi.NewCallback(cb.ID, "Заявка отправлена"))
+	if err != nil {
+		log.Println(err)
+	}
+	bot.Send(tgbotapi.NewMessage(cb.Message.Chat.ID, fmt.Sprintf("✅ Ваша заявка на роль *%s* отправлена администратору.", role)))
 }
