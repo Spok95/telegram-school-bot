@@ -45,12 +45,12 @@ func main() {
 
 	// Маршрутизация команд
 	for update := range updates {
-		if update.Message == nil {
-			continue
-		}
 		if update.CallbackQuery != nil {
 			handlers.HandleRoleCallback(bot, database, update.CallbackQuery)
 			handlers.HandlePendingRoleCallback(bot, database, update.CallbackQuery)
+			continue
+		}
+		if update.Message == nil {
 			continue
 		}
 

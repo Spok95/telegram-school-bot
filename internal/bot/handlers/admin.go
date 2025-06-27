@@ -5,6 +5,8 @@ import (
 	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"log"
+	"strconv"
+	"strings"
 )
 
 type RoleRequest struct {
@@ -65,45 +67,65 @@ WHERE pending_role IS NOT NULL AND (role IS NULL OR role = '')
 
 // Обработка нажатий на подтверждение/отклонение
 func HandlePendingRoleCallback(bot *tgbotapi.BotAPI, db *sql.DB, cb *tgbotapi.CallbackQuery) {
-	var action string
-	var targetID int64
+	data := cb.Data
 
-	_, err := fmt.Sscanf(cb.Data, "%[^:]:%d", &action, &targetID)
-	if err != nil {
-		_, err := bot.Request(tgbotapi.NewCallback(cb.ID, "❌ Неверный формат команды"))
-		if err != nil {
-			log.Println(err)
+	if strings.HasPrefix(data, "approve_") {
+		// approve_123456789_student
+		parts := strings.Split(data, "_")
+		if len(parts) != 3 {
+			bot.Request(tgbotapi.NewCallback(cb.ID, "Неверный формат подтверждения"))
+			return
 		}
-		return
-	}
 
-	var query string
-	switch action {
-	case "confirm_role":
-		query = `UPDATE users SET role = pending_role, pending_role = NULL WHERE telegram_id = ?`
-	case "reject_role":
-		query = `UPDATE users SET pending_role = NULL WHERE telegram_id = ?`
-	default:
-		_, err := bot.Request(tgbotapi.NewCallback(cb.ID, "❌ Неизвестное действие"))
+		userIDStr := parts[1]
+		role := parts[2]
+
+		userID, err := strconv.ParseInt(userIDStr, 10, 64)
 		if err != nil {
-			log.Println(err)
+			bot.Request(tgbotapi.NewCallback(cb.ID, "Ошибка ID пользователя"))
+			return
 		}
-		return
-	}
 
-	_, err = db.Exec(query, targetID)
-	if err != nil {
-		log.Println("Ошибка обновления роли:", err)
-		_, err := bot.Request(tgbotapi.NewCallback(cb.ID, "❌ Ошибка при обновлении"))
+		// Обновляем роль
+		_, err = db.Exec(`UPDATE users SET role = ?, pending_role = NULL WHERE telegram_id = ?`, role, userID)
 		if err != nil {
-			log.Println(err)
+			log.Println("Ошибка при обновлении роли:", err)
+			bot.Send(tgbotapi.NewMessage(cb.Message.Chat.ID, "❌ Ошибка при подтверждении роли."))
+			return
 		}
-		return
-	}
 
-	_, err = bot.Request(tgbotapi.NewCallback(cb.ID, "✅ Обновлено"))
-	if err != nil {
-		log.Println(err)
+		bot.Request(tgbotapi.NewCallback(cb.ID, "Роль подтверждена"))
+
+		// Уведомляем пользователя
+		msg := tgbotapi.NewMessage(userID, fmt.Sprintf("✅ Ваша роль *%s* подтверждена администратором!", role))
+		msg.ParseMode = "Markdown"
+		bot.Send(msg)
+	} else if strings.HasPrefix(data, "reject_") {
+		// reject_123456789
+		parts := strings.Split(data, "_")
+		if len(parts) != 2 {
+			bot.Request(tgbotapi.NewCallback(cb.ID, "Неверный формат отклонения"))
+			return
+		}
+
+		userIDStr := parts[1]
+		userID, err := strconv.ParseInt(userIDStr, 10, 64)
+		if err != nil {
+			bot.Request(tgbotapi.NewCallback(cb.ID, "Ошибка ID пользователя"))
+			return
+		}
+
+		// Удаляем pending_role
+		_, err = db.Exec(`UPDATE users SET pending_role = NULL WHERE telegram_id = ?`, userID)
+		if err != nil {
+			log.Println("Ошибка при отклонении заявки:", err)
+			bot.Send(tgbotapi.NewMessage(cb.Message.Chat.ID, "❌ Ошибка при отклонении."))
+			return
+		}
+
+		bot.Request(tgbotapi.NewCallback(cb.ID, "Заявка отклонена"))
+
+		// Уведомляем пользователя
+		bot.Send(tgbotapi.NewMessage(userID, "❌ Ваша заявка на роль была отклонена администратором."))
 	}
-	bot.Send(tgbotapi.NewMessage(cb.Message.Chat.ID, "✅ Заявка обработана."))
 }
