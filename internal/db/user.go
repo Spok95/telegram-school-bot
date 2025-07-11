@@ -29,7 +29,7 @@ FROM users WHERE telegram_id = ?`
 	var u models.User
 	err := row.Scan(&u.ID, &u.TelegramID, &u.Name, &u.Role, &u.ClassID, &u.ChildID, &u.PendingRole, &u.IsActive)
 	if err != nil {
-		log.Println("Ошибка при чтении пользователя:", err)
+		log.Println("Пользователь не найден в users", err)
 		return nil, err
 	}
 	return &u, nil
@@ -37,7 +37,7 @@ FROM users WHERE telegram_id = ?`
 
 func GetAllStudents(db *sql.DB) ([]models.User, error) {
 	query := `
-SELECT id, telegram_id, name, role, class_id, child_id, pending_rolem is_active
+SELECT id, telegram_id, name, role, class_id, child_id, pending_role, is_active
 FROM users WHERE role = 'student'`
 
 	rows, err := db.Query(query)

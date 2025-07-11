@@ -36,10 +36,6 @@ func HandleRoleCallback(bot *tgbotapi.BotAPI, db *sql.DB, cb *tgbotapi.CallbackQ
 	case "role_parent":
 		role = "parent"
 	default:
-		_, err := bot.Request(tgbotapi.NewCallback(cb.ID, "Ошибка выбора"))
-		if err != nil {
-			log.Println(err)
-		}
 		return
 	}
 

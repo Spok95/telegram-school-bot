@@ -7,6 +7,7 @@ import (
 	"github.com/joho/godotenv"
 	"log"
 	"os"
+	"strings"
 )
 
 func main() {
@@ -46,6 +47,11 @@ func main() {
 	// Маршрутизация команд
 	for update := range updates {
 		if update.CallbackQuery != nil {
+			if strings.HasPrefix(update.CallbackQuery.Data, "addscore_student_") ||
+				strings.HasPrefix(update.CallbackQuery.Data, "addscore_category_") {
+				handlers.HandleAddScoreCallback(bot, database, update.CallbackQuery)
+				continue
+			}
 			handlers.HandleRoleCallback(bot, database, update.CallbackQuery)
 			handlers.HandlePendingRoleCallback(bot, database, update.CallbackQuery)
 			continue
@@ -54,14 +60,18 @@ func main() {
 			continue
 		}
 
-		switch update.Message.Command() {
-		case "start":
+		switch update.Message.Text {
+		case "/start":
 			handlers.HandleStart(bot, database, update.Message)
-		case "setrole":
+		case "/setrole":
 			handlers.HandleSetRoleRequest(bot, database, update.Message)
-		case "pending_roles":
+		case "/pending_roles":
 			handlers.HandlePendingRoles(bot, database, update.Message)
-		case "myscore":
+		case "/addscore", "➕ Начислить баллы":
+			go handlers.HandleAddScore(bot, database, update.Message)
+		case "/myscore", "📊 Мой рейтинг":
+			handlers.HandleMyScore(bot, database, update.Message)
+		case "📊 Рейтинг ребёнка":
 			handlers.HandleMyScore(bot, database, update.Message)
 		default:
 			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "⚠️ Неизвестная команда. Используйте /start")

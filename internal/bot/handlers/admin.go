@@ -66,7 +66,7 @@ WHERE pending_role IS NOT NULL AND (role IS NULL OR role = '')
 }
 
 // Обработка нажатий на подтверждение/отклонение
-func HandlePendingRoleCallback(bot *tgbotapi.BotAPI, db *sql.DB, cb *tgbotapi.CallbackQuery) {
+func HandlePendingRoleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
 	data := cb.Data
 
 	if strings.HasPrefix(data, "approve_") {
@@ -87,7 +87,7 @@ func HandlePendingRoleCallback(bot *tgbotapi.BotAPI, db *sql.DB, cb *tgbotapi.Ca
 		}
 
 		// Обновляем роль
-		_, err = db.Exec(`UPDATE users SET role = ?, pending_role = NULL WHERE telegram_id = ?`, role, userID)
+		_, err = database.Exec(`UPDATE users SET role = ?, pending_role = NULL WHERE telegram_id = ?`, role, userID)
 		if err != nil {
 			log.Println("Ошибка при обновлении роли:", err)
 			bot.Send(tgbotapi.NewMessage(cb.Message.Chat.ID, "❌ Ошибка при подтверждении роли."))
@@ -100,6 +100,13 @@ func HandlePendingRoleCallback(bot *tgbotapi.BotAPI, db *sql.DB, cb *tgbotapi.Ca
 		msg := tgbotapi.NewMessage(userID, fmt.Sprintf("✅ Ваша роль *%s* подтверждена администратором!", role))
 		msg.ParseMode = "Markdown"
 		bot.Send(msg)
+
+		// Повторно выводим меню для пользователя с новой ролью
+		fakeMsg := &tgbotapi.Message{
+			From: &tgbotapi.User{ID: userID},
+			Chat: &tgbotapi.Chat{ID: userID},
+		}
+		HandleStart(bot, database, fakeMsg)
 	} else if strings.HasPrefix(data, "reject_") {
 		// reject_123456789
 		parts := strings.Split(data, "_")
@@ -116,7 +123,7 @@ func HandlePendingRoleCallback(bot *tgbotapi.BotAPI, db *sql.DB, cb *tgbotapi.Ca
 		}
 
 		// Удаляем pending_role
-		_, err = db.Exec(`UPDATE users SET pending_role = NULL WHERE telegram_id = ?`, userID)
+		_, err = database.Exec(`UPDATE users SET pending_role = NULL WHERE telegram_id = ?`, userID)
 		if err != nil {
 			log.Println("Ошибка при отклонении заявки:", err)
 			bot.Send(tgbotapi.NewMessage(cb.Message.Chat.ID, "❌ Ошибка при отклонении."))

@@ -6,13 +6,13 @@ import (
 	"log"
 )
 
-func AddScore(db *sql.DB, score models.Score) error {
+func AddScore(database *sql.DB, score models.Score) error {
 	query := `
 INSERT INTO scores (
                     student_id, category, points, type, comment, approved, sreated_by, created_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);`
 
-	_, err := db.Exec(query,
+	_, err := database.Exec(query,
 		score.StudentID,
 		score.Category,
 		score.Points,
@@ -28,9 +28,9 @@ INSERT INTO scores (
 	return err
 }
 
-func GetScoreByStudent(db *sql.DB, studentID int64) ([]models.Score, error) {
-	rows, err := db.Query(`
-SELECT id, student_id, category, points, type, comment, approved, sreated_by, created_at
+func GetScoreByStudent(database *sql.DB, studentID int64) ([]models.Score, error) {
+	rows, err := database.Query(`
+SELECT id, student_id, category, points, type, comment, approved, created_by, created_at
 FROM scores WHERE student_id = ? ORDER BY created_at DESC`, studentID)
 
 	if err != nil {
@@ -42,7 +42,7 @@ FROM scores WHERE student_id = ? ORDER BY created_at DESC`, studentID)
 	var scores []models.Score
 	for rows.Next() {
 		var s models.Score
-		err := rows.Scan(&s.ID, &s.StudentID, &s.Category, &s.Points, &s.Type, s.Comment, &s.Approved, &s.CreatedBy, &s.CreatedAt)
+		err := rows.Scan(&s.ID, &s.StudentID, &s.Category, &s.Points, &s.Type, &s.Comment, &s.Approved, &s.CreatedBy, &s.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
