@@ -10,27 +10,23 @@ import (
 
 func HandleMyScore(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	telegramID := msg.From.ID
-	var userID int64
-	var role string
-	var targetID int64
-
-	// Получаем ID и роль
-	err := database.QueryRow(`SELECT id, role FROM users WHERE telegram_id = ?`, telegramID).Scan(&userID, &role)
+	user, err := db.GetUserByTelegramID(database, telegramID)
 	if err != nil {
-		log.Println("Ошибка поиска пользователя:", err)
-		sendText(bot, msg.Chat.ID, "❌ Ошибка при получении данных.")
+		log.Println("Ошибка при получении пользователя:", err)
+		sendText(bot, msg.Chat.ID, "❌ Пользователь не найден.")
 		return
 	}
 
+	var targetID int64
 	// Если родитель — найдём ребёнка
-	if role == "parent" {
-		err := database.QueryRow(`SELECT child_id FROM users WHERE id = ? AND role = 'parent'`, userID).Scan(&targetID)
+	if user.Role != nil && *user.Role == "parent" {
+		err = database.QueryRow(`SELECT child_id FROM users WHERE id = ? AND role = 'parent'`, user.ID).Scan(&targetID)
 		if err != nil {
 			sendText(bot, msg.Chat.ID, "❌ Не удалось найти привязанного ученика.")
 			return
 		}
 	} else {
-		targetID = userID
+		targetID = user.ID
 	}
 
 	// Получаем сумму баллов по категориям
@@ -39,7 +35,7 @@ SELECT category, SUM(points) as total
 FROM scores
 WHERE student_id = ? AND approved = 1
 GROUP BY category
-`, targetID)
+`, telegramID)
 	if err != nil {
 		log.Println("Ошибка при подсчёте баллов:", err)
 		sendText(bot, msg.Chat.ID, "❌ Ошибка при подсчёте баллов.")
@@ -68,7 +64,7 @@ GROUP BY category
 	}
 
 	// Получаем все начисления/списания
-	history, err := db.GetScoreByStudent(database, userID)
+	history, err := db.GetScoreByStudent(database, telegramID)
 	if err != nil {
 		log.Println("ошибка при получении истории:", err)
 	} else {
@@ -84,11 +80,9 @@ GROUP BY category
 					sign = "-"
 				}
 				date := s.CreatedAt.Format("02.01.2006")
-				var reason string
+				reason := "-"
 				if s.Comment != nil && *s.Comment != "" {
 					reason = *s.Comment
-				} else {
-					reason = "-"
 				}
 
 				if reason == "-" {

@@ -9,7 +9,7 @@ import (
 func AddScore(database *sql.DB, score models.Score) error {
 	query := `
 INSERT INTO scores (
-                    student_id, category, points, type, comment, approved, sreated_by, created_at
+                    student_id, category, points, type, comment, approved, created_by, created_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);`
 
 	_, err := database.Exec(query,

@@ -47,11 +47,23 @@ func main() {
 	// Маршрутизация команд
 	for update := range updates {
 		if update.CallbackQuery != nil {
-			if strings.HasPrefix(update.CallbackQuery.Data, "addscore_student_") ||
-				strings.HasPrefix(update.CallbackQuery.Data, "addscore_category_") {
+			if strings.HasPrefix(update.CallbackQuery.Data, "addscore_student_") {
 				handlers.HandleAddScoreCallback(bot, database, update.CallbackQuery)
 				continue
 			}
+			if strings.HasPrefix(update.CallbackQuery.Data, "addscore_category_") {
+				handlers.HandleAddScoreCategory(bot, database, update.CallbackQuery)
+				continue
+			}
+			if strings.HasPrefix(update.CallbackQuery.Data, "addscore_confirm") {
+				handlers.HandleAddScoreConfirmCallback(bot, database, update.CallbackQuery)
+				continue
+			}
+			if strings.HasPrefix(update.CallbackQuery.Data, "addscore_cancel") {
+				handlers.HandleAddScoreCancelCallback(bot, update.CallbackQuery)
+				continue
+			}
+
 			handlers.HandleRoleCallback(bot, database, update.CallbackQuery)
 			handlers.HandlePendingRoleCallback(bot, database, update.CallbackQuery)
 			continue
@@ -59,6 +71,8 @@ func main() {
 		if update.Message == nil {
 			continue
 		}
+		handlers.HandleAddScoreValue(bot, database, update.Message)
+		handlers.HandleAddScoreComment(bot, database, update.Message)
 
 		switch update.Message.Text {
 		case "/start":
