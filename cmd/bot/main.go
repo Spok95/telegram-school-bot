@@ -47,32 +47,64 @@ func main() {
 	// Маршрутизация команд
 	for update := range updates {
 		if update.CallbackQuery != nil {
-			if strings.HasPrefix(update.CallbackQuery.Data, "addscore_student_") {
+			data := update.CallbackQuery.Data
+			if strings.HasPrefix(data, "role_") {
+				handlers.HandleRoleInline(bot, database, update.CallbackQuery)
+				continue
+			}
+			if strings.HasPrefix(data, "approve_") || strings.HasPrefix(data, "reject_") {
+				handlers.HandlePendingRoleCallback(bot, database, update.CallbackQuery)
+				continue
+			}
+			if strings.HasPrefix(data, "addscore_student_") {
 				handlers.HandleAddScoreCallback(bot, database, update.CallbackQuery)
 				continue
 			}
-			if strings.HasPrefix(update.CallbackQuery.Data, "addscore_category_") {
+			if strings.HasPrefix(data, "addscore_category_") {
 				handlers.HandleAddScoreCategory(bot, database, update.CallbackQuery)
 				continue
 			}
-			if strings.HasPrefix(update.CallbackQuery.Data, "addscore_confirm") {
+			if data == "addscore_confirm" {
 				handlers.HandleAddScoreConfirmCallback(bot, database, update.CallbackQuery)
 				continue
 			}
-			if strings.HasPrefix(update.CallbackQuery.Data, "addscore_cancel") {
+			if data == "addscore_cancel" {
 				handlers.HandleAddScoreCancelCallback(bot, update.CallbackQuery)
 				continue
 			}
+			bot.Send(tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "⚠️ Неизвестная команда. Используйте /start"))
+			continue
+		}
 
-			handlers.HandleRoleCallback(bot, database, update.CallbackQuery)
-			handlers.HandlePendingRoleCallback(bot, database, update.CallbackQuery)
+		if update.Message != nil {
+			if session, ok := handlers.AuthFSMGetSession(update.Message.From.ID); ok {
+				switch session.State {
+				case handlers.AuthStateFIO:
+					handlers.HandleFIO(bot, database, update.Message)
+					continue
+				case handlers.AuthStateClass:
+					handlers.HandleClass(bot, database, update.Message)
+					continue
+				case handlers.AuthStateChild:
+					handlers.HandleChild(bot, database, update.Message)
+					continue
+				}
+			}
+		} else {
 			continue
 		}
-		if update.Message == nil {
-			continue
+
+		state := handlers.GetAddScoreState(update.Message.Chat.ID)
+		if state != nil {
+			switch state.Step {
+			case handlers.StepValue:
+				handlers.HandleAddScoreValue(bot, database, update.Message)
+				continue
+			case handlers.StepComment:
+				handlers.HandleAddScoreComment(bot, database, update.Message)
+				continue
+			}
 		}
-		handlers.HandleAddScoreValue(bot, database, update.Message)
-		handlers.HandleAddScoreComment(bot, database, update.Message)
 
 		switch update.Message.Text {
 		case "/start":

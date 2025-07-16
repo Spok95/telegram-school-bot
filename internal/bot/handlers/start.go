@@ -46,7 +46,7 @@ func HandleStart(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) 
 
 	// Если роль не установлена — просим выбрать
 	if user.Role == nil || *user.Role == "" {
-		sendText(bot, msg.Chat.ID, "👋 Добро пожаловать!\n\nВы ещё не выбрали роль. Используйте /setrole, чтобы подать заявку.")
+		StartFSM(bot, database, msg)
 		return
 	}
 

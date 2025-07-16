@@ -13,8 +13,12 @@ CREATE TABLE IF NOT EXISTS users (
     name TEXT,
     role TEXT,
     class_id INTEGER,
+    class_name TEXT,
     child_id INTEGER,
     pending_role TEXT,
+    pending_fio TEXT,
+    pending_class TEXT,
+    pending_childfio TEXT,
     is_active BOOLEAN DEFAULT 1
 );`
 	if _, err := db.Exec(createUsers); err != nil {

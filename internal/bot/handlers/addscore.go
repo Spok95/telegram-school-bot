@@ -30,6 +30,14 @@ type AddScoreFSM struct {
 
 var addScoreStates = make(map[int64]*AddScoreFSM)
 
+func GetAddScoreState(chatID int64) *AddScoreFSM {
+	state, ok := addScoreStates[chatID]
+	if !ok {
+		return nil
+	}
+	return state
+}
+
 // HandleAddScore запускает процесс добавления
 func HandleAddScore(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	user, err := db.GetUserByTelegramID(database, msg.From.ID)
