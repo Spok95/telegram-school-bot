@@ -76,3 +76,19 @@ WHERE telegram_id=?`
 	}
 	return err
 }
+
+// Найти ученика по ФИО и классу
+func FindStudentByFIOAndClass(database *sql.DB, name string, class string) (*models.User, error) {
+	var u models.User
+	err := database.QueryRow(`SELECT id, name, class FROM users WHERE role = 'student' AND name = ? AND class = ? AND approved = 1`, name, class).Scan(&u.ID, &u.Name, &u.ClassName)
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+// Добавить связь parent-student
+func AddParentStudentLink(db *sql.DB, parentID int64, studentID int64) error {
+	_, err := db.Exec(`INSERT OR IGNORE INTO parents_students (parent_id, student_id) VALUES (?, ?)`, parentID, studentID)
+	return err
+}

@@ -31,10 +31,11 @@ func HandleMyScore(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 
 	// Получаем сумму баллов по категориям
 	rows, err := database.Query(`
-SELECT category, SUM(points) as total
-FROM scores
-WHERE student_id = ? AND approved = 1
-GROUP BY category
+SELECT c.label, SUM(points) as total
+FROM scores s
+JOIN categories c ON s.category_id = c.id
+WHERE s.student_id = ? AND s.approved = 1
+GROUP BY s.category_id
 `, telegramID)
 	if err != nil {
 		log.Println("Ошибка при подсчёте баллов:", err)
@@ -47,20 +48,19 @@ GROUP BY category
 	total := 0
 
 	for rows.Next() {
-		var cat string
+		var label string
 		var sum int
-		if err := rows.Scan(&cat, &sum); err != nil {
+		if err := rows.Scan(&label, &sum); err != nil {
 			continue
 		}
-		summary[cat] = sum
+		summary[label] = sum
 		total += sum
 	}
 
 	// Формируем текст ответа
 	text := fmt.Sprintf("📊 Ваш общий рейтинг: %d баллов\n\n", total)
-	for _, cat := range []string{"work", "elective", "activity", "social", "duty"} {
-		val := summary[cat]
-		text += fmt.Sprintf("▫️ %s: %d\n", categoryToLabel(cat), val)
+	for label, val := range summary {
+		text += fmt.Sprintf("▫️ %s: %d\n", label, val)
 	}
 
 	// Получаем все начисления/списания
@@ -86,9 +86,9 @@ GROUP BY category
 				}
 
 				if reason == "-" {
-					text += fmt.Sprintf("%s%d %s (%s)\n", sign, abs(s.Points), categoryToLabel(s.Category), date)
+					text += fmt.Sprintf("%s%d %s (%s)\n", sign, abs(s.Points), s.CategoryLabel, date)
 				} else {
-					text += fmt.Sprintf("%s%d %s — %s (%s)\n", sign, abs(s.Points), categoryToLabel(s.Category), reason, date)
+					text += fmt.Sprintf("%s%d %s — %s (%s)\n", sign, abs(s.Points), s.CategoryLabel, reason, date)
 				}
 
 				count++
@@ -102,23 +102,6 @@ GROUP BY category
 	}
 
 	bot.Send(tgbotapi.NewMessage(msg.Chat.ID, text))
-}
-
-func categoryToLabel(key string) string {
-	switch key {
-	case "work":
-		return "Работа на уроке"
-	case "elective":
-		return "Курсы по выбору"
-	case "activity":
-		return "Внеурочная активность"
-	case "social":
-		return "Социальные поступки"
-	case "duty":
-		return "Дежурство"
-	default:
-		return key
-	}
 }
 
 func abs(n int) int {

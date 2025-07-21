@@ -64,6 +64,10 @@ func main() {
 				handlers.HandleAddScoreCategory(bot, database, update.CallbackQuery)
 				continue
 			}
+			if strings.HasPrefix(data, "addscore_level_") {
+				handlers.HandleAddScoreLevel(bot, database, update.CallbackQuery)
+				continue
+			}
 			if data == "addscore_confirm" {
 				handlers.HandleAddScoreConfirmCallback(bot, database, update.CallbackQuery)
 				continue

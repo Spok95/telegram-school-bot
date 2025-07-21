@@ -9,12 +9,12 @@ import (
 func AddScore(database *sql.DB, score models.Score) error {
 	query := `
 INSERT INTO scores (
-                    student_id, category, points, type, comment, approved, created_by, created_at
+                    student_id, category_id, points, type, comment, approved, created_by, created_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);`
 
 	_, err := database.Exec(query,
 		score.StudentID,
-		score.Category,
+		score.CategoryID,
 		score.Points,
 		score.Type,
 		score.Comment,
@@ -30,8 +30,11 @@ INSERT INTO scores (
 
 func GetScoreByStudent(database *sql.DB, studentID int64) ([]models.Score, error) {
 	rows, err := database.Query(`
-SELECT id, student_id, category, points, type, comment, approved, created_by, created_at
-FROM scores WHERE student_id = ? ORDER BY created_at DESC`, studentID)
+SELECT s.id, s.student_id, s.category_id, c.name AS category, s.points, s.type, s.comment, s.approved, s.created_by, s.created_at
+FROM scores s 
+JOIN categories c ON s.category_id = c.id
+WHERE s.student_id = ? AND s.type = 'add'
+ORDER BY s.created_at DESC`, studentID)
 
 	if err != nil {
 		log.Println("Ошибка при получении истории баллов:", err)
@@ -42,7 +45,7 @@ FROM scores WHERE student_id = ? ORDER BY created_at DESC`, studentID)
 	var scores []models.Score
 	for rows.Next() {
 		var s models.Score
-		err := rows.Scan(&s.ID, &s.StudentID, &s.Category, &s.Points, &s.Type, &s.Comment, &s.Approved, &s.CreatedBy, &s.CreatedAt)
+		err := rows.Scan(&s.ID, &s.StudentID, &s.CategoryID, &s.CategoryLabel, &s.Points, &s.Type, &s.Comment, &s.Approved, &s.CreatedBy, &s.CreatedAt)
 		if err != nil {
 			return nil, err
 		}

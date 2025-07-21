@@ -21,11 +21,11 @@ const (
 )
 
 type AddScoreFSM struct {
-	Step      string
-	StudentID int64
-	Category  string
-	Value     int
-	Comment   string
+	Step       string
+	StudentID  int64
+	CategoryID int64
+	Value      int
+	Comment    string
 }
 
 var addScoreStates = make(map[int64]*AddScoreFSM)
@@ -91,12 +91,16 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, callback *tg
 		state.Step = StepCategory
 
 		// Переход к выбору категории
-		categories := []string{"Работа на уроке", "Курсы по выбору", "Внеурочная активность", "Социальные поступки", "Дежурство"}
+		catList, err := db.GetAllCategories(database)
+		if err != nil {
+			bot.Send(tgbotapi.NewMessage(callback.Message.Chat.ID, "❌ Не удалось получить категории из базы."))
+			return
+		}
 		var rows [][]tgbotapi.InlineKeyboardButton
-		for _, c := range categories {
-			data := fmt.Sprintf("addscore_category_%s", c)
+		for _, c := range catList {
+			data := fmt.Sprintf("addscore_category_%d", c.ID)
 			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData(c, data)))
+				tgbotapi.NewInlineKeyboardButtonData(c.Name, data)))
 		}
 
 		msg := tgbotapi.NewEditMessageText(callback.Message.Chat.ID, callback.Message.MessageID, "📚 Выберите категорию:")
@@ -116,33 +120,68 @@ func HandleAddScoreCategory(bot *tgbotapi.BotAPI, database *sql.DB, callback *tg
 		return
 	}
 
-	categoryMap := map[string]string{
-		"Работа на уроке":       "work",
-		"Курсы по выбору":       "elective",
-		"Внеурочная активность": "activity",
-		"Социальные поступки":   "social",
-		"Дежурство":             "duty",
-	}
-
-	label := strings.TrimPrefix(data, "addscore_category_")
-	key, ok := categoryMap[label]
-	if !ok {
-		bot.Request(tgbotapi.NewCallback(callback.ID, "❌ Неизвестная категория."))
+	idStr := strings.TrimPrefix(data, "addscore_category_")
+	catID, err := strconv.Atoi(idStr)
+	if err != nil {
+		bot.Request(tgbotapi.NewCallback(callback.ID, "❌ Неверный ID категории."))
 		return
 	}
-	state.Category = key
+	//category, err := db.GetCategoryByID(database, catID)
+	//if err != nil {
+	//	bot.Send(tgbotapi.NewMessage(chatID, "❌ Категория не найдена."))
+	//	return
+	//}
+
+	state.CategoryID = int64(catID)
 	state.Step = StepValue
 
-	// Переходим к следующему шагу — запрос баллов
-	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("✏️ Введите количество баллов для категории: *%s*", label))
-	msg.ParseMode = "Markdown"
-
-	if _, err := bot.Send(msg); err != nil {
-		log.Println("Ошибка при отправке запроса баллов:", err)
+	levels, err := db.GetLevelsByCategoryID(database, catID)
+	if err != nil || len(levels) == 0 {
+		bot.Send(tgbotapi.NewMessage(chatID, "❌ Нет уровней для этой категории."))
+		return
 	}
 
-	// Закрыть предыдущий callback (чтобы не висел индикатор загрузки)
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, level := range levels {
+		btn := tgbotapi.NewInlineKeyboardButtonData(
+			fmt.Sprintf("%s (%d)", level.Label, level.Value),
+			fmt.Sprintf("addscore_level_%d", level.ID),
+		)
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(btn))
+	}
+
+	msg := tgbotapi.NewMessage(chatID, "🔢 Выберите уровень баллов:")
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
+	bot.Send(msg)
 	bot.Request(tgbotapi.NewCallback(callback.ID, "Категория выбрана"))
+}
+
+func HandleAddScoreLevel(bot *tgbotapi.BotAPI, database *sql.DB, callback *tgbotapi.CallbackQuery) {
+	chatID := callback.Message.Chat.ID
+	state, ok := addScoreStates[chatID]
+	if !ok || state.Step != StepValue {
+		bot.Request(tgbotapi.NewCallback(callback.ID, "⚠️ Некорректный шаг."))
+		return
+	}
+
+	idStr := strings.TrimPrefix(callback.Data, "addscore_level_")
+	levelID, err := strconv.Atoi(idStr)
+	if err != nil {
+		bot.Request(tgbotapi.NewCallback(callback.ID, "❌ Неверный ID уровня."))
+		return
+	}
+
+	level, err := db.GetLevelByID(database, levelID)
+	if err != nil {
+		bot.Send(tgbotapi.NewMessage(chatID, "❌ Уровень не найден."))
+		return
+	}
+
+	state.Value = level.Value
+	state.Step = StepComment
+
+	bot.Send(tgbotapi.NewMessage(chatID, "✍️ Введите причину начисления:"))
+	bot.Request(tgbotapi.NewCallback(callback.ID, "Уровень выбран"))
 }
 
 func HandleAddScoreValue(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
@@ -182,11 +221,11 @@ func HandleAddScoreComment(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi
 
 	text := fmt.Sprintf("✅ Подтвердите начисление:\n\n"+
 		"👤 Ученик: %d\n"+
-		"📚 Категория: %s\n"+
+		"📚 Категория: %d\n"+
 		"💯 Баллы: %d\n"+
 		"📝 Причина: %s",
 		state.StudentID,
-		categoryToLabel(state.Category),
+		state.CategoryID,
 		state.Value,
 		state.Comment,
 	)
@@ -215,14 +254,14 @@ func HandleAddScoreConfirmCallback(bot *tgbotapi.BotAPI, database *sql.DB, callb
 	}
 
 	score := models.Score{
-		StudentID: state.StudentID,
-		Category:  state.Category,
-		Points:    state.Value,
-		Type:      "add",
-		Comment:   &state.Comment,
-		Approved:  true,
-		CreatedBy: chatID,
-		CreatedAt: time.Now(),
+		StudentID:  state.StudentID,
+		CategoryID: state.CategoryID,
+		Points:     state.Value,
+		Type:       "add",
+		Comment:    &state.Comment,
+		Approved:   true,
+		CreatedBy:  chatID,
+		CreatedAt:  time.Now(),
 	}
 
 	// Создание записи в базе
