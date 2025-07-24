@@ -3,182 +3,135 @@ package handlers
 import (
 	"database/sql"
 	"fmt"
+	"github.com/Spok95/telegram-school-bot/internal/bot/menu"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"log"
+	"os"
 	"strconv"
 	"strings"
 )
 
-type RoleRequest struct {
-	ID              int64  `json:"id"`
-	TelegramID      int64  `json:"telegram_id"`
-	Name            string `json:"name"`
-	PendingRole     string `json:"pending_role"`
-	PendingFIO      string `json:"pending_fio"`
-	PendingClass    string `json:"pending_class"`
-	PendingChild    string `json:"pending_child"`
-	PendingChildFIO string `json:"pending_childfio"`
-}
-
-// Обработка /pending_roles
-func HandlePendingRoles(bot *tgbotapi.BotAPI, db *sql.DB, msg *tgbotapi.Message) {
-	// Проверка: только админ
-	var role string
-	err := db.QueryRow(`SELECT role FROM users WHERE telegram_id = ?`, msg.From.ID).Scan(&role)
-	if err != nil || role != "admin" {
-		sendText(bot, msg.Chat.ID, "❌ Доступ запрещён. Только администратор может использовать эту команду.")
+func ShowPendingUsers(database *sql.DB, bot *tgbotapi.BotAPI) {
+	adminIDStr := os.Getenv("ADMIN_ID")
+	adminID, err := strconv.ParseInt(adminIDStr, 10, 64)
+	if err != nil {
+		log.Println("Ошибка при чтении ADMIN_ID из .env:", err)
 		return
 	}
 
-	// Получаем все заявки
-	rows, err := db.Query(`
-SELECT id, telegram_id, name, pending_role, pending_fio, pending_class, pending_childfio
-FROM users
-WHERE pending_role IS NOT NULL AND (role IS NULL OR role = '')
-`)
+	rows, err := database.Query(`
+		SELECT id, name, role, telegram_id FROM users WHERE confirmed = 0 AND role != 'admin'
+	`)
 	if err != nil {
-		log.Println("Ошибка при выборке заявок:", err)
-		sendText(bot, msg.Chat.ID, "❌ Ошибка при получении заявок.")
+		bot.Send(tgbotapi.NewMessage(adminID, "Ошибка при получении заявок."))
 		return
 	}
 	defer rows.Close()
 
-	count := 0
 	for rows.Next() {
-		var req RoleRequest
-		if err := rows.Scan(&req.ID, &req.TelegramID, &req.Name, &req.PendingRole, &req.PendingFIO, &req.PendingClass, &req.PendingChildFIO); err != nil {
-			continue
-		}
-		count++
+		var id int
+		var name, role string
+		var tgID int64
 
-		// Формируем сообщение и кнопки
-		text := fmt.Sprintf("📋 Заявка от: %s\nTelegram ID: %d\nЖелаемая роль: %s\nКласс: %s\nРебёнок: %s",
-			req.PendingFIO, req.TelegramID, req.PendingRole, req.PendingClass, req.PendingChildFIO)
+		rows.Scan(&id, &name, &role, &tgID)
 
-		confirm := tgbotapi.NewInlineKeyboardButtonData("✅ Подтвердить", fmt.Sprintf("confirm_role:%d", req.TelegramID))
-		reject := tgbotapi.NewInlineKeyboardButtonData("❌ Отклонить", fmt.Sprintf("reject_role:%d", req.TelegramID))
+		msg := fmt.Sprintf("Заявка:\n👤 %s\n🧩 Роль: %s\nTelegramID: %d", name, role, tgID)
 
-		keyboard := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(confirm, reject))
+		btnYes := tgbotapi.NewInlineKeyboardButtonData("✅ Подтвердить", fmt.Sprintf("confirm_%d", id))
+		brnNo := tgbotapi.NewInlineKeyboardButtonData("❌ Отклонить", fmt.Sprintf("reject_%d", id))
+		markup := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(btnYes, brnNo))
 
-		msgOut := tgbotapi.NewMessage(msg.Chat.ID, text)
-		msgOut.ReplyMarkup = keyboard
-		bot.Send(msgOut)
-	}
-
-	if count == 0 {
-		sendText(bot, msg.Chat.ID, "Нет активных заявок.")
+		message := tgbotapi.NewMessage(adminID, msg)
+		message.ReplyMarkup = markup
+		bot.Send(message)
 	}
 }
 
-// Обработка нажатий на подтверждение/отклонение
-func HandlePendingRoleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
-	data := cb.Data
-
-	if strings.HasPrefix(data, "approve_") {
-		// approve_123456789_student
-		parts := strings.Split(data, "_")
-		if len(parts) != 3 {
-			bot.Request(tgbotapi.NewCallback(cb.ID, "Неверный формат подтверждения"))
-			return
-		}
-
-		userIDStr := parts[1]
-		role := parts[2]
-
-		userID, err := strconv.ParseInt(userIDStr, 10, 64)
+func HandleAdminCallback(callback *tgbotapi.CallbackQuery, database *sql.DB, bot *tgbotapi.BotAPI, adminID int64) {
+	data := callback.Data
+	if strings.HasPrefix(data, "confirm_") {
+		idStr := strings.TrimPrefix(data, "confirm_")
+		err := ConfirmUser(database, bot, idStr, adminID)
 		if err != nil {
-			bot.Request(tgbotapi.NewCallback(cb.ID, "Ошибка ID пользователя"))
+			bot.Send(tgbotapi.NewMessage(adminID, "Ошибка подтверждения заявки."))
 			return
 		}
-
-		// 1. Прочитаем pending_* поля пользователя
-		var pendingFio, pendingClass, pendingChildFio string
-		err = database.QueryRow(`
-SELECT pending_fio, pending_class, pending_childfio
-FROM users WHERE telegram_id = ?`, userID).Scan(&pendingFio, &pendingClass, &pendingChildFio)
-		if err != nil {
-			bot.Send(tgbotapi.NewMessage(cb.Message.Chat.ID, "❌ Не удалось прочитать заявку."))
-			return
-		}
-
-		var name interface{}
-		var childID *int64
-
-		name = pendingFio
-
-		if role == "parent" && pendingChildFio != "" {
-			// Найти id ребенка по ФИО (и роли)
-			var foundChildID int64
-			err := database.QueryRow(
-				`SELECT id FROM users WHERE name = ? AND role = 'student' LIMIT 1`,
-				pendingChildFio).Scan(&foundChildID)
-			if err != nil {
-				childID = &foundChildID
-			}
-		}
-
-		// 2. Перенести все значения, очистить pending_*
-		_, err = database.Exec(`
-			UPDATE users
-			SET
-				name = ?,
-				role = ?,
-				pending_role = NULL,
-				pending_fio = NULL,
-				pending_class = NULL,
-				pending_childfio = NULL,
-				class_name = ?,
-				child_id = ?
-			WHERE telegram_id = ?`,
-			name, role, pendingClass, childID, userID)
-		if err != nil {
-			log.Println("Ошибка при обновлении роли:", err)
-			bot.Send(tgbotapi.NewMessage(cb.Message.Chat.ID, "❌ Ошибка при подтверждении роли."))
-			return
-		}
-
-		bot.Request(tgbotapi.NewCallback(cb.ID, "Роль подтверждена"))
-
-		// Уведомляем пользователя
-		msg := tgbotapi.NewMessage(userID, fmt.Sprintf("✅ Ваша роль *%s* подтверждена администратором!", role))
-		msg.ParseMode = "Markdown"
-		bot.Send(msg)
-
-		AuthFSMDeleteSession(userID)
-
-		// Повторно выводим меню для пользователя с новой ролью
-		fakeMsg := &tgbotapi.Message{
-			From: &tgbotapi.User{ID: userID},
-			Chat: &tgbotapi.Chat{ID: userID},
-		}
-		HandleStart(bot, database, fakeMsg)
+		bot.Send(tgbotapi.NewMessage(adminID, "✅ Пользователь подтверждён."))
 	} else if strings.HasPrefix(data, "reject_") {
-		// reject_123456789
-		parts := strings.Split(data, "_")
-		if len(parts) != 2 {
-			bot.Request(tgbotapi.NewCallback(cb.ID, "Неверный формат отклонения"))
-			return
-		}
-
-		userIDStr := parts[1]
-		userID, err := strconv.ParseInt(userIDStr, 10, 64)
+		idStr := strings.TrimPrefix(data, "reject_")
+		err := RejectUser(database, bot, idStr, adminID)
 		if err != nil {
-			bot.Request(tgbotapi.NewCallback(cb.ID, "Ошибка ID пользователя"))
+			bot.Send(tgbotapi.NewMessage(adminID, "Ошибка отклонения заявки."))
 			return
 		}
-
-		// Удаляем все pending_* поля
-		_, err = database.Exec(`UPDATE users SET pending_role = NULL, pending_fio = NULL, pending_class = NULL, pending_childfio = NULL WHERE telegram_id = ?`, userID)
-		if err != nil {
-			log.Println("Ошибка при отклонении заявки:", err)
-			bot.Send(tgbotapi.NewMessage(cb.Message.Chat.ID, "❌ Ошибка при отклонении."))
-			return
-		}
-
-		AuthFSMDeleteSession(userID)
-
-		bot.Request(tgbotapi.NewCallback(cb.ID, "Заявка отклонена"))
-		// Уведомляем пользователя
-		bot.Send(tgbotapi.NewMessage(userID, "❌ Ваша заявка на роль была отклонена администратором."))
+		bot.Send(tgbotapi.NewMessage(adminID, "❌ Заявка отклонена."))
 	}
+	callbackConfig := tgbotapi.CallbackConfig{
+		CallbackQueryID: callback.ID,
+		Text:            "Обработано",
+		ShowAlert:       false,
+	}
+	bot.Request(callbackConfig)
+}
+
+func ConfirmUser(database *sql.DB, bot *tgbotapi.BotAPI, name string, adminID int64) error {
+	tx, err := database.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var telegramID int64
+	err = database.QueryRow(`SELECT telegram_id FROM users WHERE id = ?`, name).Scan(&telegramID)
+	if err != nil {
+		return err
+	}
+
+	// Получаем текущую роль (до подтверждения)
+	var role string
+	err = tx.QueryRow(`SELECT role FROM users WHERE id = ? AND confirmed = 0`, name).Scan(&role)
+	if err != nil {
+		// либо уже подтверждён, либо не найден
+		return fmt.Errorf("заявка не найдена или уже обработана")
+	}
+
+	// Подтверждаем, только если ещё не подтверждён
+	res, err := tx.Exec(`UPDATE users SET confirmed = 1 WHERE id = ? AND confirmed = 0`, name)
+	if err != nil {
+		return err
+	}
+	rowsAffected, _ := res.RowsAffected()
+	if rowsAffected == 0 {
+		return fmt.Errorf("заявка уже подтверждена другим админом")
+	}
+
+	msg := tgbotapi.NewMessage(telegramID, "✅ Ваша заявка подтверждена. Добро пожаловать!")
+	msg.ReplyMarkup = menu.GetRoleMenu(role)
+	bot.Send(msg)
+
+	// Фиксируем в истории
+	_, err = tx.Exec(`
+		INSERT INTO role_changes (user_id, old_role, new_role, changed_by, changed_at)
+		VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+	`, name, "unconfirmed", role, adminID)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func RejectUser(database *sql.DB, bot *tgbotapi.BotAPI, name string, adminID int64) error {
+	var telegramID int64
+	err := database.QueryRow(`SELECT telegram_id FROM users WHERE id = ?`, name).Scan(&telegramID)
+	if err != nil {
+		return err
+	}
+
+	_, err = database.Exec(`DELETE FROM users WHERE id = ?`, name)
+	if err != nil {
+		return err
+	}
+
+	bot.Send(tgbotapi.NewMessage(telegramID, "❌ Ваша заявка отклонена. Попробуйте позже или обратитесь к администратору."))
+	return nil
 }

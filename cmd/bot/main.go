@@ -1,14 +1,21 @@
 package main
 
 import (
+	"database/sql"
+	"github.com/Spok95/telegram-school-bot/internal/bot/auth"
 	"github.com/Spok95/telegram-school-bot/internal/bot/handlers"
+	"github.com/Spok95/telegram-school-bot/internal/bot/menu"
 	"github.com/Spok95/telegram-school-bot/internal/db"
+	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/joho/godotenv"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 )
+
+var userFSMRole = make(map[int64]string)
 
 func main() {
 	// Загрузка переменных окружения
@@ -47,85 +54,140 @@ func main() {
 	// Маршрутизация команд
 	for update := range updates {
 		if update.CallbackQuery != nil {
-			data := update.CallbackQuery.Data
-			if strings.HasPrefix(data, "role_") {
-				handlers.HandleRoleInline(bot, database, update.CallbackQuery)
-				continue
-			}
-			if strings.HasPrefix(data, "approve_") || strings.HasPrefix(data, "reject_") {
-				handlers.HandlePendingRoleCallback(bot, database, update.CallbackQuery)
-				continue
-			}
-			if strings.HasPrefix(data, "addscore_student_") {
-				handlers.HandleAddScoreCallback(bot, database, update.CallbackQuery)
-				continue
-			}
-			if strings.HasPrefix(data, "addscore_category_") {
-				handlers.HandleAddScoreCategory(bot, database, update.CallbackQuery)
-				continue
-			}
-			if strings.HasPrefix(data, "addscore_level_") {
-				handlers.HandleAddScoreLevel(bot, database, update.CallbackQuery)
-				continue
-			}
-			if data == "addscore_confirm" {
-				handlers.HandleAddScoreConfirmCallback(bot, database, update.CallbackQuery)
-				continue
-			}
-			if data == "addscore_cancel" {
-				handlers.HandleAddScoreCancelCallback(bot, update.CallbackQuery)
-				continue
-			}
-			bot.Send(tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "⚠️ Неизвестная команда. Используйте /start"))
+			handleCallback(bot, database, update.CallbackQuery)
 			continue
 		}
 
 		if update.Message != nil {
-			if session, ok := handlers.AuthFSMGetSession(update.Message.From.ID); ok {
-				switch session.State {
-				case handlers.AuthStateFIO:
-					handlers.HandleFIO(bot, database, update.Message)
+			state := handlers.GetAddScoreState(update.Message.Chat.ID)
+			if state != nil {
+				switch state.Step {
+				case handlers.StepValue:
+					handlers.HandleAddScoreValue(bot, database, update.Message)
 					continue
-				case handlers.AuthStateClass:
-					handlers.HandleClass(bot, database, update.Message)
-					continue
-				case handlers.AuthStateChild:
-					handlers.HandleChild(bot, database, update.Message)
+				case handlers.StepComment:
+					handlers.HandleAddScoreComment(bot, database, update.Message)
 					continue
 				}
 			}
-		} else {
+
+			handleMessage(bot, database, update.Message)
 			continue
 		}
-
-		state := handlers.GetAddScoreState(update.Message.Chat.ID)
-		if state != nil {
-			switch state.Step {
-			case handlers.StepValue:
-				handlers.HandleAddScoreValue(bot, database, update.Message)
-				continue
-			case handlers.StepComment:
-				handlers.HandleAddScoreComment(bot, database, update.Message)
-				continue
-			}
-		}
-
-		switch update.Message.Text {
-		case "/start":
-			handlers.HandleStart(bot, database, update.Message)
-		case "/setrole":
-			handlers.HandleSetRoleRequest(bot, database, update.Message)
-		case "/pending_roles":
-			handlers.HandlePendingRoles(bot, database, update.Message)
-		case "/addscore", "➕ Начислить баллы":
-			go handlers.HandleAddScore(bot, database, update.Message)
-		case "/myscore", "📊 Мой рейтинг":
-			handlers.HandleMyScore(bot, database, update.Message)
-		case "📊 Рейтинг ребёнка":
-			handlers.HandleMyScore(bot, database, update.Message)
-		default:
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "⚠️ Неизвестная команда. Используйте /start")
-			bot.Send(msg)
-		}
 	}
+}
+
+func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+	chatID := msg.Chat.ID
+	text := msg.Text
+
+	adminID, _ := strconv.ParseInt(os.Getenv("ADMIN_ID"), 10, 64)
+
+	if chatID == adminID && text == "/start" {
+		_, err := database.Exec(`INSERT OR REPLACE INTO users (telegram_id, name, role, confirmed) VALUES (?, ?, ?, 1)`,
+			chatID, "Администратор", models.Admin)
+		if err != nil {
+			bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Ошибка авторизации админа."))
+			return
+		}
+		bot.Send(tgbotapi.NewMessage(chatID, "✅ Вы авторизованы как администратор"))
+
+		keyboard := menu.GetRoleMenu(string(models.Admin))
+		msg := tgbotapi.NewMessage(chatID, "Добро пожаловать! Выберите действие:")
+		msg.ReplyMarkup = keyboard
+		bot.Send(msg)
+		return
+	}
+
+	switch text {
+	case "/start":
+		var role string
+		var confirmed int
+		err := database.QueryRow(`SELECT role, confirmed FROM users WHERE telegram_id = ?`, chatID).Scan(&role, &confirmed)
+		if err == nil || confirmed == 1 {
+			setUserFSMRole(chatID, role)
+			keyboard := menu.GetRoleMenu(role)
+			msg := tgbotapi.NewMessage(chatID, "Добро пожаловать! Выберите действие:")
+			msg.ReplyMarkup = keyboard
+			bot.Send(msg)
+			//auth.HandleFSMMessage(chatID, "", role, bot, database)
+			return
+		}
+		msg := tgbotapi.NewMessage(chatID, "Выберите роль для регистрации:")
+		roles := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("Ученик", "reg_student"),
+				tgbotapi.NewInlineKeyboardButtonData("Родитель", "reg_parent"),
+			),
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("Учитель", "reg_teacher"),
+				tgbotapi.NewInlineKeyboardButtonData("Администрация", "reg_administration"),
+			),
+		)
+		msg.ReplyMarkup = roles
+		bot.Send(msg)
+	case "/addscore", "➕ Начислить баллы":
+		go handlers.HandleAddScore(bot, database, msg)
+	case "📉 Списать баллы":
+		go handlers.HandleAddScore(bot, database, msg)
+	case "/myscore", "📊 Мой рейтинг":
+		go handlers.HandleMyScore(bot, database, msg)
+	case "📊 Рейтинг ребёнка":
+		go handlers.HandleMyScore(bot, database, msg)
+	default:
+		role := getUserFSMRole(chatID)
+		if role == "" {
+			bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Неизвестная команда. Используйте /start"))
+			return
+		}
+		auth.HandleFSMMessage(chatID, text, role, bot, database)
+	}
+}
+
+func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
+	data := cb.Data
+	chatID := cb.Message.Chat.ID
+
+	if strings.HasPrefix(data, "reg_") {
+		role := strings.TrimPrefix(data, "reg_")
+		setUserFSMRole(chatID, role)
+		auth.StartRegistration(chatID, role, bot, database)
+		return
+	}
+
+	if strings.HasPrefix(data, "confirm_") || strings.HasPrefix(data, "reject_") {
+		handlers.HandleAdminCallback(cb, database, bot, chatID)
+		return
+	}
+
+	if strings.HasPrefix(data, "addscore_student_") {
+		handlers.HandleAddScoreCallback(bot, database, cb)
+		return
+	}
+	if strings.HasPrefix(data, "addscore_category_") {
+		handlers.HandleAddScoreCategory(bot, database, cb)
+		return
+	}
+	if strings.HasPrefix(data, "addscore_level_") {
+		handlers.HandleAddScoreLevel(bot, database, cb)
+		return
+	}
+	if data == "addscore_confirm" {
+		handlers.HandleAddScoreConfirmCallback(bot, database, cb)
+		return
+	}
+	if data == "addscore_cancel" {
+		handlers.HandleAddScoreCancelCallback(bot, cb)
+		return
+	}
+
+	bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Неизвестная команда. Используйте /start"))
+}
+
+func setUserFSMRole(chatID int64, role string) {
+	userFSMRole[chatID] = role
+}
+
+func getUserFSMRole(chatID int64) string {
+	return userFSMRole[chatID]
 }

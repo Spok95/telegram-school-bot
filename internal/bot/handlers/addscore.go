@@ -126,11 +126,6 @@ func HandleAddScoreCategory(bot *tgbotapi.BotAPI, database *sql.DB, callback *tg
 		bot.Request(tgbotapi.NewCallback(callback.ID, "❌ Неверный ID категории."))
 		return
 	}
-	//category, err := db.GetCategoryByID(database, catID)
-	//if err != nil {
-	//	bot.Send(tgbotapi.NewMessage(chatID, "❌ Категория не найдена."))
-	//	return
-	//}
 
 	state.CategoryID = int64(catID)
 	state.Step = StepValue
@@ -259,7 +254,7 @@ func HandleAddScoreConfirmCallback(bot *tgbotapi.BotAPI, database *sql.DB, callb
 		Points:     state.Value,
 		Type:       "add",
 		Comment:    &state.Comment,
-		Approved:   true,
+		Status:     "approved",
 		CreatedBy:  chatID,
 		CreatedAt:  time.Now(),
 	}
@@ -280,4 +275,9 @@ func HandleAddScoreCancelCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.Callb
 	chatID := callback.Message.Chat.ID
 	delete(addScoreStates, chatID)
 	bot.Send(tgbotapi.NewMessage(chatID, "❌ Начисление отменено."))
+}
+
+func sendText(bot *tgbotapi.BotAPI, chatID int64, text string) {
+	msg := tgbotapi.NewMessage(chatID, text)
+	bot.Send(msg)
 }

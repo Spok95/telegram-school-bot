@@ -4,42 +4,50 @@ import (
 	"database/sql"
 	"fmt"
 	"github.com/Spok95/telegram-school-bot/internal/db"
+	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"log"
 )
 
 func HandleMyScore(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
-	telegramID := msg.From.ID
-	user, err := db.GetUserByTelegramID(database, telegramID)
-	if err != nil {
-		log.Println("Ошибка при получении пользователя:", err)
+	user, err := db.GetUserByTelegramID(database, msg.From.ID)
+	if err != nil || user == nil {
 		sendText(bot, msg.Chat.ID, "❌ Пользователь не найден.")
 		return
 	}
 
-	var targetID int64
-	// Если родитель — найдём ребёнка
-	if user.Role != nil && *user.Role == "parent" {
-		err = database.QueryRow(`SELECT child_id FROM users WHERE id = ? AND role = 'parent'`, user.ID).Scan(&targetID)
+	var targetID int64 = user.TelegramID
+
+	// Если родитель — ищем telegram_id ребёнка
+	if *user.Role == models.Parent {
+		var studentInternalID int64
+		err := database.QueryRow(`
+			SELECT student_id FROM parents_students WHERE parent_id = ?
+		`, user.ID).Scan(&studentInternalID)
 		if err != nil {
 			sendText(bot, msg.Chat.ID, "❌ Не удалось найти привязанного ученика.")
 			return
 		}
-	} else {
-		targetID = user.ID
+
+		err = database.QueryRow(`
+			SELECT telegram_id FROM users WHERE id = ?
+		`, studentInternalID).Scan(&targetID)
+		if err != nil {
+			sendText(bot, msg.Chat.ID, "❌ Не удалось получить Telegram ID ученика.")
+			return
+		}
 	}
 
-	// Получаем сумму баллов по категориям
+	// Получаем категории и суммы
 	rows, err := database.Query(`
-SELECT c.label, SUM(points) as total
-FROM scores s
-JOIN categories c ON s.category_id = c.id
-WHERE s.student_id = ? AND s.approved = 1
-GROUP BY s.category_id
-`, telegramID)
+		SELECT c.label, SUM(s.points) as total
+		FROM scores s
+		JOIN categories c ON s.category_id = c.id
+		WHERE s.student_id = ? AND s.status = 'approved'
+		GROUP BY s.category_id
+	`, targetID)
 	if err != nil {
-		log.Println("Ошибка при подсчёте баллов:", err)
-		sendText(bot, msg.Chat.ID, "❌ Ошибка при подсчёте баллов.")
+		sendText(bot, msg.Chat.ID, "⚠️ Ошибка при получении рейтинга.")
 		return
 	}
 	defer rows.Close()
@@ -64,7 +72,7 @@ GROUP BY s.category_id
 	}
 
 	// Получаем все начисления/списания
-	history, err := db.GetScoreByStudent(database, telegramID)
+	history, err := db.GetScoreByStudent(database, targetID)
 	if err != nil {
 		log.Println("ошибка при получении истории:", err)
 	} else {
@@ -72,7 +80,7 @@ GROUP BY s.category_id
 			text += "\n\n📖 История:\n"
 			count := 0
 			for _, s := range history {
-				if !s.Approved {
+				if s.Status != "approved" {
 					continue
 				}
 				sign := "+"

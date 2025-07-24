@@ -22,13 +22,13 @@ ON CONFLICT(telegram_id) DO UPDATE SET role=excluded.role, name=excluded.name;`
 
 func GetUserByTelegramID(db *sql.DB, telegramID int64) (*models.User, error) {
 	query := `
-SELECT id, telegram_id, name, role, class_name, child_id, pending_role, is_active
+SELECT id, telegram_id, name, role, class_id, class_name, class_number, class_letter, child_id, confirmed, is_active
 FROM users WHERE telegram_id = ?`
 
 	row := db.QueryRow(query, telegramID)
 
 	var u models.User
-	err := row.Scan(&u.ID, &u.TelegramID, &u.Name, &u.Role, &u.ClassName, &u.ChildID, &u.PendingRole, &u.IsActive)
+	err := row.Scan(&u.ID, &u.TelegramID, &u.Name, &u.Role, &u.ClassID, &u.ClassName, &u.ClassNumber, &u.ClassLetter, &u.ChildID, &u.Сonfirmed, &u.IsActive)
 	if err != nil {
 		log.Println("Пользователь не найден в users", err)
 		return nil, err
@@ -38,7 +38,7 @@ FROM users WHERE telegram_id = ?`
 
 func GetAllStudents(db *sql.DB) ([]models.User, error) {
 	query := `
-SELECT id, telegram_id, name, role, class_name, child_id, pending_role, is_active
+SELECT id, telegram_id, name, role, class_name, class_number, class_letter, child_id, confirmed, is_active
 FROM users WHERE role = 'student'`
 
 	rows, err := db.Query(query)
@@ -51,7 +51,7 @@ FROM users WHERE role = 'student'`
 	var students []models.User
 	for rows.Next() {
 		var u models.User
-		err = rows.Scan(&u.ID, &u.TelegramID, &u.Name, &u.Role, &u.ClassName, &u.ChildID, &u.PendingRole, &u.IsActive)
+		err = rows.Scan(&u.ID, &u.TelegramID, &u.Name, &u.Role, &u.ClassName, &u.ClassNumber, &u.ClassLetter, &u.ChildID, &u.Сonfirmed, &u.IsActive)
 		if err != nil {
 			log.Println("Ошибка при чтении строки:", err)
 			return nil, err
@@ -59,36 +59,4 @@ FROM users WHERE role = 'student'`
 		students = append(students, u)
 	}
 	return students, nil
-}
-
-func UpdateUserPendingApplication(database *sql.DB, telegramID int64, pendingRole, pendingFIO, pendingClass, pendingChildFIO string) error {
-	query := `
-UPDATE users SET
-                 pending_role=?,
-                 pending_fio=?,
-                 pending_class=?,
-                 pending_childfio=?
-WHERE telegram_id=?`
-	_, err := database.Exec(query, pendingRole, pendingFIO, pendingClass, pendingChildFIO, telegramID)
-	if err != nil {
-		log.Println("Ошибка при сохранении pending application:", err)
-		return err
-	}
-	return err
-}
-
-// Найти ученика по ФИО и классу
-func FindStudentByFIOAndClass(database *sql.DB, name string, class string) (*models.User, error) {
-	var u models.User
-	err := database.QueryRow(`SELECT id, name, class FROM users WHERE role = 'student' AND name = ? AND class = ? AND approved = 1`, name, class).Scan(&u.ID, &u.Name, &u.ClassName)
-	if err != nil {
-		return nil, err
-	}
-	return &u, nil
-}
-
-// Добавить связь parent-student
-func AddParentStudentLink(db *sql.DB, parentID int64, studentID int64) error {
-	_, err := db.Exec(`INSERT OR IGNORE INTO parents_students (parent_id, student_id) VALUES (?, ?)`, parentID, studentID)
-	return err
 }

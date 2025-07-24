@@ -10,15 +10,14 @@ func Migrate(database *sql.DB) error {
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     telegram_id INTEGER NOT NULL UNIQUE,
-    name TEXT,
-    role TEXT,
+    name TEXT NOT NULL,
+    role TEXT NOT NULL,
     class_id INTEGER,
     class_name TEXT,
+    class_number INTEGER,
+    class_letter TEXT,
     child_id INTEGER,
-    pending_role TEXT,
-    pending_fio TEXT,
-    pending_class TEXT,
-    pending_childfio TEXT,
+    confirmed BOOLEAN DEFAULT 0,
     is_active BOOLEAN DEFAULT 1
 );`
 	if _, err := database.Exec(createUsers); err != nil {
@@ -33,7 +32,9 @@ CREATE TABLE IF NOT EXISTS scores (
     points INTEGER NOT NULL,
     type TEXT NOT NULL, -- 'add' или 'remove'
     comment TEXT,
-    approved BOOLEAN DEFAULT false,
+    status TEXT DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected')),
+    approved_by INTEGER,
+    approved_at TIMESTAMP,
     created_by INTEGER NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (category_id) REFERENCES categories(id)
@@ -69,7 +70,7 @@ CREATE TABLE IF NOT EXISTS score_levels (
     value INTEGER NOT NULL,
     label TEXT NOT NULL,
     category_id INTEGER,
-    UNIQUE(value, label, category_id)
+    UNIQUE(value, label, category_id),
     FOREIGN KEY (category_id) REFERENCES categories(id)
 );
 `)
@@ -100,11 +101,11 @@ CREATE TABLE IF NOT EXISTS periods (
 	_, err = database.Exec(`
 CREATE TABLE IF NOT EXISTS role_changes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    telegram_id INTEGER NOT NULL,
+    user_id INTEGER,
     old_role TEXT,
-    new_role TEXT NOT NULL,
-    changed_by INTEGER NOT NULL,
-    changed_at TEXT NOT NULL
+    new_role TEXT,
+    changed_by INTEGER,
+    changed_at TEXT
 );
 `)
 	if err != nil {
