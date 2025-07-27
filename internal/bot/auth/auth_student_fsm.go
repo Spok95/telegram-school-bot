@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/Spok95/telegram-school-bot/internal/bot/handlers"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"strconv"
 	"strings"
 )
 
@@ -13,7 +14,7 @@ type StudentFSMState string
 const (
 	StateStudentName           StudentFSMState = "student_name"
 	StateStudentClassNum       StudentFSMState = "student_class_num"
-	StateStudentClassLet       StudentFSMState = "student_class_letter"
+	StateStudentLetterBtn      StudentFSMState = "student_class_letter_btn"
 	StateStudentWaitingConfirm StudentFSMState = "student_waiting"
 )
 
@@ -43,40 +44,7 @@ func HandleStudentFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *
 	case StateStudentName:
 		studentData[chatID] = &StudentRegisterData{Name: msg}
 		studentFSM[chatID] = StateStudentClassNum
-		bot.Send(tgbotapi.NewMessage(chatID, "Введите номер класса (например, 7):"))
-	case StateStudentClassNum:
-		var num int
-		_, err := fmt.Sscanf(msg, "%d", &num)
-		if err != nil || num < 1 || num > 11 {
-			bot.Send(tgbotapi.NewMessage(chatID, "Введите корректный номер класса (1–11):"))
-			return
-		}
-		studentData[chatID].ClassNumber = num
-		studentFSM[chatID] = StateStudentClassLet
-		bot.Send(tgbotapi.NewMessage(chatID, "Введите букву класса (например, А):"))
-	case StateStudentClassLet:
-		letter := strings.TrimSpace(msg)
-		if len([]rune(letter)) != 1 || !isCyrillicLetter(letter) {
-			bot.Send(tgbotapi.NewMessage(chatID, "Введите одну букву класса (только кириллица):"))
-			return
-		}
-		letter = strings.ToUpper(letter)
-		studentData[chatID].ClassLetter = letter
-		studentFSM[chatID] = StateStudentWaitingConfirm
-
-		// Сохраняем в БД заявку, статус: unconfirmed
-		err := SaveStudentRequest(database, chatID, studentData[chatID])
-		if err != nil {
-			bot.Send(tgbotapi.NewMessage(chatID, "Ошибка при сохранении заявки. Попробуйте позже."))
-			return
-		}
-
-		bot.Send(tgbotapi.NewMessage(chatID, "Заявка на регистрацию отправлена администратору. Ожидайте подтверждения."))
-
-		handlers.ShowPendingUsers(database, bot)
-
-		delete(studentFSM, chatID)
-		delete(studentData, chatID)
+		showClassNumberButtons(chatID, bot)
 	}
 }
 
@@ -87,10 +55,65 @@ func SaveStudentRequest(database *sql.DB, chatID int64, data *StudentRegisterDat
 	return err
 }
 
-func isCyrillicLetter(letter string) bool {
-	r := []rune(letter)
-	if len(r) != 1 {
-		return false
+func HandleStudentCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, database *sql.DB) {
+	chatID := cb.Message.Chat.ID
+	data := cb.Data
+
+	if strings.HasPrefix(data, "student_class_num:") {
+		numStr := strings.TrimPrefix(data, "student_class_num:")
+		num, err := strconv.Atoi(numStr)
+		if err != nil || num < 1 || num > 11 {
+			bot.Send(tgbotapi.NewMessage(chatID, "Некорректный номер класса."))
+			return
+		}
+		if studentData[chatID] == nil {
+			studentData[chatID] = &StudentRegisterData{}
+		}
+		studentData[chatID].ClassNumber = num
+		studentFSM[chatID] = StateStudentLetterBtn
+		showClassLetterButtons(chatID, bot)
+		return
 	}
-	return r[0] >= 'А' && r[0] <= 'Я'
+
+	if strings.HasPrefix(data, "student_class_letter:") {
+		letter := strings.TrimPrefix(data, "student_class_letter:")
+		studentData[chatID].ClassLetter = letter
+		studentFSM[chatID] = StateStudentWaitingConfirm
+
+		err := SaveStudentRequest(database, chatID, studentData[chatID])
+		if err != nil {
+			bot.Send(tgbotapi.NewMessage(chatID, "Ошибка при сохранении заявки. Попробуйте позже."))
+			return
+		}
+
+		bot.Send(tgbotapi.NewMessage(chatID, "Заявка на регистрацию отправлена администратору. Ожидайте подтверждения."))
+
+		handlers.ShowPendingUsers(database, bot)
+		delete(studentFSM, chatID)
+		delete(studentData, chatID)
+		return
+	}
+}
+
+func showClassNumberButtons(chatID int64, bot *tgbotapi.BotAPI) {
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for i := 1; i <= 11; i++ {
+		btn := tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d класс", i), fmt.Sprintf("student_class_num:%d", i))
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(btn))
+	}
+	msg := tgbotapi.NewMessage(chatID, "Выберите номер класса:")
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
+	bot.Send(msg)
+}
+
+func showClassLetterButtons(chatID int64, bot *tgbotapi.BotAPI) {
+	letters := []string{"А", "Б", "В", "Г", "Д"}
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, l := range letters {
+		btn := tgbotapi.NewInlineKeyboardButtonData(l, fmt.Sprintf("student_class_letter:%s", l))
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(btn))
+	}
+	msg := tgbotapi.NewMessage(chatID, "Выберите букву класса:")
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
+	bot.Send(msg)
 }

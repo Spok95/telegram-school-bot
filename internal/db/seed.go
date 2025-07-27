@@ -38,5 +38,28 @@ ON CONFLICT(value, label, category_id) DO NOTHING
 			return fmt.Errorf("insert score_level: %w", err)
 		}
 	}
+	// Добавление классов (1А - 11Д), если таблица пустая
+	var count int
+	err := database.QueryRow(`SELECT COUNT(*) FROM classes`).Scan(&count)
+	if err != nil {
+		return fmt.Errorf("ошибка при проверке таблицы classes: %w", err)
+	}
+
+	if count == 0 {
+		classLetters := []string{"А", "Б", "В", "Г", "Д"}
+		for grade := 1; grade <= 11; grade++ {
+			for _, letter := range classLetters {
+				className := fmt.Sprintf("%d%s", grade, letter)
+				_, err := database.Exec(`
+INSERT INTO classes (name)
+VALUES (?)
+ON CONFLICT(name) DO NOTHING;
+`, className)
+				if err != nil {
+					return fmt.Errorf("insert class %s: %w", className, err)
+				}
+			}
+		}
+	}
 	return nil
 }

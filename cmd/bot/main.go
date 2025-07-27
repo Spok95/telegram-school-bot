@@ -59,16 +59,26 @@ func main() {
 		}
 
 		if update.Message != nil {
-			state := handlers.GetAddScoreState(update.Message.Chat.ID)
-			if state != nil {
-				switch state.Step {
-				case handlers.StepValue:
-					handlers.HandleAddScoreValue(bot, database, update.Message)
-					continue
-				case handlers.StepComment:
-					handlers.HandleAddScoreComment(bot, database, update.Message)
-					continue
-				}
+			//state := handlers.GetAddScoreState(update.Message.Chat.ID)
+			//if state != nil {
+			//	switch state.Step {
+			//	case handlers.StepValue:
+			//		handlers.HandleAddScoreValue(bot, database, update.Message)
+			//		continue
+			//	case handlers.StepComment:
+			//		handlers.HandleAddScoreComment(bot, database, update.Message)
+			//		continue
+			//	}
+			//}
+			addState := handlers.GetAddScoreState(update.Message.Chat.ID)
+			if addState != nil && addState.Step == 6 {
+				handlers.HandleAddScoreText(bot, database, update.Message)
+				continue
+			}
+			removeState := handlers.GetRemoveScoreState(update.Message.Chat.ID)
+			if removeState != nil && removeState.Step == 5 {
+				handlers.HandleRemoveText(bot, database, update.Message)
+				continue
 			}
 
 			handleMessage(bot, database, update.Message)
@@ -110,7 +120,6 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 			msg := tgbotapi.NewMessage(chatID, "Добро пожаловать! Выберите действие:")
 			msg.ReplyMarkup = keyboard
 			bot.Send(msg)
-			//auth.HandleFSMMessage(chatID, "", role, bot, database)
 			return
 		}
 		msg := tgbotapi.NewMessage(chatID, "Выберите роль для регистрации:")
@@ -127,9 +136,9 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		msg.ReplyMarkup = roles
 		bot.Send(msg)
 	case "/addscore", "➕ Начислить баллы":
-		go handlers.HandleAddScore(bot, database, msg)
-	case "📉 Списать баллы":
-		go handlers.HandleAddScore(bot, database, msg)
+		go handlers.StartAddScoreFSM(bot, database, msg)
+	case "/removescore", "📉 Списать баллы":
+		go handlers.StartRemoveScoreFSM(bot, database, msg)
 	case "/myscore", "📊 Мой рейтинг":
 		go handlers.HandleMyScore(bot, database, msg)
 	case "📊 Рейтинг ребёнка":
@@ -164,20 +173,57 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		handlers.HandleAddScoreCallback(bot, database, cb)
 		return
 	}
-	if strings.HasPrefix(data, "addscore_category_") {
-		handlers.HandleAddScoreCategory(bot, database, cb)
+
+	if strings.HasPrefix(data, "student_class_") {
+		auth.HandleStudentCallback(cb, bot, database)
 		return
 	}
-	if strings.HasPrefix(data, "addscore_level_") {
-		handlers.HandleAddScoreLevel(bot, database, cb)
+
+	if strings.HasPrefix(data, "student_class_letter:") {
+		auth.HandleStudentCallback(cb, bot, database)
 		return
 	}
-	if data == "addscore_confirm" {
-		handlers.HandleAddScoreConfirmCallback(bot, database, cb)
+
+	if strings.HasPrefix(data, "parent_class_num:") {
+		numStr := strings.TrimPrefix(data, "parent_class_num:")
+		num, err := strconv.Atoi(numStr)
+		if err != nil {
+			bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Неверный номер класса"))
+			return
+		}
+		auth.HandleParentClassNumber(chatID, num, bot)
 		return
 	}
-	if data == "addscore_cancel" {
-		handlers.HandleAddScoreCancelCallback(bot, cb)
+
+	if strings.HasPrefix(data, "parent_class_letter:") {
+		letter := strings.TrimPrefix(data, "parent_class_letter:")
+		auth.HandleParentClassLetter(chatID, letter, bot, database)
+		return
+	}
+	//if strings.HasPrefix(data, "addscore_category_") {
+	//	handlers.HandleAddScoreCategory(bot, database, cb)
+	//	return
+	//}
+	//if strings.HasPrefix(data, "addscore_level_") {
+	//	handlers.HandleAddScoreLevel(bot, database, cb)
+	//	return
+	//}
+	//if data == "addscore_confirm" {
+	//	handlers.HandleAddScoreConfirmCallback(bot, database, cb)
+	//	return
+	//}
+	//if data == "addscore_cancel" {
+	//	handlers.HandleAddScoreCancelCallback(bot, cb)
+	//	return
+	//}
+
+	if strings.HasPrefix(data, "remove_class_") || strings.HasPrefix(data, "removescore_") {
+		handlers.HandleRemoveCallback(bot, database, cb)
+		return
+	}
+
+	if strings.HasPrefix(data, "add_class_") || strings.HasPrefix(data, "addscore_") {
+		handlers.HandleAddScoreCallback(bot, database, cb)
 		return
 	}
 

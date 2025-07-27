@@ -43,49 +43,7 @@ func HandleParentFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *s
 		}
 		parentData[chatID].StudentName = msg
 		parentFSM[chatID] = StateParentClassNumber
-		bot.Send(tgbotapi.NewMessage(chatID, "Введите номер класса ребёнка:"))
-	case StateParentClassNumber:
-		var num int
-		_, err := fmt.Sscanf(msg, "%d", &num)
-		if err != nil {
-			bot.Send(tgbotapi.NewMessage(chatID, "Введите корректный номер класса."))
-			return
-		}
-		parentData[chatID].ClassNumber = num
-		parentFSM[chatID] = StateParentClassLetter
-		bot.Send(tgbotapi.NewMessage(chatID, "Введите букву класса ребёнка:"))
-	case StateParentClassLetter:
-		parentData[chatID].ClassLetter = msg
-		parentFSM[chatID] = StateParentWaiting
-
-		// Проверяем ученика
-		studentID, err := FindStudentID(database, parentData[chatID])
-		if err != nil {
-			bot.Send(tgbotapi.NewMessage(chatID, "Ученик не найден. Проверьте данные и введите снова ФИО."))
-			parentFSM[chatID] = StateParentStudentName
-			return
-		}
-
-		log.Printf("[PARENT_REG] chatID=%d | StudentName='%s' | ClassNumber=%d | ClassLetter='%s' | ParentName='%s'\n",
-			chatID,
-			parentData[chatID].StudentName,
-			parentData[chatID].ClassNumber,
-			parentData[chatID].ClassLetter,
-			parentData[chatID].ParentName,
-		)
-
-		// Сохраняем родителя в users, добавляем запись в parents_students
-		err = SaveParentRequest(database, chatID, studentID, parentData[chatID].ParentName)
-		if err != nil {
-			bot.Send(tgbotapi.NewMessage(chatID, "Ошибка при сохранении заявки. Попробуйте позже."))
-			return
-		}
-		bot.Send(tgbotapi.NewMessage(chatID, "Заявка на регистрацию родителя отправлена администратору. Ожидайте подтверждения."))
-
-		handlers.ShowPendingUsers(database, bot)
-
-		delete(studentFSM, chatID)
-		delete(studentData, chatID)
+		sendParentClassNumberButtons(chatID, bot)
 	}
 }
 
@@ -138,4 +96,65 @@ func SaveParentRequest(database *sql.DB, parentTelegramID int64, studentID int, 
 
 	log.Printf("[PARENT_SUCCESS] linked parent (tg_id=%d) to student_id=%d", parentTelegramID, studentID)
 	return nil
+}
+
+func HandleParentClassNumber(chatID int64, num int, bot *tgbotapi.BotAPI) {
+	if parentData[chatID] == nil {
+		parentData[chatID] = &ParentRegisterData{}
+	}
+	parentData[chatID].ClassNumber = num
+	parentFSM[chatID] = StateParentClassLetter
+	sendParentClassLetterButtons(chatID, bot)
+}
+
+func HandleParentClassLetter(chatID int64, letter string, bot *tgbotapi.BotAPI, database *sql.DB) {
+	if parentData[chatID] == nil {
+		bot.Send(tgbotapi.NewMessage(chatID, "Произошла ошибка. Начните регистрацию заново."))
+		return
+	}
+	parentData[chatID].ClassLetter = letter
+	parentFSM[chatID] = StateParentWaiting
+
+	// Проверка ученика
+	studentID, err := FindStudentID(database, parentData[chatID])
+	if err != nil {
+		bot.Send(tgbotapi.NewMessage(chatID, "❌ Ученик не найден. Введите ФИО заново:"))
+		parentFSM[chatID] = StateParentStudentName
+		return
+	}
+
+	err = SaveParentRequest(database, chatID, studentID, parentData[chatID].ParentName)
+	if err != nil {
+		bot.Send(tgbotapi.NewMessage(chatID, "Ошибка при сохранении. Попробуйте позже."))
+		return
+	}
+	bot.Send(tgbotapi.NewMessage(chatID, "Заявка на регистрацию родителя отправлена администратору. Ожидайте подтверждения."))
+
+	handlers.ShowPendingUsers(database, bot)
+
+	delete(parentFSM, chatID)
+	delete(parentData, chatID)
+}
+
+func sendParentClassNumberButtons(chatID int64, bot *tgbotapi.BotAPI) {
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for i := 1; i <= 11; i++ {
+		text := fmt.Sprintf("%d класс", i)
+		data := fmt.Sprintf("parent_class_num:%d", i)
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(text, data)))
+	}
+	msg := tgbotapi.NewMessage(chatID, "Выберите номер класса ребёнка:")
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
+	bot.Send(msg)
+}
+
+func sendParentClassLetterButtons(chatID int64, bot *tgbotapi.BotAPI) {
+	letters := []string{"А", "Б", "В", "Г", "Д"}
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, l := range letters {
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(l, "parent_class_letter:"+l)))
+	}
+	msg := tgbotapi.NewMessage(chatID, "Выберите букву класса:")
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
+	bot.Send(msg)
 }

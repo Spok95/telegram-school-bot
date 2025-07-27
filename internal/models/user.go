@@ -22,3 +22,7 @@ type User struct {
 	Сonfirmed   bool    `db:"confirmed"`
 	IsActive    bool    `db:"is_active"`
 }
+
+type Class struct {
+	Name string
+}

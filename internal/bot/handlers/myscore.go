@@ -118,3 +118,8 @@ func abs(n int) int {
 	}
 	return n
 }
+
+func sendText(bot *tgbotapi.BotAPI, chatID int64, text string) {
+	msg := tgbotapi.NewMessage(chatID, text)
+	bot.Send(msg)
+}
