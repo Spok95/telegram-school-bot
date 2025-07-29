@@ -108,13 +108,18 @@ func ApproveScore(database *sql.DB, scoreID int64, adminID int64, approvedAt tim
 		return err
 	}
 
+	adjust := points
+	if adjust < 0 {
+		adjust = -adjust
+	}
+
 	if scoreType == "add" {
-		_, err = tx.Exec(`UPDATE classes SET collective_score = collective_score + ? WHERE id = (SELECT class_id FROM users WHERE id = ?)`, points*30/100, studentID)
+		_, err = tx.Exec(`UPDATE classes SET collective_score = collective_score + ? WHERE id = (SELECT class_id FROM users WHERE id = ?)`, adjust*30/100, studentID)
 		if err != nil {
 			return err
 		}
 	} else if scoreType == "remove" {
-		_, err = tx.Exec(`UPDATE classes SET collective_score = collective_score - ? WHERE id = (SELECT class_id FROM users WHERE id = ?)`, points*30/100, studentID)
+		_, err = tx.Exec(`UPDATE classes SET collective_score = collective_score - ? WHERE id = (SELECT class_id FROM users WHERE id = ?)`, adjust*30/100, studentID)
 		if err != nil {
 			return err
 		}
