@@ -162,7 +162,11 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 	if strings.HasPrefix(data, "reg_") {
 		role := strings.TrimPrefix(data, "reg_")
 		setUserFSMRole(chatID, role)
-		auth.StartRegistration(chatID, role, bot, database)
+		if role == "parent" {
+			auth.StartParentRegistration(chatID, cb.From, bot, database)
+		} else {
+			auth.StartRegistration(chatID, role, bot, database)
+		}
 		return
 	}
 

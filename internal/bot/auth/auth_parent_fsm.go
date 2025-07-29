@@ -6,6 +6,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/bot/handlers"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"log"
+	"strings"
 )
 
 type ParentFSMState string
@@ -27,9 +28,10 @@ type ParentRegisterData struct {
 	ParentName  string
 }
 
-func StartParentRegistration(chatID int64, msg string, bot *tgbotapi.BotAPI, database *sql.DB) {
+func StartParentRegistration(chatID int64, user *tgbotapi.User, bot *tgbotapi.BotAPI, database *sql.DB) {
 	parentFSM[chatID] = StateParentStudentName
-	parentData[chatID] = &ParentRegisterData{ParentName: msg}
+	parentName := strings.TrimSpace(fmt.Sprintf("%s %s", user.FirstName, user.LastName))
+	parentData[chatID] = &ParentRegisterData{ParentName: parentName}
 	bot.Send(tgbotapi.NewMessage(chatID, "Введите ФИО ребёнка, которого вы представляете:"))
 }
 

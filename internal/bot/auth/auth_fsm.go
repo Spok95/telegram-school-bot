@@ -9,8 +9,8 @@ func StartRegistration(chatID int64, role string, bot *tgbotapi.BotAPI, database
 	switch role {
 	case "student":
 		StartStudentRegistration(chatID, role, bot, database)
-	case "parent":
-		StartParentRegistration(chatID, role, bot, database)
+	//case "parent":
+	//	StartParentRegistration(chatID, update.Message.From, bot, database)
 	case "teacher", "administration":
 		StartStaffRegistration(chatID, role, bot, database)
 	}

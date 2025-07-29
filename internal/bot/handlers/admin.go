@@ -37,7 +37,45 @@ func ShowPendingUsers(database *sql.DB, bot *tgbotapi.BotAPI) {
 
 		rows.Scan(&id, &name, &role, &tgID)
 
-		msg := fmt.Sprintf("Заявка:\n👤 %s\n🧩 Роль: %s\nTelegramID: %d", name, role, tgID)
+		var msg string
+
+		if role == "student" {
+			var classNumber, classLetter sql.NullString
+			err := database.QueryRow(`SELECT class_number, class_letter FROM users WHERE id = ?`, id).Scan(&classNumber, &classLetter)
+			if err != nil {
+				log.Println("Ошибка при получении класса ученика:", err)
+				continue
+			}
+			msg = fmt.Sprintf(
+				"Заявка:\n👤 %s\n🏫 Класс: %s%s\n🧩 Роль: %s\nTelegramID: %d",
+				name,
+				classNumber.String, classLetter.String,
+				role, tgID,
+			)
+		} else if role == "parent" {
+			var studentName, studentClassNumber, studentClassLetter sql.NullString
+
+			// получаем имя родителя (Telegram username или имя из Telegram профиля, если есть)
+			err := database.QueryRow(`
+			SELECT u.name, u.class_number, u.class_letter
+			FROM users u
+			JOIN parents_students ps ON ps.student_id = u.id
+			WHERE ps.parent_id = ?
+		`, id).Scan(&studentName, &studentClassNumber, &studentClassLetter)
+			if err != nil {
+				log.Println("Ошибка при получении информации о ребёнке:", err)
+				continue
+			}
+
+			msg = fmt.Sprintf(
+				"Заявка:\n👤 Родитель: %s\n👤 Ребёнок: %s\n🏫 Класс: %s%s\n🧩 Роль: %s\nTelegramID: %d",
+				name, studentName.String, studentClassNumber.String, studentClassLetter.String,
+				role, tgID,
+			)
+		} else {
+			// fallback
+			msg = fmt.Sprintf("Заявка:\n👤 %s\n🧩 Роль: %s\nTelegramID: %d", name, role, tgID)
+		}
 
 		btnYes := tgbotapi.NewInlineKeyboardButtonData("✅ Подтвердить", fmt.Sprintf("confirm_%d", id))
 		brnNo := tgbotapi.NewInlineKeyboardButtonData("❌ Отклонить", fmt.Sprintf("reject_%d", id))
