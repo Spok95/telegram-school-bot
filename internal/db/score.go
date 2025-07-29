@@ -2,8 +2,10 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 	"github.com/Spok95/telegram-school-bot/internal/models"
 	"log"
+	"time"
 )
 
 func AddScore(database *sql.DB, score models.Score) error {
@@ -11,6 +13,10 @@ func AddScore(database *sql.DB, score models.Score) error {
 INSERT INTO scores (
                     student_id, category_id, points, type, comment, status, approved_by, approved_at, created_by, created_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`
+
+	if score.Type == "remove" {
+		score.Points = -score.Points
+	}
 
 	_, err := database.Exec(query,
 		score.StudentID,
@@ -35,7 +41,7 @@ func GetScoreByStudent(database *sql.DB, studentID int64) ([]models.Score, error
 SELECT s.id, s.student_id, s.category_id, c.name AS category, s.points, s.type, s.comment, s.status, s.approved_by, s.approved_at, s.created_by, s.created_at
 FROM scores s 
 JOIN categories c ON s.category_id = c.id
-WHERE s.student_id = ? AND s.type = 'add' AND s.status = 'approved'
+WHERE s.student_id = ? AND s.status = 'approved'
 ORDER BY s.created_at DESC`, studentID)
 
 	if err != nil {
@@ -54,4 +60,69 @@ ORDER BY s.created_at DESC`, studentID)
 		scores = append(scores, s)
 	}
 	return scores, nil
+}
+
+// GetPendingScores возвращает все заявки, ожидающие подтверждения
+func GetPendingScores(database *sql.DB) ([]models.Score, error) {
+	rows, err := database.Query(`
+		SELECT s.id, s.student_id, s.category_id, c.name AS category_label, s.points, s.type, s.comment, s.created_by
+		FROM scores s
+		JOIN categories c ON c.id = s.category_id
+		WHERE s.status = 'pending'
+		ORDER BY s.created_at ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []models.Score
+	for rows.Next() {
+		var s models.Score
+		err := rows.Scan(&s.ID, &s.StudentID, &s.CategoryID, &s.CategoryLabel, &s.Points, &s.Type, &s.Comment, &s.CreatedBy)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, s)
+	}
+	return results, nil
+}
+
+// ApproveScore подтверждает заявку и обновляет рейтинг ученика и класса
+func ApproveScore(database *sql.DB, scoreID int64, adminID int64, approvedAt time.Time) error {
+	tx, err := database.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var studentID int64
+	var points int
+	var scoreType string
+	err = tx.QueryRow(`SELECT student_id, points, type FROM scores WHERE id = ? AND status = 'pending'`, scoreID).Scan(&studentID, &points, &scoreType)
+	if err != nil {
+		return fmt.Errorf("заявка не найдена: %v", err)
+	}
+	_, err = tx.Exec(`UPDATE scores SET status = 'approved', approved_by = ?, approved_at = ? WHERE id = ?`, adminID, approvedAt, scoreID)
+	if err != nil {
+		return err
+	}
+
+	if scoreType == "add" {
+		_, err = tx.Exec(`UPDATE classes SET collective_score = collective_score + ? WHERE id = (SELECT class_id FROM users WHERE id = ?)`, points*30/100, studentID)
+		if err != nil {
+			return err
+		}
+	} else if scoreType == "remove" {
+		_, err = tx.Exec(`UPDATE classes SET collective_score = collective_score - ? WHERE id = (SELECT class_id FROM users WHERE id = ?)`, points*30/100, studentID)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func RejectScore(database *sql.DB, scoreID int64, adminID int64, rejectedAt time.Time) error {
+	_, err := database.Exec(`UPDATE scores SET status = 'rejected', approved_by = ?, approved_at = ? WHERE id = ?`, adminID, rejectedAt, scoreID)
+	return err
 }

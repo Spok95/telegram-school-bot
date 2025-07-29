@@ -19,7 +19,7 @@ type User struct {
 	ClassNumber *int64  `db:"class_number"`
 	ClassLetter *string `db:"class_letter"`
 	ChildID     *int64  `db:"child_id"`
-	Сonfirmed   bool    `db:"confirmed"`
+	Confirmed   bool    `db:"confirmed"`
 	IsActive    bool    `db:"is_active"`
 }
 

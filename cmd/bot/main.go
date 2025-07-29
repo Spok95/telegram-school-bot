@@ -59,27 +59,25 @@ func main() {
 		}
 
 		if update.Message != nil {
-			//state := handlers.GetAddScoreState(update.Message.Chat.ID)
-			//if state != nil {
-			//	switch state.Step {
-			//	case handlers.StepValue:
-			//		handlers.HandleAddScoreValue(bot, database, update.Message)
-			//		continue
-			//	case handlers.StepComment:
-			//		handlers.HandleAddScoreComment(bot, database, update.Message)
-			//		continue
-			//	}
-			//}
-			addState := handlers.GetAddScoreState(update.Message.Chat.ID)
-			if addState != nil && addState.Step == 6 {
+			userID := update.Message.From.ID
+			if handlers.GetAddScoreState(userID) != nil {
 				handlers.HandleAddScoreText(bot, database, update.Message)
 				continue
 			}
-			removeState := handlers.GetRemoveScoreState(update.Message.Chat.ID)
-			if removeState != nil && removeState.Step == 5 {
+			if handlers.GetRemoveScoreState(userID) != nil {
 				handlers.HandleRemoveText(bot, database, update.Message)
 				continue
 			}
+			//addState := handlers.GetAddScoreState(update.Message.Chat.ID)
+			//if addState != nil && addState.Step == 6 {
+			//	handlers.HandleAddScoreText(bot, database, update.Message)
+			//	continue
+			//}
+			//removeState := handlers.GetRemoveScoreState(update.Message.Chat.ID)
+			//if removeState != nil && removeState.Step == 5 {
+			//	handlers.HandleRemoveText(bot, database, update.Message)
+			//	continue
+			//}
 
 			handleMessage(bot, database, update.Message)
 			continue
@@ -143,6 +141,10 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		go handlers.HandleMyScore(bot, database, msg)
 	case "📊 Рейтинг ребёнка":
 		go handlers.HandleMyScore(bot, database, msg)
+	case "/approvals", "📥 Заявки на баллы":
+		if chatID == adminID {
+			go handlers.ShowPendingScores(bot, database, chatID)
+		}
 	default:
 		role := getUserFSMRole(chatID)
 		if role == "" {
@@ -164,22 +166,20 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		return
 	}
 
-	if strings.HasPrefix(data, "confirm_") || strings.HasPrefix(data, "reject_") {
+	if strings.HasPrefix(data, "confirm_") ||
+		strings.HasPrefix(data, "reject_") {
 		handlers.HandleAdminCallback(cb, database, bot, chatID)
 		return
 	}
 
-	if strings.HasPrefix(data, "addscore_student_") {
-		handlers.HandleAddScoreCallback(bot, database, cb)
+	if strings.HasPrefix(data, "score_confirm_") ||
+		strings.HasPrefix(data, "score_reject_") {
+		handlers.HandleScoreApprovalCallback(cb, bot, database, chatID)
 		return
 	}
 
-	if strings.HasPrefix(data, "student_class_") {
-		auth.HandleStudentCallback(cb, bot, database)
-		return
-	}
-
-	if strings.HasPrefix(data, "student_class_letter:") {
+	if strings.HasPrefix(data, "student_class_") ||
+		strings.HasPrefix(data, "student_class_letter:") {
 		auth.HandleStudentCallback(cb, bot, database)
 		return
 	}
@@ -200,30 +200,22 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		auth.HandleParentClassLetter(chatID, letter, bot, database)
 		return
 	}
-	//if strings.HasPrefix(data, "addscore_category_") {
-	//	handlers.HandleAddScoreCategory(bot, database, cb)
-	//	return
-	//}
-	//if strings.HasPrefix(data, "addscore_level_") {
-	//	handlers.HandleAddScoreLevel(bot, database, cb)
-	//	return
-	//}
-	//if data == "addscore_confirm" {
-	//	handlers.HandleAddScoreConfirmCallback(bot, database, cb)
-	//	return
-	//}
-	//if data == "addscore_cancel" {
-	//	handlers.HandleAddScoreCancelCallback(bot, cb)
-	//	return
-	//}
-
-	if strings.HasPrefix(data, "remove_class_") || strings.HasPrefix(data, "removescore_") {
-		handlers.HandleRemoveCallback(bot, database, cb)
+	if strings.HasPrefix(data, "addscore_category_") ||
+		strings.HasPrefix(data, "addscore_level_") ||
+		strings.HasPrefix(data, "add_class_") ||
+		strings.HasPrefix(data, "addscore_") ||
+		strings.HasPrefix(data, "addscore_student_") ||
+		data == "add_students_done" {
+		handlers.HandleAddScoreCallback(bot, database, cb)
 		return
 	}
-
-	if strings.HasPrefix(data, "add_class_") || strings.HasPrefix(data, "addscore_") {
-		handlers.HandleAddScoreCallback(bot, database, cb)
+	if strings.HasPrefix(data, "remove_category_") ||
+		strings.HasPrefix(data, "remove_level_") ||
+		strings.HasPrefix(data, "remove_class_") ||
+		strings.HasPrefix(data, "removescore_") ||
+		strings.HasPrefix(data, "remove_student_") ||
+		data == "remove_students_done" {
+		handlers.HandleRemoveCallback(bot, database, cb)
 		return
 	}
 

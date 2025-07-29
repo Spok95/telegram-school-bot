@@ -80,9 +80,12 @@ CREATE TABLE IF NOT EXISTS score_levels (
 	_, err = database.Exec(`
 CREATE TABLE IF NOT EXISTS classes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
-    collective_score INTEGER DEFAULT 0
+    number INTEGER NOT NULL,
+    letter TEXT NOT NULL,
+    collective_score INTEGER DEFAULT 0,
+    UNIQUE(number, letter)
 );
+
 `)
 	if err != nil {
 		return logError("classes", err)

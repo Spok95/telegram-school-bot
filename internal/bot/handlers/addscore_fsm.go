@@ -6,6 +6,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -83,6 +84,30 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 			state.SelectedStudentIDs = append(state.SelectedStudentIDs, id)
 		}
 	} else if data == "add_students_done" {
+		if len(state.SelectedStudentIDs) == 0 {
+			bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Не выбраны ученики, выберите хотя бы одного."))
+
+			// Повторно показать меню выбора учеников
+			students, err := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
+			if err != nil {
+				bot.Send(tgbotapi.NewMessage(chatID, "Ошибка получения учеников"))
+				return
+			}
+			if len(students) == 0 {
+				bot.Send(tgbotapi.NewMessage(chatID, "❌ В этом классе нет учеников."))
+				return
+			}
+			var buttons [][]tgbotapi.InlineKeyboardButton
+			for _, s := range students {
+				callback := fmt.Sprintf("addscore_student_%d", s.ID)
+				buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(s.Name, callback)))
+			}
+			buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("✅ Готово", "add_students_done")))
+			msg := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "Выберите учеников:")
+			msg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{InlineKeyboard: buttons}
+			bot.Send(msg)
+			return
+		}
 		state.Step = 4
 		categories, _ := db.GetAllCategories(database)
 		var buttons [][]tgbotapi.InlineKeyboardButton
@@ -109,7 +134,8 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		lvlID, _ := strconv.Atoi(strings.TrimPrefix(data, "addscore_level_"))
 		state.LevelID = lvlID
 		state.Step = 6
-		bot.Send(tgbotapi.NewMessage(chatID, "Введите комментарий (необязательно, например: за участие):"))
+		msg := tgbotapi.NewMessage(chatID, "Введите комментарий (необязательно, например: за участие):")
+		bot.Send(msg)
 	}
 }
 
@@ -133,12 +159,20 @@ func HandleAddScoreText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Me
 			Type:       "add",
 			Comment:    &comment,
 			Status:     "pending",
-			CreatedBy:  int64(createdBy),
+			CreatedBy:  createdBy,
 			CreatedAt:  time.Now(),
 		}
 		db.AddScore(database, score)
+		student, err := db.GetUserByID(database, sid)
+		if err != nil {
+			log.Println("Ошибка получения ученика:", err)
+			return
+		}
+		studentName := student.Name
+		NotifyAdminsAboutScoreRequest(bot, database, score, studentName)
 	}
 	bot.Send(tgbotapi.NewMessage(chatID, "Заявки на начисление баллов отправлены на подтверждение."))
+
 	delete(addStates, chatID)
 }
 

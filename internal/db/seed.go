@@ -49,14 +49,14 @@ ON CONFLICT(value, label, category_id) DO NOTHING
 		classLetters := []string{"А", "Б", "В", "Г", "Д"}
 		for grade := 1; grade <= 11; grade++ {
 			for _, letter := range classLetters {
-				className := fmt.Sprintf("%d%s", grade, letter)
 				_, err := database.Exec(`
-INSERT INTO classes (name)
-VALUES (?)
-ON CONFLICT(name) DO NOTHING;
-`, className)
+INSERT INTO classes (number, letter)
+VALUES (?, ?)
+ON CONFLICT(number, letter) DO NOTHING;
+`, grade, letter)
+
 				if err != nil {
-					return fmt.Errorf("insert class %s: %w", className, err)
+					return fmt.Errorf("insert class %d%s: %w", grade, letter, err)
 				}
 			}
 		}

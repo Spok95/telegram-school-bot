@@ -10,13 +10,14 @@ import (
 )
 
 func HandleMyScore(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
-	user, err := db.GetUserByTelegramID(database, msg.From.ID)
+	chatID := msg.Chat.ID
+	user, err := db.GetUserByTelegramID(database, chatID)
 	if err != nil || user == nil {
-		sendText(bot, msg.Chat.ID, "❌ Пользователь не найден.")
+		bot.Send(tgbotapi.NewMessage(chatID, "❌ Пользователь не найден."))
 		return
 	}
 
-	var targetID int64 = user.TelegramID
+	var targetID int64 = user.ID
 
 	// Если родитель — ищем telegram_id ребёнка
 	if *user.Role == models.Parent {
@@ -25,17 +26,11 @@ func HandleMyScore(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 			SELECT student_id FROM parents_students WHERE parent_id = ?
 		`, user.ID).Scan(&studentInternalID)
 		if err != nil {
-			sendText(bot, msg.Chat.ID, "❌ Не удалось найти привязанного ученика.")
+			bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось найти привязанного ученика."))
 			return
 		}
 
-		err = database.QueryRow(`
-			SELECT telegram_id FROM users WHERE id = ?
-		`, studentInternalID).Scan(&targetID)
-		if err != nil {
-			sendText(bot, msg.Chat.ID, "❌ Не удалось получить Telegram ID ученика.")
-			return
-		}
+		targetID = studentInternalID
 	}
 
 	// Получаем категории и суммы
@@ -47,7 +42,7 @@ func HandleMyScore(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		GROUP BY s.category_id
 	`, targetID)
 	if err != nil {
-		sendText(bot, msg.Chat.ID, "⚠️ Ошибка при получении рейтинга.")
+		bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Ошибка при получении рейтинга."))
 		return
 	}
 	defer rows.Close()
@@ -84,7 +79,7 @@ func HandleMyScore(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 					continue
 				}
 				sign := "+"
-				if s.Points < 0 {
+				if s.Type == "remove" {
 					sign = "-"
 				}
 				date := s.CreatedAt.Format("02.01.2006")
@@ -117,9 +112,4 @@ func abs(n int) int {
 		return -n
 	}
 	return n
-}
-
-func sendText(bot *tgbotapi.BotAPI, chatID int64, text string) {
-	msg := tgbotapi.NewMessage(chatID, text)
-	bot.Send(msg)
 }

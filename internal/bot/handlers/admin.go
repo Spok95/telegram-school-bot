@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"github.com/Spok95/telegram-school-bot/internal/bot/menu"
+	"github.com/Spok95/telegram-school-bot/internal/db"
+	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"log"
 	"os"
@@ -134,4 +136,44 @@ func RejectUser(database *sql.DB, bot *tgbotapi.BotAPI, name string, adminID int
 
 	bot.Send(tgbotapi.NewMessage(telegramID, "❌ Ваша заявка отклонена. Попробуйте позже или обратитесь к администратору."))
 	return nil
+}
+
+func NotifyAdminsAboutScoreRequest(bot *tgbotapi.BotAPI, database *sql.DB, score models.Score, studentName string) {
+	adminIDStr := os.Getenv("ADMIN_ID")
+	adminID, err := strconv.ParseInt(adminIDStr, 10, 64)
+	if err != nil {
+		log.Println("Ошибка чтения ADMIN_ID:", err)
+		return
+	}
+
+	categoryName, err := db.GetCategoryByID(database, int(score.CategoryID))
+	if err != nil {
+		log.Println("Ошибка получения категории:", err)
+		return
+	}
+	action := "начисление"
+	if score.Type == "remove" {
+		action = "списание"
+	}
+
+	comment := "без комментария"
+	if score.Comment != nil && *score.Comment != "" {
+		comment = *score.Comment
+	}
+
+	student, err := db.GetUserByID(database, score.StudentID)
+	if err != nil {
+		log.Println("Ошибка получения ученика:", err)
+		return
+	}
+	var classLetter string
+	var classNumber int64
+	if student.ClassLetter != nil || student.ClassNumber != nil {
+		classLetter = *student.ClassLetter
+		classNumber = *student.ClassNumber
+	}
+	msg := fmt.Sprintf("🆕 Новая заявка на %s:\n👤 Ученик: %s\n🏫 Класс: %d%s\n📚 Категория: %s\n🎯 Баллы: %d\n💬 Комментарий: %s\n\nОжидает подтверждения.",
+		action, studentName, classNumber, classLetter, categoryName, score.Points, comment,
+	)
+	bot.Send(tgbotapi.NewMessage(adminID, msg))
 }

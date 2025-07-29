@@ -42,8 +42,8 @@ func adminMenu() tgbotapi.ReplyKeyboardMarkup {
 			tgbotapi.NewKeyboardButton("📉 Списать баллы"),
 		),
 		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("📥 Подтвердить начисление"),
-			tgbotapi.NewKeyboardButton("📉 Подтвердить списания"),
+			tgbotapi.NewKeyboardButton("📥 Заявки на баллы"),
+			tgbotapi.NewKeyboardButton("📥 Заявки на авторизацию"),
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("📊 Отчёты"),

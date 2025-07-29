@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"github.com/Spok95/telegram-school-bot/internal/bot/handlers"
+	"github.com/Spok95/telegram-school-bot/internal/db"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"strconv"
 	"strings"
@@ -23,7 +24,7 @@ var studentData = make(map[int64]*StudentRegisterData)
 
 type StudentRegisterData struct {
 	Name        string
-	ClassNumber int
+	ClassNumber int64
 	ClassLetter string
 }
 
@@ -49,9 +50,13 @@ func HandleStudentFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *
 }
 
 func SaveStudentRequest(database *sql.DB, chatID int64, data *StudentRegisterData) error {
-	_, err := database.Exec(`INSERT INTO users (telegram_id, name, role, class_number, class_letter, confirmed) 
-			VALUES (?, ?, 'student', ?, ?, 0)`,
-		chatID, data.Name, data.ClassNumber, data.ClassLetter)
+	classID, err := db.ClassIDByNumberAndLetter(database, data.ClassNumber, data.ClassLetter)
+	if err != nil {
+		return fmt.Errorf("❌ Ошибка: выбранный класс не существует. Обратитесь к администратору.%w", err)
+	}
+	_, err = database.Exec(`INSERT INTO users (telegram_id, name, role, class_id, class_number, class_letter, confirmed) 
+			VALUES (?, ?, 'student', ?, ?, ?, 0)`,
+		chatID, data.Name, classID, data.ClassNumber, data.ClassLetter)
 	return err
 }
 
@@ -69,7 +74,7 @@ func HandleStudentCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, dat
 		if studentData[chatID] == nil {
 			studentData[chatID] = &StudentRegisterData{}
 		}
-		studentData[chatID].ClassNumber = num
+		studentData[chatID].ClassNumber = int64(num)
 		studentFSM[chatID] = StateStudentLetterBtn
 		showClassLetterButtons(chatID, bot)
 		return

@@ -6,6 +6,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -73,44 +74,68 @@ func HandleRemoveCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 		}
 		var buttons [][]tgbotapi.InlineKeyboardButton
 		for _, s := range students {
-			callback := fmt.Sprintf("remove_select_student:%d", s.ID)
+			callback := fmt.Sprintf("remove_student_%d", s.ID)
 			buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData(s.Name, callback)))
 		}
 		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("✅ Готово", "remove_students_done")))
 		edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "Выберите учеников:", tgbotapi.NewInlineKeyboardMarkup(buttons...))
 		bot.Send(edit)
-	} else if strings.HasPrefix(data, "remove_select_student:") {
-		idStr := strings.TrimPrefix(data, "remove_select_student:")
+	} else if strings.HasPrefix(data, "remove_student_") {
+		idStr := strings.TrimPrefix(data, "remove_student_")
 		id, _ := strconv.ParseInt(idStr, 10, 64)
 		if !containsInt64(state.SelectedStudentIDs, id) {
 			state.SelectedStudentIDs = append(state.SelectedStudentIDs, id)
 		}
 	} else if data == "remove_students_done" {
+		if len(state.SelectedStudentIDs) == 0 {
+			bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Не выбраны ученики, выберите хотя бы одного."))
+
+			// Повторно показать меню выбора учеников
+			students, err := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
+			if err != nil {
+				bot.Send(tgbotapi.NewMessage(chatID, "Ошибка получения учеников"))
+				return
+			}
+			if len(students) == 0 {
+				bot.Send(tgbotapi.NewMessage(chatID, "❌ В этом классе нет учеников."))
+				return
+			}
+			var buttons [][]tgbotapi.InlineKeyboardButton
+			for _, s := range students {
+				callback := fmt.Sprintf("addscore_student_%d", s.ID)
+				buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(s.Name, callback)))
+			}
+			buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("✅ Готово", "add_students_done")))
+			msg := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "Выберите учеников:")
+			msg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{InlineKeyboard: buttons}
+			bot.Send(msg)
+			return
+		}
 		state.Step = 4
 		categories, _ := db.GetAllCategories(database)
 		var buttons [][]tgbotapi.InlineKeyboardButton
 		for _, c := range categories {
-			callback := fmt.Sprintf("remove_select_category:%d", c.ID)
+			callback := fmt.Sprintf("remove_category_%d", c.ID)
 			buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(c.Name, callback)))
 		}
 		edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "Выберите категорию:", tgbotapi.NewInlineKeyboardMarkup(buttons...))
 		bot.Send(edit)
-	} else if strings.HasPrefix(data, "remove_select_category:") {
-		catID, _ := strconv.Atoi(strings.TrimPrefix(data, "remove_select_category:"))
+	} else if strings.HasPrefix(data, "remove_category_") {
+		catID, _ := strconv.Atoi(strings.TrimPrefix(data, "remove_category_"))
 		state.CategoryID = catID
 		state.Step = 5
 		levels, _ := db.GetLevelsByCategoryID(database, catID)
 		var buttons [][]tgbotapi.InlineKeyboardButton
 		for _, l := range levels {
-			callback := fmt.Sprintf("remove_select_level:%d", l.ID)
+			callback := fmt.Sprintf("remove_level_%d", l.ID)
 			label := fmt.Sprintf("%s (%d)", l.Label, l.Value)
 			buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(label, callback)))
 		}
 		edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "Выберите уровень:", tgbotapi.NewInlineKeyboardMarkup(buttons...))
 		bot.Send(edit)
-	} else if strings.HasPrefix(data, "remove_select_level:") {
-		lvlID, _ := strconv.Atoi(strings.TrimPrefix(data, "remove_select_level:"))
+	} else if strings.HasPrefix(data, "remove_level_") {
+		lvlID, _ := strconv.Atoi(strings.TrimPrefix(data, "remove_level_"))
 		state.LevelID = lvlID
 		state.Step = 6
 		msg := tgbotapi.NewMessage(chatID, "Введите комментарий (обязателен для списания):")
@@ -139,12 +164,20 @@ func HandleRemoveText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 			Type:       "remove",
 			Comment:    &comment,
 			Status:     "pending",
-			CreatedBy:  int64(createdBy),
+			CreatedBy:  createdBy,
 			CreatedAt:  time.Now(),
 		}
 		db.AddScore(database, score)
+		student, err := db.GetUserByID(database, sid)
+		if err != nil {
+			log.Println("Ошибка получения ученика:", err)
+			return
+		}
+		studentName := student.Name
+		NotifyAdminsAboutScoreRequest(bot, database, score, studentName)
 	}
 	bot.Send(tgbotapi.NewMessage(chatID, "Заявки на списание баллов отправлены на подтверждение."))
+
 	delete(removeStates, chatID)
 }
 
