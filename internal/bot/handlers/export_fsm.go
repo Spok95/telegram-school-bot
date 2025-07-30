@@ -2,10 +2,14 @@ package handlers
 
 import (
 	"database/sql"
+	"fmt"
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/xuri/excelize/v2"
 	"log"
+	"os"
 	"strconv"
+	"time"
 )
 
 type ExportFSMState struct {
@@ -93,4 +97,33 @@ func HandleExportCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 
 func generateExport(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, state ExportFSMState) {
 	bot.Send(tgbotapi.NewMessage(chatID, "📂 (заглушка) Отчёт сформирован: тип "+state.ReportType+", период ID "+strconv.FormatInt(state.PeriodID, 10)))
+}
+
+func GenerateReport(database *sql.DB, reportType, periodID string) (string, error) {
+	file := excelize.NewFile()
+	sheet := "Отчёт"
+	file.NewSheet(sheet)
+	file.DeleteSheet("Sheet1")
+
+	// Заголовки
+	headers := []string{"Имя", "Класс", "Категория", "Баллы", "Комментарий", "Кем", "Когда"}
+
+	for i, h := range headers {
+		cell, _ := excelize.CoordinatesToCellName(i+1, i)
+		file.SetCellValue(sheet, cell, h)
+	}
+
+	// TODO: сделать выборку из таблицы scores с JOIN-ами
+
+	// Сохраняем файл
+	filename := fmt.Sprintf("export_%s_%d.xlsx", reportType, time.Now().Unix())
+	filepath := "data/reports/" + filename
+
+	if err := os.MkdirAll("data/reports", 0755); err != nil {
+		return "", err
+	}
+	if err := file.SaveAs(filepath); err != nil {
+		return "", err
+	}
+	return filepath, nil
 }

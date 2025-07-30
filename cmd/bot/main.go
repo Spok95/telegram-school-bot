@@ -6,7 +6,6 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/bot/handlers"
 	"github.com/Spok95/telegram-school-bot/internal/bot/menu"
 	"github.com/Spok95/telegram-school-bot/internal/db"
-	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/joho/godotenv"
 	"log"
@@ -14,8 +13,6 @@ import (
 	"strconv"
 	"strings"
 )
-
-var userFSMRole = make(map[int64]string)
 
 func main() {
 	// Загрузка переменных окружения
@@ -81,33 +78,17 @@ func main() {
 func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
 	text := msg.Text
+	db.EnsureAdmin(chatID, database, text, bot)
 
 	adminID, _ := strconv.ParseInt(os.Getenv("ADMIN_ID"), 10, 64)
-
-	if chatID == adminID && text == "/start" {
-		setUserFSMRole(chatID, "admin")
-		_, err := database.Exec(`INSERT OR REPLACE INTO users (telegram_id, name, role, confirmed) VALUES (?, ?, ?, 1)`,
-			chatID, "Администратор", models.Admin)
-		if err != nil {
-			bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Ошибка авторизации админа."))
-			return
-		}
-		bot.Send(tgbotapi.NewMessage(chatID, "✅ Вы авторизованы как администратор"))
-
-		keyboard := menu.GetRoleMenu(string(models.Admin))
-		msg := tgbotapi.NewMessage(chatID, "Добро пожаловать! Выберите действие:")
-		msg.ReplyMarkup = keyboard
-		bot.Send(msg)
-		return
-	}
-
 	switch text {
 	case "/start":
+
 		var role string
 		var confirmed int
 		err := database.QueryRow(`SELECT role, confirmed FROM users WHERE telegram_id = ?`, chatID).Scan(&role, &confirmed)
 		if err == nil || confirmed == 1 {
-			setUserFSMRole(chatID, role)
+			db.SetUserFSMRole(chatID, role)
 			keyboard := menu.GetRoleMenu(role)
 			msg := tgbotapi.NewMessage(chatID, "Добро пожаловать! Выберите действие:")
 			msg.ReplyMarkup = keyboard
@@ -139,9 +120,10 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		if chatID == adminID {
 			go handlers.ShowPendingScores(bot, database, chatID)
 		}
-	case "/setperiod":
-		if chatID == adminID {
-			go handlers.StartSetPeriodFSM(bot, msg)
+	case "/setperiod", "📅 Установить период":
+		role := getUserFSMRole(chatID)
+		if role == "admin" || role == "administration" {
+			go handlers.StartSetPeriodFSM(bot, database, msg)
 		}
 	case "/periods":
 		isAdmin := chatID == adminID
@@ -170,7 +152,7 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 
 	if strings.HasPrefix(data, "reg_") {
 		role := strings.TrimPrefix(data, "reg_")
-		setUserFSMRole(chatID, role)
+		db.SetUserFSMRole(chatID, role)
 		if role == "parent" {
 			auth.StartParentRegistration(chatID, cb.From, bot, database)
 		} else {
@@ -243,10 +225,6 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 	bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Неизвестная команда. Используйте /start"))
 }
 
-func setUserFSMRole(chatID int64, role string) {
-	userFSMRole[chatID] = role
-}
-
 func getUserFSMRole(chatID int64) string {
-	return userFSMRole[chatID]
+	return db.UserFSMRole[chatID]
 }

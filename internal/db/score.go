@@ -11,8 +11,8 @@ import (
 func AddScore(database *sql.DB, score models.Score) error {
 	query := `
 INSERT INTO scores (
-                    student_id, category_id, points, type, comment, status, approved_by, approved_at, created_by, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`
+                    student_id, category_id, points, type, comment, status, approved_by, approved_at, created_by, created_at, period_id
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`
 
 	if score.Type == "remove" {
 		score.Points = -score.Points
@@ -29,6 +29,7 @@ INSERT INTO scores (
 		score.ApprovedAt,
 		score.CreatedBy,
 		score.CreatedAt,
+		score.PeriodID,
 	)
 	if err != nil {
 		log.Println("Ошибка при добавлении записи о баллах:", err)

@@ -6,8 +6,13 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"log"
-	"strings"
 	"time"
+)
+
+const (
+	StepInputName = iota
+	StepInputStart
+	StepInputEnd
 )
 
 type SetPeriodState struct {
@@ -19,9 +24,14 @@ type SetPeriodState struct {
 
 var periodStates = make(map[int64]*SetPeriodState)
 
-func StartSetPeriodFSM(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
+func StartSetPeriodFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
-	periodStates[chatID] = &SetPeriodState{Step: 1}
+
+	// 🔁 Сброс состояния перед запуском FSM
+	delete(periodStates, chatID)
+
+	// Запуск нового FSM
+	periodStates[chatID] = &SetPeriodState{Step: StepInputName}
 	bot.Send(tgbotapi.NewMessage(chatID, "Введите название нового периода (например: 1 триместр 2025):"))
 }
 
@@ -32,25 +42,23 @@ func HandleSetPeriodInput(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.
 		return
 	}
 
-	text := strings.TrimSpace(msg.Text)
-
 	switch state.Step {
-	case 1:
-		state.Name = text
-		state.Step = 2
+	case StepInputName:
+		state.Name = msg.Text
+		state.Step = StepInputStart
 		bot.Send(tgbotapi.NewMessage(chatID, "Введите дату начала периода в формате YYYY-MM-DD:"))
-	case 2:
-		start, err := time.Parse("2006-01-02", text)
+	case StepInputStart:
+		start, err := time.Parse("2006-01-02", msg.Text)
 		if err != nil {
 			bot.Send(tgbotapi.NewMessage(chatID, "❌ Неверный формат. Введите дату начала в формате YYYY-MM-DD."))
 			delete(periodStates, chatID)
 			return
 		}
 		state.StartDate = start
-		state.Step = 3
+		state.Step = StepInputEnd
 		bot.Send(tgbotapi.NewMessage(chatID, "Введите дату окончания периода в формате YYYY-MM-DD:"))
-	case 3:
-		end, err := time.Parse("2006-01-02", text)
+	case StepInputEnd:
+		end, err := time.Parse("2006-01-02", msg.Text)
 		if err != nil {
 			bot.Send(tgbotapi.NewMessage(chatID, "❌ Неверный формат. Введите дату окончания в формате YYYY-MM-DD."))
 			delete(periodStates, chatID)
@@ -65,7 +73,7 @@ func HandleSetPeriodInput(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.
 			EndDate:   state.EndDate,
 			IsActive:  true,
 		}
-		err = db.CreatePeriod(database, period)
+		periodID, err := db.CreatePeriod(database, period)
 		if err != nil {
 			log.Println("❌ Ошибка при создании периода:", err)
 			bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось сохранить период."))
@@ -74,9 +82,10 @@ func HandleSetPeriodInput(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.
 		}
 
 		// Сбрасываем старые периоды и активируем этот
-		err = db.SetActivePeriod(database, db.GetLastInsertID(database))
+		err = db.SetActivePeriod(database, periodID)
 		if err != nil {
 			log.Println("❌ Ошибка при установке активного периода:", err)
+			delete(periodStates, chatID)
 		}
 		bot.Send(tgbotapi.NewMessage(chatID, "✅ Новый период успешно создан и активирован."))
 		delete(periodStates, chatID)

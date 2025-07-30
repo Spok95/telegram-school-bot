@@ -157,6 +157,12 @@ func HandleRemoveText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 	createdBy := user.ID
 	comment := state.Comment
 
+	period, err := db.GetActivePeriod(database)
+	if err != nil || period == nil {
+		bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось определить активный период."))
+		return
+	}
+
 	for _, sid := range state.SelectedStudentIDs {
 		score := models.Score{
 			StudentID:  sid,
@@ -167,6 +173,7 @@ func HandleRemoveText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 			Status:     "pending",
 			CreatedBy:  createdBy,
 			CreatedAt:  time.Now(),
+			PeriodID:   &period.ID,
 		}
 		db.AddScore(database, score)
 		student, err := db.GetUserByID(database, sid)

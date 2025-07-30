@@ -42,8 +42,8 @@ func SetActivePeriod(database *sql.DB, periodID int64) error {
 	return tx.Commit()
 }
 
-func CreatePeriod(database *sql.DB, p models.Period) error {
-	_, err := database.Exec(`
+func CreatePeriod(database *sql.DB, p models.Period) (int64, error) {
+	res, err := database.Exec(`
 		INSERT INTO periods (name, start_date, end_date, is_active) 
 		VALUES (?, ?, ?, ?)`,
 		p.Name,
@@ -51,7 +51,10 @@ func CreatePeriod(database *sql.DB, p models.Period) error {
 		p.EndDate.Format("2006-01-02"),
 		p.IsActive,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
 }
 
 func GetLastInsertID(database *sql.DB) int64 {
