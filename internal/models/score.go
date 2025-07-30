@@ -15,6 +15,7 @@ type Score struct {
 	ApprovedAt    *time.Time `db:"approved_at"`
 	CreatedBy     int64      `db:"created_by"`
 	CreatedAt     time.Time  `db:"created_at"`
+	PeriodID      *int64     `db:"period_id"`
 }
 
 type Category struct {

@@ -103,16 +103,32 @@ func ApproveScore(database *sql.DB, scoreID int64, adminID int64, approvedAt tim
 	if err != nil {
 		return fmt.Errorf("заявка не найдена: %v", err)
 	}
-	_, err = tx.Exec(`UPDATE scores SET status = 'approved', approved_by = ?, approved_at = ? WHERE id = ?`, adminID, approvedAt, scoreID)
+
+	// Получаем активный период
+	activePeriod, err := GetActivePeriod(database)
+	var periodID *int64
+	if err == nil && activePeriod != nil {
+		periodID = &activePeriod.ID
+	}
+
+	// Обновляем заявку: статус + period_id
+	_, err = tx.Exec(`
+		UPDATE scores 
+		SET status = 'approved', approved_by = ?, approved_at = ?, period_id = ? 
+		WHERE id = ?`,
+		adminID, approvedAt, periodID, scoreID,
+	)
 	if err != nil {
 		return err
 	}
 
+	// Приводим к положительному числу (points уже может быть отрицательным)
 	adjust := points
 	if adjust < 0 {
 		adjust = -adjust
 	}
 
+	// Обновляем коллективный рейтинг
 	if scoreType == "add" {
 		_, err = tx.Exec(`UPDATE classes SET collective_score = collective_score + ? WHERE id = (SELECT class_id FROM users WHERE id = ?)`, adjust*30/100, studentID)
 		if err != nil {

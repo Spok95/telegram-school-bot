@@ -68,16 +68,9 @@ func main() {
 				handlers.HandleRemoveText(bot, database, update.Message)
 				continue
 			}
-			//addState := handlers.GetAddScoreState(update.Message.Chat.ID)
-			//if addState != nil && addState.Step == 6 {
-			//	handlers.HandleAddScoreText(bot, database, update.Message)
-			//	continue
-			//}
-			//removeState := handlers.GetRemoveScoreState(update.Message.Chat.ID)
-			//if removeState != nil && removeState.Step == 5 {
-			//	handlers.HandleRemoveText(bot, database, update.Message)
-			//	continue
-			//}
+			if handlers.GetSetPeriodState(userID) != nil {
+				handlers.HandleSetPeriodInput(bot, database, update.Message)
+			}
 
 			handleMessage(bot, database, update.Message)
 			continue
@@ -145,6 +138,13 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		if chatID == adminID {
 			go handlers.ShowPendingScores(bot, database, chatID)
 		}
+	case "/serperiod":
+		if chatID == adminID {
+			go handlers.StartSetPeriodFSM(bot, msg)
+		}
+	case "/periods":
+		isAdmin := chatID == adminID
+		go handlers.ShowPeriods(bot, database, chatID, isAdmin)
 	default:
 		role := getUserFSMRole(chatID)
 		if role == "" {
@@ -221,6 +221,9 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		data == "remove_students_done" {
 		handlers.HandleRemoveCallback(bot, database, cb)
 		return
+	}
+	if strings.HasPrefix(data, "activate_period_") {
+		handlers.HandlePeriodCallback(cb, bot, database)
 	}
 
 	bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Неизвестная команда. Используйте /start"))

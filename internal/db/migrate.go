@@ -30,14 +30,19 @@ CREATE TABLE IF NOT EXISTS scores (
     student_id INTEGER NOT NULL,
     category_id INTEGER NOT NULL,
     points INTEGER NOT NULL,
-    type TEXT NOT NULL, -- 'add' или 'remove'
+    type TEXT NOT NULL CHECK(type IN ('add', 'remove')),
     comment TEXT,
     status TEXT DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected')),
     approved_by INTEGER,
     approved_at TIMESTAMP,
     created_by INTEGER NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (category_id) REFERENCES categories(id)
+    period_id INTEGER,
+    FOREIGN KEY (student_id) REFERENCES users(id),
+    FOREIGN KEY (category_id) REFERENCES categories(id),
+    FOREIGN KEY (approved_by) REFERENCES users(id),
+    FOREIGN KEY (created_by) REFERENCES users(id),
+    FOREIGN KEY (period_id) REFERENCES periods(id)
 );`
 
 	if _, err := database.Exec(createScores); err != nil {
@@ -95,8 +100,10 @@ CREATE TABLE IF NOT EXISTS periods (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     start_date TEXT NOT NULL,
-    end_date TEXT NOT NULL
+    end_date TEXT NOT NULL,
+    is_active INTEGER DEFAULT 0
 );
+
 `)
 	if err != nil {
 		return logError("periods", err)
