@@ -128,6 +128,8 @@ func HandleParentClassLetter(chatID int64, letter string, bot *tgbotapi.BotAPI, 
 	err = SaveParentRequest(database, chatID, studentID, parentData[chatID].ParentName)
 	if err != nil {
 		bot.Send(tgbotapi.NewMessage(chatID, "Ошибка при сохранении. Попробуйте позже."))
+		delete(parentFSM, chatID)
+		delete(parentData, chatID)
 		return
 	}
 	bot.Send(tgbotapi.NewMessage(chatID, "Заявка на регистрацию родителя отправлена администратору. Ожидайте подтверждения."))

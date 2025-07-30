@@ -85,6 +85,7 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 	adminID, _ := strconv.ParseInt(os.Getenv("ADMIN_ID"), 10, 64)
 
 	if chatID == adminID && text == "/start" {
+		setUserFSMRole(chatID, "admin")
 		_, err := database.Exec(`INSERT OR REPLACE INTO users (telegram_id, name, role, confirmed) VALUES (?, ?, ?, 1)`,
 			chatID, "Администратор", models.Admin)
 		if err != nil {
@@ -138,13 +139,21 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		if chatID == adminID {
 			go handlers.ShowPendingScores(bot, database, chatID)
 		}
-	case "/serperiod":
+	case "/setperiod":
 		if chatID == adminID {
 			go handlers.StartSetPeriodFSM(bot, msg)
 		}
 	case "/periods":
 		isAdmin := chatID == adminID
 		go handlers.ShowPeriods(bot, database, chatID, isAdmin)
+	case "/export", "📥 Экспорт отчёта":
+		role := getUserFSMRole(chatID)
+		if role == "admin" || role == "administration" {
+
+			log.Println("📊 Роль пользователя:", getUserFSMRole(chatID))
+
+			go handlers.StartExportFSM(bot, database, msg)
+		}
 	default:
 		role := getUserFSMRole(chatID)
 		if role == "" {
@@ -224,6 +233,11 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 	}
 	if strings.HasPrefix(data, "activate_period_") {
 		handlers.HandlePeriodCallback(cb, bot, database)
+		return
+	}
+	if strings.HasPrefix(data, "export_type_") || strings.HasPrefix(data, "export_period_") {
+		handlers.HandleExportCallback(bot, database, cb)
+		return
 	}
 
 	bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Неизвестная команда. Используйте /start"))

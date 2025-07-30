@@ -43,6 +43,7 @@ func HandleSetPeriodInput(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.
 		start, err := time.Parse("2006-01-02", text)
 		if err != nil {
 			bot.Send(tgbotapi.NewMessage(chatID, "❌ Неверный формат. Введите дату начала в формате YYYY-MM-DD."))
+			delete(periodStates, chatID)
 			return
 		}
 		state.StartDate = start
@@ -52,6 +53,7 @@ func HandleSetPeriodInput(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.
 		end, err := time.Parse("2006-01-02", text)
 		if err != nil {
 			bot.Send(tgbotapi.NewMessage(chatID, "❌ Неверный формат. Введите дату окончания в формате YYYY-MM-DD."))
+			delete(periodStates, chatID)
 			return
 		}
 		state.EndDate = end
@@ -67,6 +69,7 @@ func HandleSetPeriodInput(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.
 		if err != nil {
 			log.Println("❌ Ошибка при создании периода:", err)
 			bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось сохранить период."))
+			delete(periodStates, chatID)
 			return
 		}
 

@@ -88,6 +88,8 @@ func HandleStudentCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, dat
 		err := SaveStudentRequest(database, chatID, studentData[chatID])
 		if err != nil {
 			bot.Send(tgbotapi.NewMessage(chatID, "Ошибка при сохранении заявки. Попробуйте позже."))
+			delete(studentFSM, chatID)
+			delete(studentData, chatID)
 			return
 		}
 

@@ -32,14 +32,16 @@ func HandleStaffFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *sq
 		err := SaveStaffRequest(database, chatID, msg, role)
 		if err != nil {
 			bot.Send(tgbotapi.NewMessage(chatID, "Ошибка при сохранении заявки. Попробуйте позже."))
+			delete(staffFSM, chatID)
+			delete(staffData, chatID)
 			return
 		}
 		bot.Send(tgbotapi.NewMessage(chatID, "Заявка на регистрацию отправлена администратору. Ожидайте подтверждения."))
 
 		handlers.ShowPendingUsers(database, bot)
 
-		delete(parentFSM, chatID)
-		delete(parentData, chatID)
+		delete(staffFSM, chatID)
+		delete(staffData, chatID)
 	}
 }
 

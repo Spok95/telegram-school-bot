@@ -47,6 +47,7 @@ func adminMenu() tgbotapi.ReplyKeyboardMarkup {
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("📊 Отчёты"),
+			tgbotapi.NewKeyboardButton("📥 Экспорт отчёта"),
 		),
 	)
 }

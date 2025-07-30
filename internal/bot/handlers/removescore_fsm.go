@@ -70,6 +70,7 @@ func HandleRemoveCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 		students, _ := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
 		if len(students) == 0 {
 			bot.Send(tgbotapi.NewMessage(chatID, "❌ В этом классе нет учеников."))
+			delete(removeStates, chatID)
 			return
 		}
 		var buttons [][]tgbotapi.InlineKeyboardButton
