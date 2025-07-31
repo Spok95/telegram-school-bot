@@ -79,40 +79,39 @@ func HandleRemoveCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData(s.Name, callback)))
 		}
-		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("✅ Готово", "remove_students_done")))
-		edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "Выберите учеников:", tgbotapi.NewInlineKeyboardMarkup(buttons...))
+		edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "Выберите ученика или учеников:", tgbotapi.NewInlineKeyboardMarkup(buttons...))
 		bot.Send(edit)
 	} else if strings.HasPrefix(data, "remove_student_") {
 		idStr := strings.TrimPrefix(data, "remove_student_")
 		id, _ := strconv.ParseInt(idStr, 10, 64)
+		// Если ученик не выбран — добавляем
 		if !containsInt64(state.SelectedStudentIDs, id) {
 			state.SelectedStudentIDs = append(state.SelectedStudentIDs, id)
 		}
-	} else if data == "remove_students_done" {
-		if len(state.SelectedStudentIDs) == 0 {
-			bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Не выбраны ученики, выберите хотя бы одного."))
+		// Получаем учеников и пересобираем клавиатуру
+		students, _ := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
+		var buttons [][]tgbotapi.InlineKeyboardButton
+		for _, s := range students {
+			label := s.Name
+			callback := fmt.Sprintf("remove_student_%d", s.ID)
 
-			// Повторно показать меню выбора учеников
-			students, err := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
-			if err != nil {
-				bot.Send(tgbotapi.NewMessage(chatID, "Ошибка получения учеников"))
-				return
+			// Отметим выбранного
+			if containsInt64(state.SelectedStudentIDs, s.ID) {
+				label = "✅ " + label
 			}
-			if len(students) == 0 {
-				bot.Send(tgbotapi.NewMessage(chatID, "❌ В этом классе нет учеников."))
-				return
-			}
-			var buttons [][]tgbotapi.InlineKeyboardButton
-			for _, s := range students {
-				callback := fmt.Sprintf("addscore_student_%d", s.ID)
-				buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(s.Name, callback)))
-			}
-			buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("✅ Готово", "add_students_done")))
-			msg := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "Выберите учеников:")
-			msg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{InlineKeyboard: buttons}
-			bot.Send(msg)
-			return
+			buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(label, callback)))
 		}
+
+		// Показываем кнопку "Готово" только если выбран хотя бы один
+		if len(state.SelectedStudentIDs) > 0 {
+			buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("✅ Готово", "remove_students_done"),
+			))
+		}
+
+		edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "Выберите ученика или учеников:", tgbotapi.NewInlineKeyboardMarkup(buttons...))
+		bot.Send(edit)
+	} else if data == "remove_students_done" {
 		state.Step = 4
 		categories, _ := db.GetAllCategories(database)
 		var buttons [][]tgbotapi.InlineKeyboardButton

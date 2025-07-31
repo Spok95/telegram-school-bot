@@ -29,3 +29,14 @@ type ScoreLevel struct {
 	Label      string
 	CategoryID int
 }
+
+type ScoreWithUser struct {
+	StudentName   string
+	ClassNumber   int
+	ClassLetter   string
+	CategoryLabel string
+	Points        int
+	Comment       string
+	AddedByName   string
+	CreatedAt     time.Time
+}

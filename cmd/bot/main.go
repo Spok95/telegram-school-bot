@@ -134,7 +134,7 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 
 			log.Println("📊 Роль пользователя:", getUserFSMRole(chatID))
 
-			go handlers.StartExportFSM(bot, database, msg)
+			go handlers.StartExportFSM(bot, msg)
 		}
 	default:
 		role := getUserFSMRole(chatID)

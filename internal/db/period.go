@@ -83,3 +83,51 @@ func ListPeriods(database *sql.DB) ([]models.Period, error) {
 	}
 	return result, nil
 }
+
+func GetScoresByPeriod(database *sql.DB, periodID int) ([]models.ScoreWithUser, error) {
+	query := `
+	SELECT
+		students.full_name AS student_name,
+		students.class_number,
+		students.class_letter,
+		categories.label AS category_label,
+		scores.points,
+		scores.comment,
+		users.full_name AS added_by_name,
+		scores.created_at
+	FROM scores
+	JOIN students ON scores.student_id = students.id
+	JOIN users ON scores.created_by = users.id
+	JOIN categories ON scores.category_id = categories.id
+	WHERE scores.period_id = ?
+	ORDER BY scores.created_at ASC;
+	`
+	rows, err := database.Query(query, periodID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []models.ScoreWithUser
+	for rows.Next() {
+		var s models.ScoreWithUser
+		if err := rows.Scan(&s.StudentName, &s.ClassNumber, &s.ClassLetter, &s.CategoryLabel, &s.Points, &s.Comment, &s.AddedByName, &s.CreatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, s)
+	}
+	return result, nil
+}
+
+func GetPeriodByID(database *sql.DB, id int) (*models.Period, error) {
+	row := database.QueryRow(`SELECT id, name, start_date, end_date, is_active FROM periods WHERE id = ?`, id)
+
+	var p models.Period
+	var startStr, endStr string
+	err := row.Scan(&p.ID, &p.Name, &startStr, &endStr, &p.IsActive)
+	if err != nil {
+		return nil, err
+	}
+	p.StartDate, _ = time.Parse("2006-01-02", startStr)
+	p.EndDate, _ = time.Parse("2006-01-02", endStr)
+	return &p, nil
+}

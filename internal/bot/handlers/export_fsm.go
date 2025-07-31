@@ -4,10 +4,12 @@ import (
 	"database/sql"
 	"fmt"
 	"github.com/Spok95/telegram-school-bot/internal/db"
+	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/xuri/excelize/v2"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 )
@@ -20,7 +22,7 @@ type ExportFSMState struct {
 
 var exportStates = make(map[int64]*ExportFSMState)
 
-func StartExportFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+func StartExportFSM(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
 	exportStates[chatID] = &ExportFSMState{Step: 1}
 
@@ -89,41 +91,72 @@ func HandleExportCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 		bot.Send(tgbotapi.NewMessage(chatID, "⏳ Формирую Excel-файл..."))
 
 		// Вызов генерации Excel-файла
-		go generateExport(bot, database, chatID, *state)
+		go func() {
+			err := GenerateReport(bot, database, chatID, state.ReportType, state.PeriodID)
+			if err != nil {
+				bot.Send(tgbotapi.NewMessage(chatID, "❌ Ошибка при экспорте: "+err.Error()))
+			}
+		}()
 
 		delete(exportStates, chatID)
 	}
 }
 
-func generateExport(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, state ExportFSMState) {
-	bot.Send(tgbotapi.NewMessage(chatID, "📂 (заглушка) Отчёт сформирован: тип "+state.ReportType+", период ID "+strconv.FormatInt(state.PeriodID, 10)))
-}
-
-func GenerateReport(database *sql.DB, reportType, periodID string) (string, error) {
-	file := excelize.NewFile()
-	sheet := "Отчёт"
-	file.NewSheet(sheet)
-	file.DeleteSheet("Sheet1")
+func generateExport(scores []models.ScoreWithUser) (string, error) {
+	f := excelize.NewFile()
+	sheet := "Report"
+	f.SetSheetName("Sheet1", sheet)
 
 	// Заголовки
-	headers := []string{"Имя", "Класс", "Категория", "Баллы", "Комментарий", "Кем", "Когда"}
-
+	headers := []string{"ФИО ученика", "Класс", "Категория", "Баллы", "Комментарий", "Кто добавил", "Дата добавления"}
 	for i, h := range headers {
-		cell, _ := excelize.CoordinatesToCellName(i+1, i)
-		file.SetCellValue(sheet, cell, h)
+		cell := fmt.Sprintf("%s1", string(rune('A'+i)))
+		f.SetCellValue("Sheet1", cell, h)
+	}
+	// Данные
+	for i, s := range scores {
+		row := i + 2
+		_ = f.SetCellValue(sheet, fmt.Sprintf("A%d", row), s.StudentName)
+		_ = f.SetCellValue(sheet, fmt.Sprintf("B%d", row), fmt.Sprintf("%d%s", s.ClassNumber, s.ClassLetter))
+		_ = f.SetCellValue(sheet, fmt.Sprintf("C%d", row), s.CategoryLabel)
+		_ = f.SetCellValue(sheet, fmt.Sprintf("D%d", row), s.Points)
+		_ = f.SetCellValue(sheet, fmt.Sprintf("E%d", row), s.Comment)
+		_ = f.SetCellValue(sheet, fmt.Sprintf("F%d", row), s.AddedByName)
+		_ = f.SetCellValue(sheet, fmt.Sprintf("G%d", row), s.CreatedAt.Format("2006-01-02 15:04"))
 	}
 
-	// TODO: сделать выборку из таблицы scores с JOIN-ами
+	// Автосохранение
+	filename := fmt.Sprintf("report_%d.xlsx", time.Now().Unix())
+	path := filepath.Join(os.TempDir(), filename)
 
-	// Сохраняем файл
-	filename := fmt.Sprintf("export_%s_%d.xlsx", reportType, time.Now().Unix())
-	filepath := "data/reports/" + filename
-
-	if err := os.MkdirAll("data/reports", 0755); err != nil {
+	if err := f.SaveAs(path); err != nil {
 		return "", err
 	}
-	if err := file.SaveAs(filepath); err != nil {
-		return "", err
+	return path, nil
+}
+
+func GenerateReport(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, exportType string, periodID int64) error {
+	scores, err := db.GetScoresByPeriod(database, int(periodID))
+	if err != nil {
+		return fmt.Errorf("ошибка получения баллов: %w", err)
 	}
-	return filepath, nil
+
+	period, err := db.GetPeriodByID(database, int(periodID))
+	if err != nil {
+		return fmt.Errorf("ошибка получения периода: %w", err)
+	}
+
+	filePath, err := generateExport(scores)
+	if err != nil {
+		return fmt.Errorf("ошибка создания Excel файла: %w", err)
+	}
+
+	// Отправка Excel файла пользователю
+	doc := tgbotapi.NewDocument(chatID, tgbotapi.FilePath(filePath))
+	doc.Caption = fmt.Sprintf("📊 Отчёт за период: %s", period.Name)
+
+	if _, err := bot.Send(doc); err != nil {
+		return fmt.Errorf("ошибка отправки файла: %w", err)
+	}
+	return nil
 }

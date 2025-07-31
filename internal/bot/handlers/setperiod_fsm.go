@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"fmt"
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -48,20 +49,18 @@ func HandleSetPeriodInput(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.
 		state.Step = StepInputStart
 		bot.Send(tgbotapi.NewMessage(chatID, "Введите дату начала периода в формате YYYY-MM-DD:"))
 	case StepInputStart:
-		start, err := time.Parse("2006-01-02", msg.Text)
+		start, err := parseDate(msg.Text)
 		if err != nil {
 			bot.Send(tgbotapi.NewMessage(chatID, "❌ Неверный формат. Введите дату начала в формате YYYY-MM-DD."))
-			delete(periodStates, chatID)
 			return
 		}
 		state.StartDate = start
 		state.Step = StepInputEnd
 		bot.Send(tgbotapi.NewMessage(chatID, "Введите дату окончания периода в формате YYYY-MM-DD:"))
 	case StepInputEnd:
-		end, err := time.Parse("2006-01-02", msg.Text)
+		end, err := parseDate(msg.Text)
 		if err != nil {
 			bot.Send(tgbotapi.NewMessage(chatID, "❌ Неверный формат. Введите дату окончания в формате YYYY-MM-DD."))
-			delete(periodStates, chatID)
 			return
 		}
 		state.EndDate = end
@@ -77,7 +76,6 @@ func HandleSetPeriodInput(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.
 		if err != nil {
 			log.Println("❌ Ошибка при создании периода:", err)
 			bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось сохранить период."))
-			delete(periodStates, chatID)
 			return
 		}
 
@@ -94,4 +92,15 @@ func HandleSetPeriodInput(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.
 
 func GetSetPeriodState(chatID int64) *SetPeriodState {
 	return periodStates[chatID]
+}
+
+func parseDate(input string) (time.Time, error) {
+	date, err := time.Parse("2006-01-02", input)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if date.Year() < 2025 {
+		return time.Time{}, fmt.Errorf("❌ Неверная дата. Убедитесь, что месяц есть в году или день существует в этом месяце (например, февраль — 28 или 29 дней).")
+	}
+	return date, nil
 }
