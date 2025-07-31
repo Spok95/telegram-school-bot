@@ -129,8 +129,9 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		isAdmin := chatID == adminID
 		go handlers.ShowPeriods(bot, database, chatID, isAdmin)
 	case "/export", "📥 Экспорт отчёта":
-		role := getUserFSMRole(chatID)
-		if role == "admin" || role == "administration" {
+		user, _ := db.GetUserByTelegramID(database, chatID)
+		log.Println("📤 Попытка экспорта. Роль:", *user.Role)
+		if *user.Role == "admin" || *user.Role == "administration" {
 
 			log.Println("📊 Роль пользователя:", getUserFSMRole(chatID))
 

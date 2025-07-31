@@ -111,7 +111,7 @@ func generateExport(scores []models.ScoreWithUser) (string, error) {
 	headers := []string{"ФИО ученика", "Класс", "Категория", "Баллы", "Комментарий", "Кто добавил", "Дата добавления"}
 	for i, h := range headers {
 		cell := fmt.Sprintf("%s1", string(rune('A'+i)))
-		f.SetCellValue("Sheet1", cell, h)
+		f.SetCellValue(sheet, cell, h)
 	}
 	// Данные
 	for i, s := range scores {
@@ -146,10 +146,13 @@ func GenerateReport(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, export
 		return fmt.Errorf("ошибка получения периода: %w", err)
 	}
 
+	log.Printf("📊 Получено %d записей для экспорта", len(scores))
+
 	filePath, err := generateExport(scores)
 	if err != nil {
 		return fmt.Errorf("ошибка создания Excel файла: %w", err)
 	}
+	log.Println("📄 Файл сохранён по пути:", filePath)
 
 	// Отправка Excel файла пользователю
 	doc := tgbotapi.NewDocument(chatID, tgbotapi.FilePath(filePath))

@@ -89,22 +89,34 @@ func ShowPendingUsers(database *sql.DB, bot *tgbotapi.BotAPI) {
 
 func HandleAdminCallback(callback *tgbotapi.CallbackQuery, database *sql.DB, bot *tgbotapi.BotAPI, adminID int64) {
 	data := callback.Data
+	messageID := callback.Message.MessageID
+	chatID := callback.Message.Chat.ID
+	adminUsername := callback.From.UserName
+
 	if strings.HasPrefix(data, "confirm_") {
 		idStr := strings.TrimPrefix(data, "confirm_")
+
 		err := ConfirmUser(database, bot, idStr, adminID)
 		if err != nil {
-			bot.Send(tgbotapi.NewMessage(adminID, "Ошибка подтверждения заявки."))
+			bot.Send(tgbotapi.NewMessage(adminID, "❌ Ошибка подтверждения заявки."))
 			return
 		}
-		bot.Send(tgbotapi.NewMessage(adminID, "✅ Пользователь подтверждён."))
+
+		newText := fmt.Sprintf("✅ Заявка подтверждена.\nПодтвердил: @%s", adminUsername)
+		edit := tgbotapi.NewEditMessageText(chatID, messageID, newText)
+		bot.Send(edit)
 	} else if strings.HasPrefix(data, "reject_") {
 		idStr := strings.TrimPrefix(data, "reject_")
+
 		err := RejectUser(database, bot, idStr, adminID)
 		if err != nil {
-			bot.Send(tgbotapi.NewMessage(adminID, "Ошибка отклонения заявки."))
+			bot.Send(tgbotapi.NewMessage(adminID, "❌ Ошибка отклонения заявки."))
 			return
 		}
-		bot.Send(tgbotapi.NewMessage(adminID, "❌ Заявка отклонена."))
+
+		newText := fmt.Sprintf("❌ Заявка отклонена.\nОтклонил: @%s", adminUsername)
+		edit := tgbotapi.NewEditMessageText(chatID, messageID, newText)
+		bot.Send(edit)
 	}
 	callbackConfig := tgbotapi.CallbackConfig{
 		CallbackQueryID: callback.ID,

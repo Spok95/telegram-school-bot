@@ -71,20 +71,31 @@ func HandleScoreApprovalCallback(callback *tgbotapi.CallbackQuery, bot *tgbotapi
 		return
 	}
 
+	chatID := callback.Message.Chat.ID
+	messageID := callback.Message.MessageID
+	adminUsername := callback.From.UserName
+
+	var resultText string
+
 	if action == "approve" {
 		err = db.ApproveScore(database, scoreID, adminID, time.Now())
 		if err == nil {
-			bot.Send(tgbotapi.NewMessage(adminID, fmt.Sprintf("✅ Заявка #%d подтверждена", scoreID)))
+			resultText = callback.Message.Text + fmt.Sprintf("\n\n✅ Подтверждено @%s", adminUsername)
 		} else {
 			log.Println("ошибка подтверждения заявки:", err)
+			resultText = "❌ Ошибка при подтверждении заявки."
 		}
 	} else {
 		err = db.RejectScore(database, scoreID, adminID, time.Now())
 		if err == nil {
-			bot.Send(tgbotapi.NewMessage(adminID, fmt.Sprintf("❌ Заявка #%d отклонена", scoreID)))
+			resultText = callback.Message.Text + fmt.Sprintf("\n\n❌ Отклонено @%s", adminUsername)
 		} else {
 			log.Println("ошибка отклонения заявки:", err)
+			resultText = "❌ Ошибка при отклонении заявки."
 		}
 	}
+	edit := tgbotapi.NewEditMessageText(chatID, messageID, resultText)
+	bot.Send(edit)
+
 	bot.Request(tgbotapi.NewCallback(callback.ID, "Обработано"))
 }

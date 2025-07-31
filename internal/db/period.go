@@ -87,18 +87,18 @@ func ListPeriods(database *sql.DB) ([]models.Period, error) {
 func GetScoresByPeriod(database *sql.DB, periodID int) ([]models.ScoreWithUser, error) {
 	query := `
 	SELECT
-		students.full_name AS student_name,
-		students.class_number,
-		students.class_letter,
-		categories.label AS category_label,
+		s.name AS student_name,
+		s.class_number,
+		s.class_letter,
+		c.label AS category_label,
 		scores.points,
 		scores.comment,
-		users.full_name AS added_by_name,
+		a.name AS added_by_name,
 		scores.created_at
 	FROM scores
-	JOIN students ON scores.student_id = students.id
-	JOIN users ON scores.created_by = users.id
-	JOIN categories ON scores.category_id = categories.id
+	JOIN users s ON scores.student_id = s.id
+	JOIN users a ON scores.created_by = a.id
+	JOIN categories c ON scores.category_id = c.id
 	WHERE scores.period_id = ?
 	ORDER BY scores.created_at ASC;
 	`
