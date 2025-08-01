@@ -64,8 +64,8 @@ func HandleStudentCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, dat
 	chatID := cb.Message.Chat.ID
 	data := cb.Data
 
-	if strings.HasPrefix(data, "student_class_num:") {
-		numStr := strings.TrimPrefix(data, "student_class_num:")
+	if strings.HasPrefix(data, "student_class_num_") {
+		numStr := strings.TrimPrefix(data, "student_class_num_")
 		num, err := strconv.Atoi(numStr)
 		if err != nil || num < 1 || num > 11 {
 			bot.Send(tgbotapi.NewMessage(chatID, "Некорректный номер класса."))
@@ -80,8 +80,8 @@ func HandleStudentCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, dat
 		return
 	}
 
-	if strings.HasPrefix(data, "student_class_letter:") {
-		letter := strings.TrimPrefix(data, "student_class_letter:")
+	if strings.HasPrefix(data, "student_class_letter_") {
+		letter := strings.TrimPrefix(data, "student_class_letter_")
 		studentData[chatID].ClassLetter = letter
 		studentFSM[chatID] = StateStudentWaitingConfirm
 
@@ -105,7 +105,7 @@ func HandleStudentCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, dat
 func showClassNumberButtons(chatID int64, bot *tgbotapi.BotAPI) {
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for i := 1; i <= 11; i++ {
-		btn := tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d класс", i), fmt.Sprintf("student_class_num:%d", i))
+		btn := tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d класс", i), fmt.Sprintf("student_class_num_%d", i))
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(btn))
 	}
 	msg := tgbotapi.NewMessage(chatID, "Выберите номер класса:")
@@ -117,7 +117,7 @@ func showClassLetterButtons(chatID int64, bot *tgbotapi.BotAPI) {
 	letters := []string{"А", "Б", "В", "Г", "Д"}
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for _, l := range letters {
-		btn := tgbotapi.NewInlineKeyboardButtonData(l, fmt.Sprintf("student_class_letter:%s", l))
+		btn := tgbotapi.NewInlineKeyboardButtonData(l, fmt.Sprintf("student_class_letter_%s", l))
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(btn))
 	}
 	msg := tgbotapi.NewMessage(chatID, "Выберите букву класса:")

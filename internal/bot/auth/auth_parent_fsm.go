@@ -144,7 +144,7 @@ func sendParentClassNumberButtons(chatID int64, bot *tgbotapi.BotAPI) {
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for i := 1; i <= 11; i++ {
 		text := fmt.Sprintf("%d класс", i)
-		data := fmt.Sprintf("parent_class_num:%d", i)
+		data := fmt.Sprintf("parent_class_num_%d", i)
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(text, data)))
 	}
 	msg := tgbotapi.NewMessage(chatID, "Выберите номер класса ребёнка:")
@@ -156,7 +156,7 @@ func sendParentClassLetterButtons(chatID int64, bot *tgbotapi.BotAPI) {
 	letters := []string{"А", "Б", "В", "Г", "Д"}
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for _, l := range letters {
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(l, "parent_class_letter:"+l)))
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(l, "parent_class_letter_"+l)))
 	}
 	msg := tgbotapi.NewMessage(chatID, "Выберите букву класса:")
 	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)

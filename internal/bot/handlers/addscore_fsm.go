@@ -31,7 +31,7 @@ func StartAddScoreFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 	number := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
 	var buttons [][]tgbotapi.InlineKeyboardButton
 	for _, num := range number {
-		callback := fmt.Sprintf("add_class_num:%d", num)
+		callback := fmt.Sprintf("add_class_num_%d", num)
 		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d класс", num), callback)))
 	}
 	msgOut := tgbotapi.NewMessage(chatID, "Выберите номер класса:")
@@ -46,8 +46,8 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		return
 	}
 	data := cq.Data
-	if strings.HasPrefix(data, "add_class_num:") {
-		numStr := strings.TrimPrefix(data, "add_class_num:")
+	if strings.HasPrefix(data, "add_class_num_") {
+		numStr := strings.TrimPrefix(data, "add_class_num_")
 		num, _ := strconv.ParseInt(numStr, 10, 64)
 		state.ClassNumber = num
 		state.Step = 2
@@ -55,13 +55,13 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		letters := []string{"А", "Б", "В", "Г", "Д"}
 		var buttons [][]tgbotapi.InlineKeyboardButton
 		for _, l := range letters {
-			callback := fmt.Sprintf("add_class_letter:%s", l)
+			callback := fmt.Sprintf("add_class_letter_%s", l)
 			buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(l, callback)))
 		}
 		edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "Выберите букву класса:", tgbotapi.NewInlineKeyboardMarkup(buttons...))
 		bot.Send(edit)
-	} else if strings.HasPrefix(data, "add_class_letter:") {
-		state.ClassLetter = strings.TrimPrefix(data, "add_class_letter:")
+	} else if strings.HasPrefix(data, "add_class_letter_") {
+		state.ClassLetter = strings.TrimPrefix(data, "add_class_letter_")
 		state.Step = 3
 
 		students, _ := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
@@ -111,7 +111,8 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 
 	} else if data == "add_students_done" {
 		state.Step = 4
-		categories, _ := db.GetAllCategories(database)
+		user, _ := db.GetUserByTelegramID(database, chatID)
+		categories, _ := db.GetAllCategories(database, string(*user.Role))
 		var buttons [][]tgbotapi.InlineKeyboardButton
 		for _, c := range categories {
 			callback := fmt.Sprintf("addscore_category_%d", c.ID)

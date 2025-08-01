@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"github.com/Spok95/telegram-school-bot/internal/models"
+	"log"
 )
 
 func SeedScoreLevels(database *sql.DB) error {
@@ -19,6 +20,10 @@ func SeedScoreLevels(database *sql.DB) error {
 		if err != nil {
 			return err
 		}
+	}
+	_, err := database.Exec(`INSERT OR IGNORE INTO categories (id, name, label) VALUES (?, ?, ?)`, 999, "Аукцион", "Аукцион")
+	if err != nil {
+		log.Fatalf("ошибка вставки категории Аукцион: %v", err)
 	}
 
 	levels := []models.ScoreLevel{
@@ -40,7 +45,7 @@ ON CONFLICT(value, label, category_id) DO NOTHING
 	}
 	// Добавление классов (1А - 11Д), если таблица пустая
 	var count int
-	err := database.QueryRow(`SELECT COUNT(*) FROM classes`).Scan(&count)
+	err = database.QueryRow(`SELECT COUNT(*) FROM classes`).Scan(&count)
 	if err != nil {
 		return fmt.Errorf("ошибка при проверке таблицы classes: %w", err)
 	}

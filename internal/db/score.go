@@ -100,7 +100,8 @@ func ApproveScore(database *sql.DB, scoreID int64, adminID int64, approvedAt tim
 	var studentID int64
 	var points int
 	var scoreType string
-	err = tx.QueryRow(`SELECT student_id, points, type FROM scores WHERE id = ? AND status = 'pending'`, scoreID).Scan(&studentID, &points, &scoreType)
+	var categoryID int64
+	err = tx.QueryRow(`SELECT student_id, points, type, category_id FROM scores WHERE id = ? AND status = 'pending'`, scoreID).Scan(&studentID, &points, &scoreType, &categoryID)
 	if err != nil {
 		return fmt.Errorf("заявка не найдена: %v", err)
 	}
@@ -135,7 +136,7 @@ func ApproveScore(database *sql.DB, scoreID int64, adminID int64, approvedAt tim
 		if err != nil {
 			return err
 		}
-	} else if scoreType == "remove" {
+	} else if scoreType == "remove" && categoryID != 999 {
 		_, err = tx.Exec(`UPDATE classes SET collective_score = collective_score - ? WHERE id = (SELECT class_id FROM users WHERE id = ?)`, adjust*30/100, studentID)
 		if err != nil {
 			return err
@@ -147,4 +148,16 @@ func ApproveScore(database *sql.DB, scoreID int64, adminID int64, approvedAt tim
 func RejectScore(database *sql.DB, scoreID int64, adminID int64, rejectedAt time.Time) error {
 	_, err := database.Exec(`UPDATE scores SET status = 'rejected', approved_by = ?, approved_at = ? WHERE id = ?`, adminID, rejectedAt, scoreID)
 	return err
+}
+
+func GetApprovedScoreSum(database *sql.DB, studentID int64) (int, error) {
+	var total int
+	err := database.QueryRow(`
+		SELECT IFNULL(SUM(points), 0)
+		FROM scores
+		WHERE student_id = ? AND status = 'approved'`, studentID).Scan(&total)
+	if err != nil {
+		return 0, fmt.Errorf("ошибка при получении баланса ученика %d: %v", studentID, err)
+	}
+	return total, nil
 }

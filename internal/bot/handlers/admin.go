@@ -189,13 +189,6 @@ func RejectUser(database *sql.DB, bot *tgbotapi.BotAPI, name string, adminID int
 }
 
 func NotifyAdminsAboutScoreRequest(bot *tgbotapi.BotAPI, database *sql.DB, score models.Score, studentName string) {
-	adminIDStr := os.Getenv("ADMIN_ID")
-	adminID, err := strconv.ParseInt(adminIDStr, 10, 64)
-	if err != nil {
-		log.Println("Ошибка чтения ADMIN_ID:", err)
-		return
-	}
-
 	categoryName, err := db.GetCategoryByID(database, int(score.CategoryID))
 	if err != nil {
 		log.Println("Ошибка получения категории:", err)
@@ -222,8 +215,25 @@ func NotifyAdminsAboutScoreRequest(bot *tgbotapi.BotAPI, database *sql.DB, score
 		classLetter = *student.ClassLetter
 		classNumber = *student.ClassNumber
 	}
-	msg := fmt.Sprintf("🆕 Новая заявка на %s:\n👤 Ученик: %s\n🏫 Класс: %d%s\n📚 Категория: %s\n🎯 Баллы: %d\n💬 Комментарий: %s\n\nОжидает подтверждения.",
+	msgText := fmt.Sprintf(
+		"🆕 Новая заявка на %s:\n👤 Ученик: %s\n🏫 Класс: %d%s\n📚 Категория: %s\n🎯 Баллы: %d\n💬 Комментарий: %s\n\nОжидает подтверждения.",
 		action, studentName, classNumber, classLetter, categoryName, score.Points, comment,
 	)
-	bot.Send(tgbotapi.NewMessage(adminID, msg))
+
+	// 📢 Получаем всех админов и администрацию
+	rows, err := database.Query(`SELECT telegram_id FROM users WHERE role IN ('admin', 'administration') AND confirmed = 1 AND is_active = 1`)
+	if err != nil {
+		log.Println("❌ Ошибка при получении списка админов:", err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var tgID int64
+		if err := rows.Scan(&tgID); err != nil {
+			log.Println("❌ Ошибка чтения telegram_id:", err)
+			continue
+		}
+		bot.Send(tgbotapi.NewMessage(tgID, msgText))
+	}
 }

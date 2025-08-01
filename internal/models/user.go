@@ -3,10 +3,11 @@ package models
 type Role string
 
 const (
-	Student Role = "student"
-	Teacher Role = "teacher"
-	Parent  Role = "parent"
-	Admin   Role = "admin"
+	Admin          Role = "admin"
+	Administration Role = "administration"
+	Teacher        Role = "teacher"
+	Student        Role = "student"
+	Parent         Role = "parent"
 )
 
 type User struct {

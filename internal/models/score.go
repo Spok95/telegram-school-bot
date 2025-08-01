@@ -19,8 +19,9 @@ type Score struct {
 }
 
 type Category struct {
-	ID   int
-	Name string
+	ID    int
+	Name  string
+	Label string
 }
 
 type ScoreLevel struct {

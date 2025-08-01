@@ -39,8 +39,15 @@ func GetLevelByID(database *sql.DB, levelID int) (*models.ScoreLevel, error) {
 }
 
 // Получение всех категорий
-func GetAllCategories(database *sql.DB) ([]models.Category, error) {
-	rows, err := database.Query(`SELECT id, name FROM categories`)
+func GetAllCategories(database *sql.DB, role string) ([]models.Category, error) {
+	var rows *sql.Rows
+	var err error
+
+	if role == "admin" || role == "administration" {
+		rows, err = database.Query("SELECT id, name, label FROM categories ORDER BY id")
+	} else {
+		rows, err = database.Query("SELECT id, name, label FROM categories WHERE name != 'Аукцион' ORDER BY id")
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +56,7 @@ func GetAllCategories(database *sql.DB) ([]models.Category, error) {
 	var categories []models.Category
 	for rows.Next() {
 		var c models.Category
-		if err := rows.Scan(&c.ID, &c.Name); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Label); err != nil {
 			return nil, err
 		}
 		categories = append(categories, c)

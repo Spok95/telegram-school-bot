@@ -68,6 +68,10 @@ func main() {
 			if handlers.GetSetPeriodState(userID) != nil {
 				handlers.HandleSetPeriodInput(bot, database, update.Message)
 			}
+			if handlers.GetAuctionState(userID) != nil {
+				handlers.HandleAuctionText(bot, database, update.Message)
+				continue
+			}
 
 			handleMessage(bot, database, update.Message)
 			continue
@@ -137,6 +141,8 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 
 			go handlers.StartExportFSM(bot, msg)
 		}
+	case "/auction", "🎯 Аукцион":
+		go handlers.StartAuctionFSM(bot, database, msg)
 	default:
 		role := getUserFSMRole(chatID)
 		if role == "" {
@@ -174,14 +180,20 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		return
 	}
 
-	if strings.HasPrefix(data, "student_class_") ||
-		strings.HasPrefix(data, "student_class_letter:") {
+	if strings.HasPrefix(data, "student_class_num_") ||
+		strings.HasPrefix(data, "student_class_num_") {
 		auth.HandleStudentCallback(cb, bot, database)
 		return
 	}
 
-	if strings.HasPrefix(data, "parent_class_num:") {
-		numStr := strings.TrimPrefix(data, "parent_class_num:")
+	if strings.HasPrefix(data, "student_class_letter_") ||
+		strings.HasPrefix(data, "student_class_letter_") {
+		auth.HandleStudentCallback(cb, bot, database)
+		return
+	}
+
+	if strings.HasPrefix(data, "parent_class_num_") {
+		numStr := strings.TrimPrefix(data, "parent_class_num_")
 		num, err := strconv.Atoi(numStr)
 		if err != nil {
 			bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Неверный номер класса"))
@@ -191,8 +203,8 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		return
 	}
 
-	if strings.HasPrefix(data, "parent_class_letter:") {
-		letter := strings.TrimPrefix(data, "parent_class_letter:")
+	if strings.HasPrefix(data, "parent_class_letter_") {
+		letter := strings.TrimPrefix(data, "parent_class_letter_")
 		auth.HandleParentClassLetter(chatID, letter, bot, database)
 		return
 	}
@@ -220,6 +232,14 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 	}
 	if strings.HasPrefix(data, "export_type_") || strings.HasPrefix(data, "export_period_") {
 		handlers.HandleExportCallback(bot, database, cb)
+		return
+	}
+	if strings.HasPrefix(data, "auction_mode_") ||
+		strings.HasPrefix(data, "auction_class_number_") ||
+		strings.HasPrefix(data, "auction_class_letter_") ||
+		strings.HasPrefix(data, "auction_select_student_") ||
+		data == "auction_students_done" {
+		handlers.HandleAuctionCallback(bot, database, cb)
 		return
 	}
 
