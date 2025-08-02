@@ -151,6 +151,7 @@ func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 		log.Println("❌ Ошибка получения пользователя:", err)
 		return
 	}
+	_ = db.SetActivePeriod(database)
 	period, err := db.GetActivePeriod(database)
 	if err != nil || period == nil {
 		bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось определить активный период."))

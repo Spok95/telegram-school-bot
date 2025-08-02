@@ -21,25 +21,20 @@ func GetActivePeriod(database *sql.DB) (*models.Period, error) {
 	return &p, nil
 }
 
-func SetActivePeriod(database *sql.DB, periodID int64) error {
-	tx, err := database.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+func SetActivePeriod(database *sql.DB) error {
+	now := time.Now()
 
-	// Снимаем флаг is_active у всех периодов
-	_, err = tx.Exec(`UPDATE periods SET is_active = 0`)
+	_, err := database.Exec(`UPDATE periods SET is_active = 0`)
 	if err != nil {
 		return err
 	}
 
-	// Устанавливаем is_active = 1 выбранному периоду
-	_, err = tx.Exec(`UPDATE periods SET is_active = 1 WHERE id = ?`, periodID)
+	_, err = database.Exec(`UPDATE periods SET is_active = 1 WHERE start_date <= ? AND end_date >= ?`, now, now)
 	if err != nil {
 		return err
 	}
-	return tx.Commit()
+
+	return nil
 }
 
 func CreatePeriod(database *sql.DB, p models.Period) (int64, error) {
@@ -55,12 +50,6 @@ func CreatePeriod(database *sql.DB, p models.Period) (int64, error) {
 		return 0, err
 	}
 	return res.LastInsertId()
-}
-
-func GetLastInsertID(database *sql.DB) int64 {
-	var id int64
-	_ = database.QueryRow("SELECT last_insert_rowid();").Scan(&id)
-	return id
 }
 
 func ListPeriods(database *sql.DB) ([]models.Period, error) {

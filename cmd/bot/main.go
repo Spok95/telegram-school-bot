@@ -44,6 +44,11 @@ func main() {
 		log.Fatal("Миграция не удалась:", err)
 	}
 
+	err = db.SetActivePeriod(database)
+	if err != nil {
+		log.Println("❌ Ошибка установки активного периода:", err)
+	}
+
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 	updates := bot.GetUpdatesChan(u)

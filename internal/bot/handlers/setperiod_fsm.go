@@ -70,9 +70,8 @@ func HandleSetPeriodInput(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.
 			Name:      state.Name,
 			StartDate: state.StartDate,
 			EndDate:   state.EndDate,
-			IsActive:  true,
 		}
-		periodID, err := db.CreatePeriod(database, period)
+		_, err = db.CreatePeriod(database, period)
 		if err != nil {
 			log.Println("❌ Ошибка при создании периода:", err)
 			bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось сохранить период."))
@@ -80,12 +79,12 @@ func HandleSetPeriodInput(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.
 		}
 
 		// Сбрасываем старые периоды и активируем этот
-		err = db.SetActivePeriod(database, periodID)
+		err = db.SetActivePeriod(database)
 		if err != nil {
 			log.Println("❌ Ошибка при установке активного периода:", err)
 			delete(periodStates, chatID)
 		}
-		bot.Send(tgbotapi.NewMessage(chatID, "✅ Новый период успешно создан и активирован."))
+		bot.Send(tgbotapi.NewMessage(chatID, "✅ Новый период успешно создан."))
 		delete(periodStates, chatID)
 	}
 }

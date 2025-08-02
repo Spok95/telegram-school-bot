@@ -60,6 +60,7 @@ func HandleExportCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 		state.Step = 2
 
 		// Показываем периоды
+		_ = db.SetActivePeriod(database)
 		periods, err := db.ListPeriods(database)
 		if err != nil || len(periods) == 0 {
 			bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось загрузить периоды"))

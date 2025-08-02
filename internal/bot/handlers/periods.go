@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"log"
-	"strconv"
 )
 
 func ShowPeriods(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, isAdmin bool) {
@@ -36,13 +34,7 @@ func ShowPeriods(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, isAdmin b
 func HandlePeriodCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, database *sql.DB) {
 	data := cb.Data
 	if !cb.From.IsBot && data != "" && data[:15] == "activate_period" {
-		idStr := data[len("activate_period_"):]
-		id, err := strconv.ParseInt(idStr, 10, 64)
-		if err != nil {
-			log.Println("⚠️ Неверный ID периода:", err)
-			return
-		}
-		err = db.SetActivePeriod(database, id)
+		err := db.SetActivePeriod(database)
 		if err != nil {
 			bot.Send(tgbotapi.NewMessage(cb.Message.Chat.ID, "❌ Не удалось активировать период."))
 			return
