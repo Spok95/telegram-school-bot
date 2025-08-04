@@ -77,6 +77,10 @@ func main() {
 				handlers.HandleAuctionText(bot, database, update.Message)
 				continue
 			}
+			if handlers.GetExportState(userID) != nil {
+				handlers.HandleExportText(bot, database, update.Message)
+				continue
+			}
 
 			handleMessage(bot, database, update.Message)
 			continue
@@ -129,10 +133,14 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		if chatID == adminID {
 			go handlers.ShowPendingScores(bot, database, chatID)
 		}
+	case "📥 Заявки на авторизацию":
+		if chatID == adminID {
+			go handlers.ShowPendingUsers(bot, database, chatID)
+		}
 	case "/setperiod", "📅 Установить период":
 		role := getUserFSMRole(chatID)
 		if role == "admin" || role == "administration" {
-			go handlers.StartSetPeriodFSM(bot, database, msg)
+			go handlers.StartSetPeriodFSM(bot, msg)
 		}
 	case "/periods":
 		isAdmin := chatID == adminID
@@ -235,7 +243,13 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		handlers.HandlePeriodCallback(cb, bot, database)
 		return
 	}
-	if strings.HasPrefix(data, "export_type_") || strings.HasPrefix(data, "export_period_") {
+	if strings.HasPrefix(data, "export_type_") ||
+		strings.HasPrefix(data, "export_period_") ||
+		strings.HasPrefix(data, "export_mode_") ||
+		strings.HasPrefix(data, "export_class_number_") ||
+		strings.HasPrefix(data, "export_class_letter_") ||
+		strings.HasPrefix(data, "export_select_student_") ||
+		data == "export_students_done" {
 		handlers.HandleExportCallback(bot, database, cb)
 		return
 	}

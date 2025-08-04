@@ -20,7 +20,7 @@ func ShowPendingScores(bot *tgbotapi.BotAPI, database *sql.DB, adminID int64) {
 		return
 	}
 	if len(scores) == 0 {
-		bot.Send(tgbotapi.NewMessage(adminID, "Нет ожидающих подтверждения заявок."))
+		bot.Send(tgbotapi.NewMessage(adminID, "✅ Нет ожидающих подтверждения заявок."))
 		return
 	}
 

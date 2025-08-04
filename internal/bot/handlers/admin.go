@@ -13,11 +13,24 @@ import (
 	"strings"
 )
 
-func ShowPendingUsers(database *sql.DB, bot *tgbotapi.BotAPI) {
+func ShowPendingUsers(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
 	adminIDStr := os.Getenv("ADMIN_ID")
 	adminID, err := strconv.ParseInt(adminIDStr, 10, 64)
 	if err != nil {
 		log.Println("Ошибка при чтении ADMIN_ID из .env:", err)
+		return
+	}
+
+	var count int
+	err = database.QueryRow(`SELECT COUNT(*) FROM users WHERE confirmed = 0 AND role != 'admin'`).Scan(&count)
+	if err != nil {
+		log.Println("Ошибка при подсчете заявок:", err)
+		bot.Send(tgbotapi.NewMessage(chatID, "❌ Ошибка при проверке заявок."))
+		return
+	}
+
+	if count == 0 {
+		bot.Send(tgbotapi.NewMessage(chatID, "✅ Нет ожидающих подтверждения заявок."))
 		return
 	}
 

@@ -62,14 +62,16 @@ func HandleAuctionCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 		mode := strings.TrimPrefix(data, "auction_mode_")
 		state.Mode = mode
 		state.Step = AuctionStepClassNumber
-		promptClassNumber(cq, bot)
+		text := fmt.Sprintf("auction_class_number_")
+		promptClassNumber(cq, bot, text)
 
 	case strings.HasPrefix(data, "auction_class_number_"):
 		numStr := strings.TrimPrefix(data, "auction_class_number_")
 		classNumber, _ := strconv.ParseInt(numStr, 10, 64)
 		state.ClassNumber = classNumber
 		state.Step = AuctionStepClassLetter
-		promptClassLetter(cq, bot)
+		text := fmt.Sprintf("auction_class_letter_")
+		promptClassLetter(cq, bot, text)
 
 	case strings.HasPrefix(data, "auction_class_letter_"):
 		letter := strings.TrimPrefix(data, "auction_class_letter_")
@@ -181,23 +183,23 @@ func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 	delete(auctionStates, chatID)
 }
 
-func promptClassNumber(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI) {
+func promptClassNumber(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, text string) {
 	msg := tgbotapi.NewMessage(cq.Message.Chat.ID, "🔢 Выберите номер класса:")
 	rows := [][]tgbotapi.InlineKeyboardButton{}
 	for i := 1; i <= 11; i++ {
-		btn := tgbotapi.NewInlineKeyboardButtonData(strconv.Itoa(i), fmt.Sprintf("auction_class_number_%d", i))
+		btn := tgbotapi.NewInlineKeyboardButtonData(strconv.Itoa(i), fmt.Sprintf("%s%d", text, i))
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(btn))
 	}
 	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
 	bot.Send(msg)
 }
 
-func promptClassLetter(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI) {
+func promptClassLetter(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, text string) {
 	msg := tgbotapi.NewMessage(cq.Message.Chat.ID, "🔠 Выберите букву класса:")
 	letters := []string{"А", "Б", "В", "Г", "Д"}
 	row := []tgbotapi.InlineKeyboardButton{}
 	for _, l := range letters {
-		row = append(row, tgbotapi.NewInlineKeyboardButtonData(l, "auction_class_letter_"+l))
+		row = append(row, tgbotapi.NewInlineKeyboardButtonData(l, text+l))
 	}
 	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(row)
 	bot.Send(msg)

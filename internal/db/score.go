@@ -161,3 +161,206 @@ func GetApprovedScoreSum(database *sql.DB, studentID int64) (int, error) {
 	}
 	return total, nil
 }
+
+func GetScoresByPeriod(database *sql.DB, periodID int) ([]models.ScoreWithUser, error) {
+	query := `
+	SELECT
+		s.name AS student_name,
+		s.class_number,
+		s.class_letter,
+		c.label AS category_label,
+		scores.points,
+		scores.comment,
+		a.name AS added_by_name,
+		scores.created_at
+	FROM scores
+	JOIN users s ON scores.student_id = s.id
+	JOIN users a ON scores.created_by = a.id
+	JOIN categories c ON scores.category_id = c.id
+	WHERE scores.period_id = ? AND scores.status = 'approved'
+	ORDER BY scores.created_at ASC;
+	`
+	rows, err := database.Query(query, periodID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []models.ScoreWithUser
+	for rows.Next() {
+		var s models.ScoreWithUser
+		if err := rows.Scan(&s.StudentName, &s.ClassNumber, &s.ClassLetter, &s.CategoryLabel, &s.Points, &s.Comment, &s.AddedByName, &s.CreatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, s)
+	}
+	return result, nil
+}
+
+// Для отчёта по ученику
+func GetScoresByStudentAndDateRange(database *sql.DB, studentID int64, from, to time.Time) ([]models.ScoreWithUser, error) {
+	query := `
+	SELECT s.*, u.name as student_name, u.class_number, u.class_letter, c.name as category, ua.name as added_by_name
+	FROM scores s
+	JOIN users u ON u.id = s.student_id
+	JOIN users ua ON ua.id = s.created_by
+	JOIN categories c ON c.id = s.category_id
+	WHERE s.student_id = ? AND s.created_at BETWEEN ? AND ? AND s.status = 'approved'
+	ORDER BY s.created_at
+	`
+	rows, err := database.Query(query, studentID, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []models.ScoreWithUser
+	for rows.Next() {
+		var s models.ScoreWithUser
+		err := rows.Scan(
+			&s.ID, &s.StudentID, &s.CategoryID, &s.CategoryLabel, &s.Points,
+			&s.Type, &s.Comment, &s.Status, &s.ApprovedBy, &s.ApprovedAt,
+			&s.CreatedBy, &s.CreatedAt, &s.PeriodID,
+			&s.StudentName, &s.ClassNumber, &s.ClassLetter, &s.AddedByName,
+		)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, s)
+	}
+	return result, nil
+}
+
+// Для отчёта по классу
+func GetScoresByClassAndDateRange(database *sql.DB, classNumber int, classLetter string, from, to time.Time) ([]models.ScoreWithUser, error) {
+	query := `
+	SELECT s.*, u.name as student_name, u.class_number, u.class_letter, c.name as category, ua.name as added_by_name
+	FROM scores s
+	JOIN users u ON u.id = s.student_id
+	JOIN users ua ON ua.id = s.created_by
+	JOIN categories c ON c.id = s.category_id
+	WHERE u.role = 'student' u.class_number = ? AND u.class_letter = ? AND s.created_at BETWEEN ? AND ? AND s.status = 'approved'
+	ORDER BY u.name
+	`
+	rows, err := database.Query(query, classNumber, classLetter, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []models.ScoreWithUser
+	for rows.Next() {
+		var s models.ScoreWithUser
+		err := rows.Scan(
+			&s.ID, &s.StudentID, &s.CategoryID, &s.CategoryLabel, &s.Points,
+			&s.Type, &s.Comment, &s.Status, &s.ApprovedBy, &s.ApprovedAt,
+			&s.CreatedBy, &s.CreatedAt, &s.PeriodID,
+			&s.StudentName, &s.ClassNumber, &s.ClassLetter, &s.AddedByName,
+		)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, s)
+	}
+	return result, nil
+}
+
+// Для отчёта по школе
+func GetScoresByDateRange(database *sql.DB, from, to time.Time) ([]models.ScoreWithUser, error) {
+	query := `
+	SELECT s.*, u.name AS student_name, u.class_number, u.class_letter, c.name AS category_label,
+		a.name AS added_by_name
+	FROM scores s
+	JOIN users u ON u.id = s.student_id
+	JOIN categories c ON c.id = s.category_id
+	JOIN users a ON a.id = s.created_by
+	WHERE u.role = 'student' AND s.created_at BETWEEN ? AND ? AND s.status = 'approved'
+	ORDER BY s.created_at
+	`
+	rows, err := database.Query(query, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []models.ScoreWithUser
+	for rows.Next() {
+		var r models.ScoreWithUser
+		err := rows.Scan(
+			&r.ID, &r.StudentID, &r.CategoryID, &r.CategoryLabel, &r.Points,
+			&r.Type, &r.Comment, &r.Status, &r.ApprovedBy, &r.ApprovedAt,
+			&r.CreatedBy, &r.CreatedAt, &r.PeriodID,
+			&r.StudentName, &r.ClassNumber, &r.ClassLetter, &r.AddedByName,
+		)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+	return results, nil
+}
+
+func GetScoresByStudentAndPeriod(database *sql.DB, selectedStudentID int64, periodID int) ([]models.ScoreWithUser, error) {
+	query := `
+	SELECT s.*, u.name as student_name, u.class_number, u.class_letter, c.name as category, ua.name as added_by_name
+	FROM scores s
+	JOIN users u ON u.id = s.student_id
+	JOIN users ua ON ua.id = s.created_by
+	JOIN categories c ON c.id = s.category_id
+	WHERE s.student_id = ? AND s.period_id = ? AND s.status = 'approved'
+	ORDER BY s.created_at
+	`
+	rows, err := database.Query(query, selectedStudentID, periodID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []models.ScoreWithUser
+	for rows.Next() {
+		var s models.ScoreWithUser
+		err := rows.Scan(
+			&s.ID, &s.StudentID, &s.CategoryID, &s.CategoryLabel, &s.Points,
+			&s.Type, &s.Comment, &s.Status, &s.ApprovedBy, &s.ApprovedAt,
+			&s.CreatedBy, &s.CreatedAt, &s.PeriodID,
+			&s.StudentName, &s.ClassNumber, &s.ClassLetter, &s.AddedByName,
+		)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, s)
+	}
+	return result, nil
+}
+
+func GetScoresByClassAndPeriod(database *sql.DB, classNumber int64, classLetter string, periodID int64) ([]models.ScoreWithUser, error) {
+	query := `
+	SELECT s.*, u.name as student_name, u.class_number, u.class_letter, c.name as category, ua.name as added_by_name
+	FROM scores s
+	JOIN users u ON u.id = s.student_id
+	JOIN users ua ON ua.id = s.created_by
+	JOIN categories c ON c.id = s.category_id
+	WHERE u.class_number = ? AND u.class_letter = ? AND s.period_id = ? AND s.status = 'approved'
+	ORDER BY u.name
+	`
+	rows, err := database.Query(query, classNumber, classLetter, periodID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []models.ScoreWithUser
+	for rows.Next() {
+		var s models.ScoreWithUser
+		err := rows.Scan(
+			&s.ID, &s.StudentID, &s.CategoryID, &s.CategoryLabel, &s.Points,
+			&s.Type, &s.Comment, &s.Status, &s.ApprovedBy, &s.ApprovedAt,
+			&s.CreatedBy, &s.CreatedAt, &s.PeriodID,
+			&s.StudentName, &s.ClassNumber, &s.ClassLetter, &s.AddedByName,
+		)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, s)
+	}
+	return result, nil
+}

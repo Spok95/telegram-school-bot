@@ -2,7 +2,6 @@ package auth
 
 import (
 	"database/sql"
-	"github.com/Spok95/telegram-school-bot/internal/bot/handlers"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -37,8 +36,6 @@ func HandleStaffFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *sq
 			return
 		}
 		bot.Send(tgbotapi.NewMessage(chatID, "Заявка на регистрацию отправлена администратору. Ожидайте подтверждения."))
-
-		handlers.ShowPendingUsers(database, bot)
 
 		delete(staffFSM, chatID)
 		delete(staffData, chatID)

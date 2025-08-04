@@ -25,5 +25,9 @@ type User struct {
 }
 
 type Class struct {
-	Name string
+	ID              int64  `db:"id"`
+	Name            string `db:"name"`
+	Number          int64  `db:"number"`
+	Letter          string `db:"letter"`
+	CollectiveScore int64  `db:"collective_score"`
 }

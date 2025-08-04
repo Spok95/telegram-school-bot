@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 	"github.com/Spok95/telegram-school-bot/internal/models"
 	"time"
 )
@@ -16,8 +17,8 @@ func GetActivePeriod(database *sql.DB) (*models.Period, error) {
 		return nil, err
 	}
 
-	p.StartDate, _ = time.Parse("2006-01-02", startStr)
-	p.EndDate, _ = time.Parse("2006-01-02", endStr)
+	p.StartDate, _ = time.Parse("02.01.2006", startStr)
+	p.EndDate, _ = time.Parse("02.01.2006", endStr)
 	return &p, nil
 }
 
@@ -38,12 +39,16 @@ func SetActivePeriod(database *sql.DB) error {
 }
 
 func CreatePeriod(database *sql.DB, p models.Period) (int64, error) {
+	if !p.StartDate.Before(p.EndDate) {
+		return 0, fmt.Errorf("дата окончания не может быть раньше даты начала")
+	}
+
 	res, err := database.Exec(`
 		INSERT INTO periods (name, start_date, end_date, is_active) 
 		VALUES (?, ?, ?, ?)`,
 		p.Name,
-		p.StartDate.Format("2006-01-02"),
-		p.EndDate.Format("2006-01-02"),
+		p.StartDate.Format("02.01.2006"),
+		p.EndDate.Format("02.01.2006"),
 		p.IsActive,
 	)
 	if err != nil {
@@ -66,43 +71,9 @@ func ListPeriods(database *sql.DB) ([]models.Period, error) {
 		if err := rows.Scan(&p.ID, &p.Name, &startStr, &endStr, &p.IsActive); err != nil {
 			continue
 		}
-		p.StartDate, _ = time.Parse("2006-01-02", startStr)
-		p.EndDate, _ = time.Parse("2006-01-02", endStr)
+		p.StartDate, _ = time.Parse("02.01.2006", startStr)
+		p.EndDate, _ = time.Parse("02.01.2006", endStr)
 		result = append(result, p)
-	}
-	return result, nil
-}
-
-func GetScoresByPeriod(database *sql.DB, periodID int) ([]models.ScoreWithUser, error) {
-	query := `
-	SELECT
-		s.name AS student_name,
-		s.class_number,
-		s.class_letter,
-		c.label AS category_label,
-		scores.points,
-		scores.comment,
-		a.name AS added_by_name,
-		scores.created_at
-	FROM scores
-	JOIN users s ON scores.student_id = s.id
-	JOIN users a ON scores.created_by = a.id
-	JOIN categories c ON scores.category_id = c.id
-	WHERE scores.period_id = ?
-	ORDER BY scores.created_at ASC;
-	`
-	rows, err := database.Query(query, periodID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var result []models.ScoreWithUser
-	for rows.Next() {
-		var s models.ScoreWithUser
-		if err := rows.Scan(&s.StudentName, &s.ClassNumber, &s.ClassLetter, &s.CategoryLabel, &s.Points, &s.Comment, &s.AddedByName, &s.CreatedAt); err != nil {
-			return nil, err
-		}
-		result = append(result, s)
 	}
 	return result, nil
 }
@@ -116,7 +87,7 @@ func GetPeriodByID(database *sql.DB, id int) (*models.Period, error) {
 	if err != nil {
 		return nil, err
 	}
-	p.StartDate, _ = time.Parse("2006-01-02", startStr)
-	p.EndDate, _ = time.Parse("2006-01-02", endStr)
+	p.StartDate, _ = time.Parse("02.01.2006", startStr)
+	p.EndDate, _ = time.Parse("02.01.2006", endStr)
 	return &p, nil
 }

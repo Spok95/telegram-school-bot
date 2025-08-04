@@ -32,12 +32,21 @@ type ScoreLevel struct {
 }
 
 type ScoreWithUser struct {
+	ID            int64
+	StudentID     int64
+	CategoryID    int64
+	CategoryLabel string
+	Points        int
+	Type          string
+	Comment       *string
+	Status        string
+	ApprovedBy    *int64
+	ApprovedAt    *time.Time
+	CreatedBy     int64
+	CreatedAt     *time.Time
+	PeriodID      *int64
 	StudentName   string
 	ClassNumber   int
 	ClassLetter   string
-	CategoryLabel string
-	Points        int
-	Comment       string
 	AddedByName   string
-	CreatedAt     time.Time
 }

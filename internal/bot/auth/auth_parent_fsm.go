@@ -3,7 +3,6 @@ package auth
 import (
 	"database/sql"
 	"fmt"
-	"github.com/Spok95/telegram-school-bot/internal/bot/handlers"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"log"
 	"strings"
@@ -133,8 +132,6 @@ func HandleParentClassLetter(chatID int64, letter string, bot *tgbotapi.BotAPI, 
 		return
 	}
 	bot.Send(tgbotapi.NewMessage(chatID, "Заявка на регистрацию родителя отправлена администратору. Ожидайте подтверждения."))
-
-	handlers.ShowPendingUsers(database, bot)
 
 	delete(parentFSM, chatID)
 	delete(parentData, chatID)

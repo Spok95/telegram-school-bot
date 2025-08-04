@@ -25,7 +25,7 @@ type SetPeriodState struct {
 
 var periodStates = make(map[int64]*SetPeriodState)
 
-func StartSetPeriodFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+func StartSetPeriodFSM(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
 
 	// 🔁 Сброс состояния перед запуском FSM
@@ -47,20 +47,20 @@ func HandleSetPeriodInput(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.
 	case StepInputName:
 		state.Name = msg.Text
 		state.Step = StepInputStart
-		bot.Send(tgbotapi.NewMessage(chatID, "Введите дату начала периода в формате YYYY-MM-DD:"))
+		bot.Send(tgbotapi.NewMessage(chatID, "Введите дату начала периода в формате ДД.ММ.ГГГГ:"))
 	case StepInputStart:
 		start, err := parseDate(msg.Text)
 		if err != nil {
-			bot.Send(tgbotapi.NewMessage(chatID, "❌ Неверный формат. Введите дату начала в формате YYYY-MM-DD."))
+			bot.Send(tgbotapi.NewMessage(chatID, "❌ Неверный формат. Введите дату начала в формате ДД.ММ.ГГГГ."))
 			return
 		}
 		state.StartDate = start
 		state.Step = StepInputEnd
-		bot.Send(tgbotapi.NewMessage(chatID, "Введите дату окончания периода в формате YYYY-MM-DD:"))
+		bot.Send(tgbotapi.NewMessage(chatID, "Введите дату окончания периода в формате ДД.ММ.ГГГГ:"))
 	case StepInputEnd:
 		end, err := parseDate(msg.Text)
 		if err != nil {
-			bot.Send(tgbotapi.NewMessage(chatID, "❌ Неверный формат. Введите дату окончания в формате YYYY-MM-DD."))
+			bot.Send(tgbotapi.NewMessage(chatID, "❌ Неверный формат. Введите дату окончания в формате ДД.ММ.ГГГГ."))
 			return
 		}
 		state.EndDate = end
@@ -71,6 +71,20 @@ func HandleSetPeriodInput(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.
 			StartDate: state.StartDate,
 			EndDate:   state.EndDate,
 		}
+
+		// Проверка корректности дат
+		if !period.StartDate.Before(period.EndDate) {
+			msg := tgbotapi.NewMessage(chatID, "❌ Ошибка: дата начала должна быть раньше даты окончания.\nПопробуйте снова.")
+			bot.Send(msg)
+			delete(periodStates, chatID) // сбрасываем FSM, если нужно
+			return
+		}
+		// Автоматическая активация, если период включает сегодняшнюю дату
+		now := time.Now()
+		if !now.Before(period.StartDate) && !now.After(period.EndDate) {
+			period.IsActive = true
+		}
+
 		_, err = db.CreatePeriod(database, period)
 		if err != nil {
 			log.Println("❌ Ошибка при создании периода:", err)
@@ -78,12 +92,6 @@ func HandleSetPeriodInput(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.
 			return
 		}
 
-		// Сбрасываем старые периоды и активируем этот
-		err = db.SetActivePeriod(database)
-		if err != nil {
-			log.Println("❌ Ошибка при установке активного периода:", err)
-			delete(periodStates, chatID)
-		}
 		bot.Send(tgbotapi.NewMessage(chatID, "✅ Новый период успешно создан."))
 		delete(periodStates, chatID)
 	}
@@ -94,7 +102,8 @@ func GetSetPeriodState(chatID int64) *SetPeriodState {
 }
 
 func parseDate(input string) (time.Time, error) {
-	date, err := time.Parse("2006-01-02", input)
+	layout := "02.01.2006"
+	date, err := time.Parse(layout, input)
 	if err != nil {
 		return time.Time{}, err
 	}
