@@ -29,7 +29,11 @@ func generateStudentReport(scores []models.ScoreWithUser) (string, error) {
 		_ = f.SetCellValue(sheet, fmt.Sprintf("B%d", row), fmt.Sprintf("%d%s", s.ClassNumber, s.ClassLetter))
 		_ = f.SetCellValue(sheet, fmt.Sprintf("C%d", row), s.CategoryLabel)
 		_ = f.SetCellValue(sheet, fmt.Sprintf("D%d", row), s.Points)
-		_ = f.SetCellValue(sheet, fmt.Sprintf("E%d", row), s.Comment)
+		if s.Comment != nil {
+			_ = f.SetCellValue(sheet, fmt.Sprintf("E%d", row), *s.Comment)
+		} else {
+			_ = f.SetCellValue(sheet, fmt.Sprintf("E%d", row), "")
+		}
 		_ = f.SetCellValue(sheet, fmt.Sprintf("F%d", row), s.AddedByName)
 		_ = f.SetCellValue(sheet, fmt.Sprintf("G%d", row), s.CreatedAt.Format("02.01.2006 15:04"))
 	}
@@ -60,7 +64,11 @@ func generateClassReport(scores []models.ScoreWithUser) (string, error) {
 				Class: fmt.Sprintf("%d%s", s.ClassNumber, s.ClassLetter),
 			}
 		}
-		studentMap[key].Total += s.Points
+
+		// Учитываем только баллы НЕ из категории "Аукцион"
+		if s.CategoryLabel != "Аукцион" {
+			studentMap[key].Total += s.Points
+		}
 	}
 
 	// Вычисляем вклад
@@ -89,9 +97,9 @@ func generateClassReport(scores []models.ScoreWithUser) (string, error) {
 	for i, g := range groups {
 		row := i + 2
 		_ = f.SetCellValue(sheet, fmt.Sprintf("A%d", row), g.Name)
-		_ = f.SetCellValue(sheet, fmt.Sprintf("C%d", row), g.Class)
-		_ = f.SetCellValue(sheet, fmt.Sprintf("D%d", row), g.Total)
-		_ = f.SetCellValue(sheet, fmt.Sprintf("E%d", row), g.Contribution)
+		_ = f.SetCellValue(sheet, fmt.Sprintf("B%d", row), g.Class)
+		_ = f.SetCellValue(sheet, fmt.Sprintf("C%d", row), g.Total)
+		_ = f.SetCellValue(sheet, fmt.Sprintf("D%d", row), g.Contribution)
 	}
 
 	filename := fmt.Sprintf("class_report_%d.xlsx", time.Now().Unix())
@@ -110,10 +118,15 @@ func generateSchoolReport(scores []models.ScoreWithUser) (string, error) {
 	classMap := make(map[string]*classStat)
 	for _, s := range scores {
 		classKey := fmt.Sprintf("%d%s", s.ClassNumber, s.ClassLetter)
+		// Инициализация структуры по классу
 		if _, exists := classMap[classKey]; !exists {
 			classMap[classKey] = &classStat{Name: classKey}
 		}
-		classMap[classKey].Total += s.Points
+
+		// Учитываем только баллы НЕ из категории "Аукцион"
+		if s.CategoryLabel != "Аукцион" {
+			classMap[classKey].Total += s.Points
+		}
 	}
 
 	// Рассчитываем рейтинг как 30% от общей суммы баллов
@@ -121,6 +134,7 @@ func generateSchoolReport(scores []models.ScoreWithUser) (string, error) {
 		class.Rating = class.Total * 30 / 100
 	}
 
+	// Сортировка классов по убыванию рейтинга
 	var classes []classStat
 	for _, v := range classMap {
 		classes = append(classes, *v)
@@ -129,6 +143,7 @@ func generateSchoolReport(scores []models.ScoreWithUser) (string, error) {
 		return classes[i].Total > classes[j].Total
 	})
 
+	// Формируем Excel-отчёт
 	f := excelize.NewFile()
 	sheet := "SchoolReport"
 	f.SetSheetName("Sheet1", sheet)
@@ -141,7 +156,7 @@ func generateSchoolReport(scores []models.ScoreWithUser) (string, error) {
 	for i, c := range classes {
 		row := i + 2
 		_ = f.SetCellValue(sheet, fmt.Sprintf("A%d", row), c.Name)
-		_ = f.SetCellValue(sheet, fmt.Sprintf("C%d", row), c.Rating)
+		_ = f.SetCellValue(sheet, fmt.Sprintf("B%d", row), c.Rating)
 	}
 
 	filename := fmt.Sprintf("school_report_%d.xlsx", time.Now().Unix())

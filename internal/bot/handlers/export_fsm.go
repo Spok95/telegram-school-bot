@@ -6,6 +6,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -227,13 +228,25 @@ func generateExportReport(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 			periodLabel = p.Name
 			if state.ReportType == "student" {
 				for _, id := range state.SelectedStudentIDs {
-					part, _ := db.GetScoresByStudentAndPeriod(database, id, int(*state.PeriodID))
+					part, err := db.GetScoresByStudentAndPeriod(database, id, int(*state.PeriodID))
+					if err != nil {
+						log.Println("Ошибка при получении баллов:", err)
+					}
+					log.Printf("📊 Получено %d записей для отчёта по ученику\n", len(part))
 					scores = append(scores, part...)
 				}
 			} else if state.ReportType == "class" {
-				scores, _ = db.GetScoresByClassAndPeriod(database, state.ClassNumber, state.ClassLetter, *state.PeriodID)
+				scores, err = db.GetScoresByClassAndPeriod(database, state.ClassNumber, state.ClassLetter, *state.PeriodID)
+				if err != nil {
+					log.Println("Ошибка при получении баллов:", err)
+				}
+				log.Printf("📊 Получено %d записей для отчёта по классу\n", len(scores))
 			} else if state.ReportType == "school" {
-				scores, _ = db.GetScoresByPeriod(database, int(*state.PeriodID))
+				scores, err = db.GetScoresByPeriod(database, int(*state.PeriodID))
+				if err != nil {
+					log.Println("Ошибка при получении баллов:", err)
+				}
+				log.Printf("📊 Получено %d записей для отчёта по школе\n", len(scores))
 			}
 		case "custom":
 			if state.FromDate == nil || state.ToDate == nil {
@@ -243,13 +256,25 @@ func generateExportReport(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 			periodLabel = fmt.Sprintf("%s–%s", state.FromDate.Format("02.01.2006"), state.ToDate.Format("02.01.2006"))
 			if state.ReportType == "student" {
 				for _, id := range state.SelectedStudentIDs {
-					part, _ := db.GetScoresByStudentAndDateRange(database, id, *state.FromDate, *state.ToDate)
+					part, err := db.GetScoresByStudentAndDateRange(database, id, *state.FromDate, *state.ToDate)
+					if err != nil {
+						log.Println("Ошибка при получении баллов:", err)
+					}
+					log.Printf("📊 Получено %d записей для отчёта по ученику\n", len(scores))
 					scores = append(scores, part...)
 				}
 			} else if state.ReportType == "class" {
-				scores, _ = db.GetScoresByClassAndDateRange(database, int(state.ClassNumber), state.ClassLetter, *state.FromDate, *state.ToDate)
+				scores, err = db.GetScoresByClassAndDateRange(database, int(state.ClassNumber), state.ClassLetter, *state.FromDate, *state.ToDate)
+				if err != nil {
+					log.Println("Ошибка при получении баллов:", err)
+				}
+				log.Printf("📊 Получено %d записей для отчёта по классу\n", len(scores))
 			} else if state.ReportType == "school" {
-				scores, _ = db.GetScoresByDateRange(database, *state.FromDate, *state.ToDate)
+				scores, err = db.GetScoresByDateRange(database, *state.FromDate, *state.ToDate)
+				if err != nil {
+					log.Println("Ошибка при получении баллов:", err)
+				}
+				log.Printf("📊 Получено %d записей для отчёта по школе\n", len(scores))
 			}
 		}
 		var filePath string
