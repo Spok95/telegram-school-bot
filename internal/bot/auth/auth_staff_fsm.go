@@ -44,7 +44,7 @@ func HandleStaffFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *sq
 
 func SaveStaffRequest(database *sql.DB, telegramID int64, name, role string) error {
 	_, err := database.Exec(`
-		INSERT INTO users (telegram_id, full_name, role, confirmed)
+		INSERT INTO users (telegram_id, name, role, confirmed)
 		VALUES (?, ?, ?, 0)
 	`, telegramID, name, role)
 	return err
