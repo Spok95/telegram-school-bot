@@ -6,6 +6,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/bot/handlers"
 	"github.com/Spok95/telegram-school-bot/internal/bot/menu"
 	"github.com/Spok95/telegram-school-bot/internal/db"
+	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/joho/godotenv"
 	"log"
@@ -108,6 +109,7 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 	chatID := msg.Chat.ID
 	text := msg.Text
 	db.EnsureAdmin(chatID, database, text, bot)
+	user, _ := db.GetUserByTelegramID(database, chatID)
 
 	adminID, _ := strconv.ParseInt(os.Getenv("ADMIN_ID"), 10, 64)
 	switch text {
@@ -145,11 +147,11 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		go handlers.HandleMyScore(bot, database, msg)
 	case "➕ Добавить ребёнка":
 		go handlers.StartAddChild(bot, database, msg)
-
 	case "📊 Рейтинг ребёнка":
-		go handlers.HandleMyScore(bot, database, msg)
+		if *user.Role == models.Parent {
+			go handlers.HandleParentRatingRequest(bot, database, chatID, user.ID)
+		}
 	case "/approvals", "📥 Заявки на баллы":
-		user, _ := db.GetUserByTelegramID(database, chatID)
 		if *user.Role == "admin" || *user.Role == "administration" {
 			go handlers.ShowPendingScores(bot, database, chatID)
 		}
@@ -158,7 +160,6 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 			go handlers.ShowPendingUsers(bot, database, chatID)
 		}
 	case "/setperiod", "📅 Установить период":
-		user, _ := db.GetUserByTelegramID(database, chatID)
 		if *user.Role == "admin" {
 			go handlers.StartSetPeriodFSM(bot, msg)
 		}
@@ -166,7 +167,6 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		isAdmin := chatID == adminID
 		go handlers.ShowPeriods(bot, database, chatID, isAdmin)
 	case "/export", "📥 Экспорт отчёта":
-		user, _ := db.GetUserByTelegramID(database, chatID)
 		if *user.Role == "admin" || *user.Role == "administration" {
 			go handlers.StartExportFSM(bot, msg)
 		}
@@ -294,11 +294,20 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		handlers.StartAddChild(bot, database, msg)
 		return
 	}
-
 	if data == "add_another_child_no" {
 		msg := tgbotapi.NewMessage(chatID, "Вы вернулись в главное меню.")
 		msg.ReplyMarkup = menu.GetRoleMenu("parent")
 		bot.Send(msg)
+		return
+	}
+	if strings.HasPrefix(data, "show_rating_student_") {
+		idStr := strings.TrimPrefix(data, "show_rating_student_")
+		studentID, err := strconv.Atoi(idStr)
+		if err != nil {
+			bot.Send(tgbotapi.NewMessage(chatID, "Ошибка: не удалось определить ученика."))
+			return
+		}
+		handlers.ShowStudentRating(bot, database, chatID, int64(studentID))
 		return
 	}
 

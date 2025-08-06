@@ -46,22 +46,27 @@ WHERE role = 'student' AND class_number = ? AND class_letter = ?`
 	return students, nil
 }
 
-func GetAllClasses(database *sql.DB) ([]models.Class, error) {
-	rows, err := database.Query(`SELECT name FROM classes ORDER BY name`)
+func GetChildrenByParentID(db *sql.DB, parentID int64) ([]models.User, error) {
+	rows, err := db.Query(`
+		SELECT u.id, u.name, u.class_number, u.class_letter
+		FROM users u
+		JOIN parents_students ps ON ps.student_id = u.id
+		WHERE ps.parent_id = ?
+	`, parentID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var classes []models.Class
+	var students []models.User
 	for rows.Next() {
-		var class = models.Class{}
-		if err := rows.Scan(&class.Name); err != nil {
-			return nil, err
+		var u models.User
+		if err := rows.Scan(&u.ID, &u.Name, &u.ClassNumber, &u.ClassLetter); err != nil {
+			continue
 		}
-		classes = append(classes, class)
+		students = append(students, u)
 	}
-	return classes, nil
+	return students, nil
 }
 
 func GetUserByID(database *sql.DB, id int64) (models.User, error) {
