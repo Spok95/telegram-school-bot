@@ -68,3 +68,30 @@ ON CONFLICT(number, letter) DO NOTHING;
 	}
 	return nil
 }
+
+func SeedStudents(database *sql.DB) error {
+	log.Println("🧪 Наполнение таблицы users тестовыми учениками...")
+
+	startTelegramID := int64(1000000001)
+	classLetters := []string{"А", "Б", "В", "Г", "Д"}
+
+	for grade := 1; grade <= 11; grade++ {
+		for _, letter := range classLetters {
+			for i := 1; i <= 10; i++ {
+				name := fmt.Sprintf("Ученик %d%s-%d", grade, letter, i)
+				telegramID := startTelegramID
+				startTelegramID++
+
+				_, err := database.Exec(`
+INSERT OR IGNORE INTO users (telegram_id, name, role, class_number, class_letter, confirmed, is_active)
+VALUES (?, ?, 'student', ?, ?, 1, 1);
+`, telegramID, name, grade, letter)
+				if err != nil {
+					return fmt.Errorf("❌ ошибка при вставке ученика %s: %w", name, err)
+				}
+			}
+		}
+	}
+	log.Println("✅ Ученики успешно добавлены.")
+	return nil
+}

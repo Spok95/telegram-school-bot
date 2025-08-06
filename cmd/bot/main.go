@@ -44,6 +44,18 @@ func main() {
 		log.Fatal("Миграция не удалась:", err)
 	}
 
+	// ...............................................
+	// Только если база пустая — наполняем
+	var count int
+	err = database.QueryRow(`SELECT COUNT(*) FROM users WHERE role = 'student'`).Scan(&count)
+	if err != nil {
+		log.Fatalf("Ошибка при проверке пользователей: %v", err)
+	}
+	if count == 0 {
+		db.SeedStudents(database)
+	}
+	// ...............................................
+
 	err = db.SetActivePeriod(database)
 	if err != nil {
 		log.Println("❌ Ошибка установки активного периода:", err)
@@ -79,6 +91,10 @@ func main() {
 			}
 			if handlers.GetExportState(userID) != nil {
 				handlers.HandleExportText(bot, database, update.Message)
+				continue
+			}
+			if handlers.GetAddChildFSMState(userID) != "" {
+				handlers.HandleAddChildText(bot, database, update.Message)
 				continue
 			}
 
@@ -127,10 +143,14 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		go handlers.StartRemoveScoreFSM(bot, database, msg)
 	case "/myscore", "📊 Мой рейтинг":
 		go handlers.HandleMyScore(bot, database, msg)
+	case "➕ Добавить ребёнка":
+		go handlers.StartAddChild(bot, database, msg)
+
 	case "📊 Рейтинг ребёнка":
 		go handlers.HandleMyScore(bot, database, msg)
 	case "/approvals", "📥 Заявки на баллы":
-		if chatID == adminID {
+		user, _ := db.GetUserByTelegramID(database, chatID)
+		if *user.Role == "admin" || *user.Role == "administration" {
 			go handlers.ShowPendingScores(bot, database, chatID)
 		}
 	case "📥 Заявки на авторизацию":
@@ -138,8 +158,8 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 			go handlers.ShowPendingUsers(bot, database, chatID)
 		}
 	case "/setperiod", "📅 Установить период":
-		role := getUserFSMRole(chatID)
-		if role == "admin" || role == "administration" {
+		user, _ := db.GetUserByTelegramID(database, chatID)
+		if *user.Role == "admin" {
 			go handlers.StartSetPeriodFSM(bot, msg)
 		}
 	case "/periods":
@@ -147,11 +167,7 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		go handlers.ShowPeriods(bot, database, chatID, isAdmin)
 	case "/export", "📥 Экспорт отчёта":
 		user, _ := db.GetUserByTelegramID(database, chatID)
-		log.Println("📤 Попытка экспорта. Роль:", *user.Role)
 		if *user.Role == "admin" || *user.Role == "administration" {
-
-			log.Println("📊 Роль пользователя:", getUserFSMRole(chatID))
-
 			go handlers.StartExportFSM(bot, msg)
 		}
 	case "/auction", "🎯 Аукцион":
@@ -212,13 +228,24 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 			bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Неверный номер класса"))
 			return
 		}
-		auth.HandleParentClassNumber(chatID, num, bot)
+
+		// Если активен FSM по добавлению ребёнка — вызываем его хендлер
+		if handlers.GetAddChildFSMState(chatID) == "add_child_class_number" {
+			handlers.HandleAddChildClassNumber(chatID, num, bot)
+		} else {
+			auth.HandleParentClassNumber(chatID, num, bot)
+		}
 		return
 	}
 
 	if strings.HasPrefix(data, "parent_class_letter_") {
 		letter := strings.TrimPrefix(data, "parent_class_letter_")
-		auth.HandleParentClassLetter(chatID, letter, bot, database)
+
+		if handlers.GetAddChildFSMState(chatID) == "add_child_class_number" {
+			handlers.HandleAddChildClassLetter(chatID, letter, bot, database)
+		} else {
+			auth.HandleParentClassLetter(chatID, letter, bot, database)
+		}
 		return
 	}
 	if strings.HasPrefix(data, "addscore_category_") ||

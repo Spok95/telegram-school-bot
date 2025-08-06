@@ -64,16 +64,19 @@ func generateClassReport(scores []models.ScoreWithUser) (string, error) {
 				Class: fmt.Sprintf("%d%s", s.ClassNumber, s.ClassLetter),
 			}
 		}
+		studentMap[key].Total += s.Points
+	}
 
-		// Учитываем только баллы НЕ из категории "Аукцион"
+	for _, s := range scores {
+		key := s.StudentName
 		if s.CategoryLabel != "Аукцион" {
-			studentMap[key].Total += s.Points
+			studentMap[key].Contribution += s.Points
 		}
 	}
 
 	// Вычисляем вклад
 	for _, s := range studentMap {
-		s.Contribution = s.Total * 30 / 100
+		s.Contribution = s.Contribution * 30 / 100
 	}
 
 	// Сортировка по убыванию

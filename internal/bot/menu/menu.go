@@ -77,6 +77,7 @@ func parentMenu() tgbotapi.ReplyKeyboardMarkup {
 	return tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("📊 Рейтинг ребёнка"),
+			tgbotapi.NewKeyboardButton("➕ Добавить ребёнка"),
 		),
 	)
 }

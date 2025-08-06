@@ -51,7 +51,7 @@ func ShowPendingScores(bot *tgbotapi.BotAPI, database *sql.DB, adminID int64) {
 }
 
 // HandleScoreApprovalCallback обрабатывает нажатия на кнопки подтверждения/отклонения заявок
-func HandleScoreApprovalCallback(callback *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, database *sql.DB, adminID int64) {
+func HandleScoreApprovalCallback(callback *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, database *sql.DB, userID int64) {
 	data := callback.Data
 	var action, idStr string
 
@@ -73,27 +73,34 @@ func HandleScoreApprovalCallback(callback *tgbotapi.CallbackQuery, bot *tgbotapi
 
 	chatID := callback.Message.Chat.ID
 	messageID := callback.Message.MessageID
-	adminUsername := callback.From.UserName
+	user, _ := db.GetUserByTelegramID(database, userID)
 
 	var resultText string
-
-	if action == "approve" {
-		err = db.ApproveScore(database, scoreID, adminID, time.Now())
+	// Проверяем текущий статус
+	currentStatus, err := db.GetScoreStatusByID(database, scoreID)
+	if err != nil {
+		log.Println("ошибка получения статуса заявки:", err)
+		resultText = "❌ Ошибка при обработке заявки."
+	} else if currentStatus != "pending" {
+		resultText = "⏳ Заявка уже обработана ранее."
+	} else if action == "approve" {
+		err = db.ApproveScore(database, scoreID, userID, time.Now())
 		if err == nil {
-			resultText = callback.Message.Text + fmt.Sprintf("\n\n✅ Подтверждено @%s", adminUsername)
+			resultText = callback.Message.Text + fmt.Sprintf("\n\n✅ Подтверждено @%s", user.Name)
 		} else {
 			log.Println("ошибка подтверждения заявки:", err)
 			resultText = "❌ Ошибка при подтверждении заявки."
 		}
 	} else {
-		err = db.RejectScore(database, scoreID, adminID, time.Now())
+		err = db.RejectScore(database, scoreID, userID, time.Now())
 		if err == nil {
-			resultText = callback.Message.Text + fmt.Sprintf("\n\n❌ Отклонено @%s", adminUsername)
+			resultText = callback.Message.Text + fmt.Sprintf("\n\n❌ Отклонено @%s", user.Name)
 		} else {
 			log.Println("ошибка отклонения заявки:", err)
 			resultText = "❌ Ошибка при отклонении заявки."
 		}
 	}
+
 	edit := tgbotapi.NewEditMessageText(chatID, messageID, resultText)
 	bot.Send(edit)
 

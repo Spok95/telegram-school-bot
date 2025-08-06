@@ -39,7 +39,7 @@ func SetActivePeriod(database *sql.DB) error {
 }
 
 func CreatePeriod(database *sql.DB, p models.Period) (int64, error) {
-	if !p.StartDate.Before(p.EndDate) {
+	if p.StartDate.After(p.EndDate) {
 		return 0, fmt.Errorf("дата окончания не может быть раньше даты начала")
 	}
 

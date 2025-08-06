@@ -44,14 +44,14 @@ func HandleParentFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *s
 		}
 		parentData[chatID].StudentName = msg
 		parentFSM[chatID] = StateParentClassNumber
-		sendParentClassNumberButtons(chatID, bot)
+		SendParentClassNumberButtons(chatID, bot)
 	}
 }
 
 func FindStudentID(database *sql.DB, data *ParentRegisterData) (int, error) {
 	var id int
 	err := database.QueryRow(`
-		SELECT id FROM users 
+		SELECT id FROM users
 		WHERE name = ? AND class_number = ? AND class_letter = ? AND role = 'student' AND confirmed = 1
 	`, data.StudentName, data.ClassNumber, data.ClassLetter).Scan(&id)
 	return id, err
@@ -68,7 +68,7 @@ func SaveParentRequest(database *sql.DB, parentTelegramID int64, studentID int, 
 	if err == sql.ErrNoRows {
 		// Вставка родителя в users
 		res, err := tx.Exec(`
-		INSERT INTO users (telegram_id, name, role, confirmed) 
+		INSERT INTO users (telegram_id, name, role, confirmed)
 		VALUES (?, ?, 'parent', 0)
 	`, parentTelegramID, parentName)
 		if err != nil {
@@ -105,7 +105,7 @@ func HandleParentClassNumber(chatID int64, num int, bot *tgbotapi.BotAPI) {
 	}
 	parentData[chatID].ClassNumber = num
 	parentFSM[chatID] = StateParentClassLetter
-	sendParentClassLetterButtons(chatID, bot)
+	SendParentClassLetterButtons(chatID, bot)
 }
 
 func HandleParentClassLetter(chatID int64, letter string, bot *tgbotapi.BotAPI, database *sql.DB) {
@@ -137,7 +137,7 @@ func HandleParentClassLetter(chatID int64, letter string, bot *tgbotapi.BotAPI, 
 	delete(parentData, chatID)
 }
 
-func sendParentClassNumberButtons(chatID int64, bot *tgbotapi.BotAPI) {
+func SendParentClassNumberButtons(chatID int64, bot *tgbotapi.BotAPI) {
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for i := 1; i <= 11; i++ {
 		text := fmt.Sprintf("%d класс", i)
@@ -149,7 +149,7 @@ func sendParentClassNumberButtons(chatID int64, bot *tgbotapi.BotAPI) {
 	bot.Send(msg)
 }
 
-func sendParentClassLetterButtons(chatID int64, bot *tgbotapi.BotAPI) {
+func SendParentClassLetterButtons(chatID int64, bot *tgbotapi.BotAPI) {
 	letters := []string{"А", "Б", "В", "Г", "Д"}
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for _, l := range letters {

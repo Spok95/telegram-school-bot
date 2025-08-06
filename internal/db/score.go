@@ -150,6 +150,16 @@ func RejectScore(database *sql.DB, scoreID int64, adminID int64, rejectedAt time
 	return err
 }
 
+// GetScoreStatusByID возвращает статус заявки по ID
+func GetScoreStatusByID(database *sql.DB, scoreID int64) (string, error) {
+	var status string
+	err := database.QueryRow(`SELECT status FROM scores WHERE id = ?`, scoreID).Scan(&status)
+	if err != nil {
+		return "", err
+	}
+	return status, nil
+}
+
 func GetApprovedScoreSum(database *sql.DB, studentID int64) (int, error) {
 	var total int
 	err := database.QueryRow(`
@@ -163,6 +173,24 @@ func GetApprovedScoreSum(database *sql.DB, studentID int64) (int, error) {
 }
 
 func GetScoresByPeriod(database *sql.DB, periodID int) ([]models.ScoreWithUser, error) {
+	row := database.QueryRow(`SELECT start_date, end_date FROM periods WHERE id = ?`, periodID)
+
+	var startDateStr, endDateStr string
+	if err := row.Scan(&startDateStr, &endDateStr); err != nil {
+		return nil, err
+	}
+	startDate, err := time.Parse("02.01.2006", startDateStr)
+	if err != nil {
+		return nil, err
+	}
+	endDate, err := time.Parse("02.01.2006", endDateStr)
+	if err != nil {
+		return nil, err
+	}
+
+	// включаем весь последний день
+	endDate = endDate.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
+
 	query := `
 	SELECT
 		s.name AS student_name,
@@ -177,14 +205,15 @@ func GetScoresByPeriod(database *sql.DB, periodID int) ([]models.ScoreWithUser, 
 	JOIN users s ON scores.student_id = s.id
 	JOIN users a ON scores.created_by = a.id
 	JOIN categories c ON scores.category_id = c.id
-	WHERE scores.period_id = ? AND scores.status = 'approved'
+	WHERE scores.created_at BETWEEN ? AND ? AND scores.status = 'approved'
 	ORDER BY scores.created_at ASC;
 	`
-	rows, err := database.Query(query, periodID)
+	rows, err := database.Query(query, startDate, endDate)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+
 	var result []models.ScoreWithUser
 
 	log.Println("⏬ Получаем строки из запроса ...")
@@ -325,6 +354,7 @@ func GetScoresByDateRange(database *sql.DB, from, to time.Time) ([]models.ScoreW
 
 	FROM scores s
 	JOIN users u ON u.id = s.student_id
+	JOIN users ua ON ua.id = s.created_by
 	JOIN categories c ON c.id = s.category_id
 	JOIN users a ON a.id = s.created_by
 	WHERE u.role = 'student' AND s.created_at BETWEEN ? AND ? AND s.status = 'approved'
@@ -372,6 +402,24 @@ func GetScoresByDateRange(database *sql.DB, from, to time.Time) ([]models.ScoreW
 }
 
 func GetScoresByStudentAndPeriod(database *sql.DB, selectedStudentID int64, periodID int) ([]models.ScoreWithUser, error) {
+	row := database.QueryRow(`SELECT start_date, end_date FROM periods WHERE id = ?`, periodID)
+
+	var startDateStr, endDateStr string
+	if err := row.Scan(&startDateStr, &endDateStr); err != nil {
+		return nil, err
+	}
+	startDate, err := time.Parse("02.01.2006", startDateStr)
+	if err != nil {
+		return nil, err
+	}
+	endDate, err := time.Parse("02.01.2006", endDateStr)
+	if err != nil {
+		return nil, err
+	}
+
+	// включаем весь последний день
+	endDate = endDate.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
+
 	query := `
 	SELECT 
 	s.id, s.student_id, s.category_id, s.points, s.type, s.comment,
@@ -383,10 +431,10 @@ func GetScoresByStudentAndPeriod(database *sql.DB, selectedStudentID int64, peri
 	JOIN users u ON u.id = s.student_id
 	JOIN users ua ON ua.id = s.created_by
 	JOIN categories c ON c.id = s.category_id
-	WHERE s.student_id = ? AND s.period_id = ? AND s.status = 'approved'
+	WHERE s.student_id = ? AND s.created_at BETWEEN ? AND ? AND s.status = 'approved'
 	ORDER BY s.created_at
 	`
-	rows, err := database.Query(query, selectedStudentID, periodID)
+	rows, err := database.Query(query, selectedStudentID, startDate, endDate)
 	if err != nil {
 		return nil, err
 	}
@@ -428,6 +476,24 @@ func GetScoresByStudentAndPeriod(database *sql.DB, selectedStudentID int64, peri
 }
 
 func GetScoresByClassAndPeriod(database *sql.DB, classNumber int64, classLetter string, periodID int64) ([]models.ScoreWithUser, error) {
+	row := database.QueryRow(`SELECT start_date, end_date FROM periods WHERE id = ?`, periodID)
+
+	var startDateStr, endDateStr string
+	if err := row.Scan(&startDateStr, &endDateStr); err != nil {
+		return nil, err
+	}
+	startDate, err := time.Parse("02.01.2006", startDateStr)
+	if err != nil {
+		return nil, err
+	}
+	endDate, err := time.Parse("02.01.2006", endDateStr)
+	if err != nil {
+		return nil, err
+	}
+
+	// включаем весь последний день
+	endDate = endDate.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
+
 	query := `
 	SELECT 
 	s.id, s.student_id, s.category_id, s.points, s.type, s.comment,
@@ -439,10 +505,10 @@ func GetScoresByClassAndPeriod(database *sql.DB, classNumber int64, classLetter 
 	JOIN users u ON u.id = s.student_id
 	JOIN users ua ON ua.id = s.created_by
 	JOIN categories c ON c.id = s.category_id
-	WHERE u.class_number = ? AND u.class_letter = ? AND s.period_id = ? AND s.status = 'approved'
+	WHERE u.class_number = ? AND u.class_letter = ? AND s.created_at BETWEEN ? AND ? AND s.status = 'approved'
 	ORDER BY u.name
 	`
-	rows, err := database.Query(query, classNumber, classLetter, periodID)
+	rows, err := database.Query(query, classNumber, classLetter, startDate, endDate)
 	if err != nil {
 		return nil, err
 	}

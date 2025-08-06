@@ -179,7 +179,8 @@ func HandleExportText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 			bot.Send(tgbotapi.NewMessage(chatID, "❌ Неверный формат. Введите в формате ДД.ММ.ГГГГ."))
 			return
 		}
-		state.ToDate = &date
+		endOfDay := date.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
+		state.ToDate = &endOfDay
 		advanceExportStep(bot, database, chatID, state)
 	}
 }

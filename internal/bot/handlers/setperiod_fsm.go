@@ -73,7 +73,7 @@ func HandleSetPeriodInput(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.
 		}
 
 		// Проверка корректности дат
-		if !period.StartDate.Before(period.EndDate) {
+		if period.StartDate.After(period.EndDate) {
 			msg := tgbotapi.NewMessage(chatID, "❌ Ошибка: дата начала должна быть раньше даты окончания.\nПопробуйте снова.")
 			bot.Send(msg)
 			delete(periodStates, chatID) // сбрасываем FSM, если нужно
