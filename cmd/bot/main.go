@@ -241,7 +241,7 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 	if strings.HasPrefix(data, "parent_class_letter_") {
 		letter := strings.TrimPrefix(data, "parent_class_letter_")
 
-		if handlers.GetAddChildFSMState(chatID) == "add_child_class_number" {
+		if handlers.GetAddChildFSMState(chatID) != "" {
 			handlers.HandleAddChildClassLetter(chatID, letter, bot, database)
 		} else {
 			auth.HandleParentClassLetter(chatID, letter, bot, database)
@@ -286,6 +286,19 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		strings.HasPrefix(data, "auction_select_student_") ||
 		data == "auction_students_done" {
 		handlers.HandleAuctionCallback(bot, database, cb)
+		return
+	}
+	if data == "add_another_child_yes" {
+		bot.Send(tgbotapi.NewMessage(chatID, "Введите ФИО следующего ребёнка:"))
+		msg := &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: chatID}} // мок-сообщение для FSM
+		handlers.StartAddChild(bot, database, msg)
+		return
+	}
+
+	if data == "add_another_child_no" {
+		msg := tgbotapi.NewMessage(chatID, "Вы вернулись в главное меню.")
+		msg.ReplyMarkup = menu.GetRoleMenu("parent")
+		bot.Send(msg)
 		return
 	}
 

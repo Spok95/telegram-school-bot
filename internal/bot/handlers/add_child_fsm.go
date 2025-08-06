@@ -50,10 +50,21 @@ func HandleAddChildClassLetter(chatID int64, letter string, bot *tgbotapi.BotAPI
 	// Только добавление связи, без вставки родителя
 	err = AddStudentLinkIfParentExists(database, chatID, studentID)
 	if err != nil {
-		bot.Send(tgbotapi.NewMessage(chatID, "❌ Ошибка при добавлении связи. Попробуйте позже."))
+		bot.Send(tgbotapi.NewMessage(chatID, "❌ Ошибка при добавлении связи. Возможно, ребёнок уже добавлен."))
 	} else {
 		bot.Send(tgbotapi.NewMessage(chatID, "✅ Ребёнок успешно добавлен!"))
 	}
+
+	// ✅ Предлагаем добавить ещё одного ребёнка
+	markup := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("Да", "add_another_child_yes"),
+			tgbotapi.NewInlineKeyboardButtonData("Нет", "add_another_child_no"),
+		),
+	)
+	msg := tgbotapi.NewMessage(chatID, "Хотите добавить ещё одного ребёнка?")
+	msg.ReplyMarkup = markup
+	bot.Send(msg)
 
 	delete(addChildFSM, chatID)
 	delete(addChildData, chatID)
@@ -65,7 +76,7 @@ func AddStudentLinkIfParentExists(database *sql.DB, telegramID int64, studentID 
 	if err != nil {
 		return fmt.Errorf("родитель не найден: %w", err)
 	}
-	_, err = database.Exec(`INSERT INTO parents_students (parent_id, student_id) VALUES (?, ?)`, parentID, studentID)
+	_, err = database.Exec(`INSERT OR IGNORE INTO parents_students (parent_id, student_id) VALUES (?, ?)`, parentID, studentID)
 	if err != nil {
 		return fmt.Errorf("ошибка добавления связи: %w", err)
 	}
