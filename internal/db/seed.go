@@ -77,21 +77,30 @@ func SeedStudents(database *sql.DB) error {
 
 	for grade := 1; grade <= 11; grade++ {
 		for _, letter := range classLetters {
+			var classID int
+			err := database.QueryRow(`
+			SELECT id FROM classes WHERE number = ? AND letter = ? LIMIT 1
+		`, grade, letter).Scan(&classID)
+			if err != nil {
+				return fmt.Errorf("❌ не удалось найти class_id для %d%s: %w", grade, letter, err)
+			}
+
 			for i := 1; i <= 10; i++ {
 				name := fmt.Sprintf("Ученик %d%s-%d", grade, letter, i)
 				telegramID := startTelegramID
 				startTelegramID++
 
 				_, err := database.Exec(`
-INSERT OR IGNORE INTO users (telegram_id, name, role, class_number, class_letter, confirmed, is_active)
-VALUES (?, ?, 'student', ?, ?, 1, 1);
-`, telegramID, name, grade, letter)
+INSERT OR IGNORE INTO users (telegram_id, name, role, class_number, class_letter, class_id, confirmed, is_active)
+VALUES (?, ?, 'student', ?, ?, ?, 1, 1);
+`, telegramID, name, grade, letter, classID)
 				if err != nil {
 					return fmt.Errorf("❌ ошибка при вставке ученика %s: %w", name, err)
 				}
 			}
 		}
 	}
+
 	log.Println("✅ Ученики успешно добавлены.")
 	return nil
 }

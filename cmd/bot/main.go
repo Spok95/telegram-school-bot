@@ -248,6 +248,10 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		}
 		return
 	}
+	if data == "select_all_students" {
+		handlers.HandleAddScoreCallback(bot, database, cb)
+		return
+	}
 	if strings.HasPrefix(data, "addscore_category_") ||
 		strings.HasPrefix(data, "addscore_level_") ||
 		strings.HasPrefix(data, "add_class_") ||

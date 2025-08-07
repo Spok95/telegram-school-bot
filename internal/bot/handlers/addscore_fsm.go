@@ -75,8 +75,38 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 			callback := fmt.Sprintf("addscore_student_%d", s.ID)
 			buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(s.Name, callback)))
 		}
+
+		// Кнопка "✅ Выбрать всех"
+		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("✅ Выбрать всех", "select_all_students"),
+		))
+
 		edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "Выберите ученика или учеников:", tgbotapi.NewInlineKeyboardMarkup(buttons...))
 		bot.Send(edit)
+	} else if data == "select_all_students" {
+		students, _ := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
+		for _, s := range students {
+			if !containsInt64(state.SelectedStudentIDs, s.ID) {
+				state.SelectedStudentIDs = append(state.SelectedStudentIDs, s.ID)
+			}
+		}
+
+		students, _ = db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
+		var buttons [][]tgbotapi.InlineKeyboardButton
+		for _, s := range students {
+			label := "✅ " + s.Name
+			callback := fmt.Sprintf("addscore_student_%d", s.ID)
+			buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData(label, callback),
+			))
+		}
+		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("✅ Готово", "add_students_done"),
+		))
+
+		edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "Выберите ученика или учеников:", tgbotapi.NewInlineKeyboardMarkup(buttons...))
+		bot.Send(edit)
+
 	} else if strings.HasPrefix(data, "addscore_student_") {
 		idStr := strings.TrimPrefix(data, "addscore_student_")
 		id, _ := strconv.ParseInt(idStr, 10, 64)
