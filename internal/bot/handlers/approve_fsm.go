@@ -48,6 +48,7 @@ func ShowPendingScores(bot *tgbotapi.BotAPI, database *sql.DB, adminID int64) {
 		msg.ReplyMarkup = markup
 		bot.Send(msg)
 	}
+	delete(notifiedAdmins, adminID)
 }
 
 // HandleScoreApprovalCallback обрабатывает нажатия на кнопки подтверждения/отклонения заявок
@@ -86,7 +87,7 @@ func HandleScoreApprovalCallback(callback *tgbotapi.CallbackQuery, bot *tgbotapi
 	} else if action == "approve" {
 		err = db.ApproveScore(database, scoreID, userID, time.Now())
 		if err == nil {
-			resultText = callback.Message.Text + fmt.Sprintf("\n\n✅ Подтверждено @%s", user.Name)
+			resultText = fmt.Sprintf("✅ Заявка подтверждена.\nПодтвердил: @%s", user.Name)
 		} else {
 			log.Println("ошибка подтверждения заявки:", err)
 			resultText = "❌ Ошибка при подтверждении заявки."
@@ -94,14 +95,16 @@ func HandleScoreApprovalCallback(callback *tgbotapi.CallbackQuery, bot *tgbotapi
 	} else {
 		err = db.RejectScore(database, scoreID, userID, time.Now())
 		if err == nil {
-			resultText = callback.Message.Text + fmt.Sprintf("\n\n❌ Отклонено @%s", user.Name)
+			resultText = fmt.Sprintf("❌ Заявка отклонена.\nОтклонил: @%s", user.Name)
 		} else {
 			log.Println("ошибка отклонения заявки:", err)
 			resultText = "❌ Ошибка при отклонении заявки."
 		}
 	}
 
-	edit := tgbotapi.NewEditMessageText(chatID, messageID, resultText)
+	edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, messageID, resultText, tgbotapi.InlineKeyboardMarkup{
+		InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{},
+	})
 	bot.Send(edit)
 
 	bot.Request(tgbotapi.NewCallback(callback.ID, "Обработано"))

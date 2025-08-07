@@ -85,6 +85,7 @@ func main() {
 			}
 			if handlers.GetSetPeriodState(userID) != nil {
 				handlers.HandleSetPeriodInput(bot, database, update.Message)
+				continue
 			}
 			if handlers.GetAuctionState(userID) != nil {
 				handlers.HandleAuctionText(bot, database, update.Message)
