@@ -5,12 +5,6 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/models"
 )
 
-func GetCategoryByID(database *sql.DB, id int) (string, error) {
-	var name string
-	err := database.QueryRow(`SELECT name FROM categories WHERE id=?`, id).Scan(&name)
-	return name, err
-}
-
 func GetLevelsByCategoryID(database *sql.DB, categoryID int) ([]models.ScoreLevel, error) {
 	rows, err := database.Query("SELECT id, value, label, category_id FROM score_levels WHERE category_id = ?", categoryID)
 	if err != nil {

@@ -70,6 +70,7 @@ func HandleSetPeriodInput(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.
 			Name:      state.Name,
 			StartDate: state.StartDate,
 			EndDate:   state.EndDate,
+			IsActive:  false,
 		}
 
 		// Проверка корректности дат
@@ -79,17 +80,15 @@ func HandleSetPeriodInput(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.
 			delete(periodStates, chatID) // сбрасываем FSM, если нужно
 			return
 		}
-		// Автоматическая активация, если период включает сегодняшнюю дату
-		now := time.Now()
-		if !now.Before(period.StartDate) && !now.After(period.EndDate) {
-			period.IsActive = true
-		}
 
 		_, err = db.CreatePeriod(database, period)
 		if err != nil {
 			log.Println("❌ Ошибка при создании периода:", err)
 			bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось сохранить период."))
 			return
+		}
+		if err := db.SetActivePeriod(database); err != nil {
+			log.Println("⚠️ Ошибка при автоматической установке активного периода:", err)
 		}
 
 		bot.Send(tgbotapi.NewMessage(chatID, "✅ Новый период успешно создан."))
@@ -108,7 +107,7 @@ func parseDate(input string) (time.Time, error) {
 		return time.Time{}, err
 	}
 	if date.Year() < 2025 {
-		return time.Time{}, fmt.Errorf("❌ Неверная дата. Убедитесь, что месяц есть в году или день существует в этом месяце (например, февраль — 28 или 29 дней).")
+		return time.Time{}, fmt.Errorf("❌ Неверная дата. Убедитесь, что месяц есть в году или день существует в этом месяце (например, февраль — 28 или 29 дней).%w", err)
 	}
 	return date, nil
 }

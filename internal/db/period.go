@@ -43,26 +43,12 @@ func CreatePeriod(database *sql.DB, p models.Period) (int64, error) {
 		return 0, fmt.Errorf("дата окончания не может быть раньше даты начала")
 	}
 
-	// Вычисляем активность
-	now := time.Now()
-	isActive := 0
-	if !now.Before(p.StartDate) && !now.After(p.EndDate) {
-		isActive = 1
-	}
-
-	// Деактивируем все старые периоды
-	//_, err := database.Exec(`UPDATE periods SET is_active = 0`)
-	//if err != nil {
-	//	return 0, err
-	//}
-
 	res, err := database.Exec(`
 		INSERT INTO periods (name, start_date, end_date, is_active) 
-		VALUES (?, ?, ?, ?)`,
+		VALUES (?, ?, ?, 0)`,
 		p.Name,
 		p.StartDate.Format("02.01.2006"),
 		p.EndDate.Format("02.01.2006"),
-		isActive,
 	)
 	if err != nil {
 		return 0, err

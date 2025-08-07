@@ -164,9 +164,6 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		if *user.Role == "admin" {
 			go handlers.StartSetPeriodFSM(bot, msg)
 		}
-	case "/periods":
-		isAdmin := chatID == adminID
-		go handlers.ShowPeriods(bot, database, chatID, isAdmin)
 	case "/export", "📥 Экспорт отчёта":
 		if *user.Role == "admin" || *user.Role == "administration" {
 			go handlers.StartExportFSM(bot, msg)
@@ -269,10 +266,6 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		strings.HasPrefix(data, "remove_student_") ||
 		data == "remove_students_done" {
 		handlers.HandleRemoveCallback(bot, database, cb)
-		return
-	}
-	if strings.HasPrefix(data, "activate_period_") {
-		handlers.HandlePeriodCallback(cb, bot, database)
 		return
 	}
 	if strings.HasPrefix(data, "export_type_") ||
