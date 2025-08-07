@@ -189,6 +189,7 @@ func HandleRemoveText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 	period, err := db.GetActivePeriod(database)
 	if err != nil || period == nil {
 		bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось определить активный период."))
+		delete(removeStates, chatID)
 		return
 	}
 

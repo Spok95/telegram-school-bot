@@ -188,6 +188,7 @@ func HandleAddScoreText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Me
 	period, err := db.GetActivePeriod(database)
 	if err != nil || period == nil {
 		bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось определить активный период."))
+		delete(addStates, chatID)
 		return
 	}
 

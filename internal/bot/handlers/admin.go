@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"github.com/Spok95/telegram-school-bot/internal/bot/menu"
-	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"log"
@@ -12,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 )
+
+var notifiedAdmins = make(map[int64]bool)
 
 func ShowPendingUsers(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
 	adminIDStr := os.Getenv("ADMIN_ID")
@@ -202,36 +203,10 @@ func RejectUser(database *sql.DB, bot *tgbotapi.BotAPI, name string, adminID int
 }
 
 func NotifyAdminsAboutScoreRequest(bot *tgbotapi.BotAPI, database *sql.DB, score models.Score, studentName string) {
-	categoryName, err := db.GetCategoryByID(database, int(score.CategoryID))
-	if err != nil {
-		log.Println("Ошибка получения категории:", err)
-		return
-	}
-	action := "начисление"
+	action := "начисления"
 	if score.Type == "remove" {
-		action = "списание"
+		action = "списания"
 	}
-
-	comment := "без комментария"
-	if score.Comment != nil && *score.Comment != "" {
-		comment = *score.Comment
-	}
-
-	student, err := db.GetUserByID(database, score.StudentID)
-	if err != nil {
-		log.Println("Ошибка получения ученика:", err)
-		return
-	}
-	var classLetter string
-	var classNumber int64
-	if student.ClassLetter != nil || student.ClassNumber != nil {
-		classLetter = *student.ClassLetter
-		classNumber = *student.ClassNumber
-	}
-	msgText := fmt.Sprintf(
-		"🆕 Новая заявка на %s:\n👤 Ученик: %s\n🏫 Класс: %d%s\n📚 Категория: %s\n🎯 Баллы: %d\n💬 Комментарий: %s\n\nОжидает подтверждения.",
-		action, studentName, classNumber, classLetter, categoryName, score.Points, comment,
-	)
 
 	// 📢 Получаем всех админов и администрацию
 	rows, err := database.Query(`SELECT telegram_id FROM users WHERE role IN ('admin', 'administration') AND confirmed = 1 AND is_active = 1`)
@@ -247,6 +222,12 @@ func NotifyAdminsAboutScoreRequest(bot *tgbotapi.BotAPI, database *sql.DB, score
 			log.Println("❌ Ошибка чтения telegram_id:", err)
 			continue
 		}
-		bot.Send(tgbotapi.NewMessage(tgID, msgText))
+
+		// Отправим уведомление только один раз
+		if !notifiedAdmins[tgID] {
+			notifiedAdmins[tgID] = true
+			msg := tgbotapi.NewMessage(tgID, fmt.Sprintf("📥 Появились новые заявки для подтверждения %s.", action))
+			bot.Send(msg)
+		}
 	}
 }
