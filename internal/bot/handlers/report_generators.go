@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -85,7 +86,7 @@ func generateClassReport(scores []models.ScoreWithUser) (string, error) {
 		groups = append(groups, *v)
 	}
 	sort.Slice(groups, func(i, j int) bool {
-		return groups[i].Total > groups[j].Total
+		return strings.ToLower(groups[i].Name) < strings.ToLower(groups[j].Name)
 	})
 
 	f := excelize.NewFile()
@@ -143,7 +144,18 @@ func generateSchoolReport(scores []models.ScoreWithUser) (string, error) {
 		classes = append(classes, *v)
 	}
 	sort.Slice(classes, func(i, j int) bool {
-		return classes[i].Total > classes[j].Total
+		var numI, numJ int
+		var letI, letJ string
+		fmt.Sscanf(classes[i].Name, "%d%s", &numI, &letI)
+		fmt.Sscanf(classes[j].Name, "%d%s", &numJ, &letJ)
+
+		if numI != numJ {
+			return numI < numJ
+		}
+		if classes[i].Total != classes[j].Total {
+			return classes[i].Total > classes[j].Total
+		}
+		return letI < letJ
 	})
 
 	// Формируем Excel-отчёт
