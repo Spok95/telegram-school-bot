@@ -26,7 +26,11 @@ var addStates = make(map[int64]*AddFSMState)
 
 func StartAddScoreFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
-	addStates[chatID] = &AddFSMState{Step: 1}
+	delete(addStates, chatID)
+	addStates[chatID] = &AddFSMState{
+		Step:               1,
+		SelectedStudentIDs: []int64{},
+	}
 
 	number := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
 	var buttons [][]tgbotapi.InlineKeyboardButton
@@ -78,43 +82,30 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 
 		// Кнопка "✅ Выбрать всех"
 		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("✅ Выбрать всех", "select_all_students"),
+			tgbotapi.NewInlineKeyboardButtonData("✅ Выбрать всех", "add_select_all_students"),
 		))
 
 		edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "Выберите ученика или учеников:", tgbotapi.NewInlineKeyboardMarkup(buttons...))
 		bot.Send(edit)
-	} else if data == "select_all_students" {
-		students, _ := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
-		for _, s := range students {
-			if !containsInt64(state.SelectedStudentIDs, s.ID) {
-				state.SelectedStudentIDs = append(state.SelectedStudentIDs, s.ID)
-			}
-		}
-
-		students, _ = db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
-		var buttons [][]tgbotapi.InlineKeyboardButton
-		for _, s := range students {
-			label := "✅ " + s.Name
-			callback := fmt.Sprintf("addscore_student_%d", s.ID)
-			buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData(label, callback),
-			))
-		}
-		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("✅ Готово", "add_students_done"),
-		))
-
-		edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "Выберите ученика или учеников:", tgbotapi.NewInlineKeyboardMarkup(buttons...))
-		bot.Send(edit)
-
-	} else if strings.HasPrefix(data, "addscore_student_") {
+	} else if strings.HasPrefix(data, "addscore_student_") || data == "add_select_all_students" {
 		idStr := strings.TrimPrefix(data, "addscore_student_")
 		id, _ := strconv.ParseInt(idStr, 10, 64)
 
-		// Если ученик не выбран — добавляем
-		if !containsInt64(state.SelectedStudentIDs, id) {
-			state.SelectedStudentIDs = append(state.SelectedStudentIDs, id)
+		if data != "add_select_all_students" {
+			// Если ученик не выбран — добавляем
+			if !containsInt64(state.SelectedStudentIDs, id) {
+				state.SelectedStudentIDs = append(state.SelectedStudentIDs, id)
+			}
+		} else {
+			// Выбраны все
+			students, _ := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
+			for _, s := range students {
+				if !containsInt64(state.SelectedStudentIDs, s.ID) {
+					state.SelectedStudentIDs = append(state.SelectedStudentIDs, s.ID)
+				}
+			}
 		}
+
 		// Получаем учеников и пересобираем клавиатуру
 		students, _ := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
 		var buttons [][]tgbotapi.InlineKeyboardButton
@@ -128,6 +119,10 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 			}
 			buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(label, callback)))
 		}
+		// Кнопка "✅ Выбрать всех"
+		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("✅ Выбрать всех", "add_select_all_students"),
+		))
 
 		// Показываем кнопку "Готово" только если выбран хотя бы один
 		if len(state.SelectedStudentIDs) > 0 {

@@ -72,34 +72,7 @@ func main() {
 			handleCallback(bot, database, update.CallbackQuery)
 			continue
 		}
-
 		if update.Message != nil {
-			userID := update.Message.From.ID
-			if handlers.GetAddScoreState(userID) != nil {
-				handlers.HandleAddScoreText(bot, database, update.Message)
-				continue
-			}
-			if handlers.GetRemoveScoreState(userID) != nil {
-				handlers.HandleRemoveText(bot, database, update.Message)
-				continue
-			}
-			if handlers.GetSetPeriodState(userID) != nil {
-				handlers.HandleSetPeriodInput(bot, database, update.Message)
-				continue
-			}
-			if handlers.GetAuctionState(userID) != nil {
-				handlers.HandleAuctionText(bot, database, update.Message)
-				continue
-			}
-			if handlers.GetExportState(userID) != nil {
-				handlers.HandleExportText(bot, database, update.Message)
-				continue
-			}
-			if handlers.GetAddChildFSMState(userID) != "" {
-				handlers.HandleAddChildText(bot, database, update.Message)
-				continue
-			}
-
 			handleMessage(bot, database, update.Message)
 			continue
 		}
@@ -110,36 +83,105 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 	chatID := msg.Chat.ID
 	text := msg.Text
 	db.EnsureAdmin(chatID, database, text, bot)
-	user, _ := db.GetUserByTelegramID(database, chatID)
-
-	adminID, _ := strconv.ParseInt(os.Getenv("ADMIN_ID"), 10, 64)
-	switch text {
-	case "/start":
-
-		var role string
-		var confirmed int
-		err := database.QueryRow(`SELECT role, confirmed FROM users WHERE telegram_id = ?`, chatID).Scan(&role, &confirmed)
-		if err == nil || confirmed == 1 {
-			db.SetUserFSMRole(chatID, role)
-			keyboard := menu.GetRoleMenu(role)
-			msg := tgbotapi.NewMessage(chatID, "Добро пожаловать! Выберите действие:")
-			msg.ReplyMarkup = keyboard
+	// Обработка команды /start без проверки регистрации
+	if text == "/start" {
+		user, err := db.GetUserByTelegramID(database, chatID)
+		if err != nil || user == nil || user.Role == nil {
+			msg := tgbotapi.NewMessage(chatID, "Выберите роль для регистрации:")
+			roles := tgbotapi.NewInlineKeyboardMarkup(
+				tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("Ученик", "reg_student"),
+					tgbotapi.NewInlineKeyboardButtonData("Родитель", "reg_parent"),
+				),
+				tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("Учитель", "reg_teacher"),
+					tgbotapi.NewInlineKeyboardButtonData("Администрация", "reg_administration"),
+				),
+			)
+			msg.ReplyMarkup = roles
 			bot.Send(msg)
 			return
 		}
-		msg := tgbotapi.NewMessage(chatID, "Выберите роль для регистрации:")
-		roles := tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("Ученик", "reg_student"),
-				tgbotapi.NewInlineKeyboardButtonData("Родитель", "reg_parent"),
-			),
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("Учитель", "reg_teacher"),
-				tgbotapi.NewInlineKeyboardButtonData("Администрация", "reg_administration"),
-			),
-		)
-		msg.ReplyMarkup = roles
+
+		// Пользователь уже зарегистрирован
+		db.SetUserFSMRole(chatID, string(*user.Role))
+		keyboard := menu.GetRoleMenu(string(*user.Role))
+		msg := tgbotapi.NewMessage(chatID, "Добро пожаловать! Выберите действие:")
+		msg.ReplyMarkup = keyboard
 		bot.Send(msg)
+		return
+	}
+
+	// Все остальные команды требуют регистрации
+	user, err := db.GetUserByTelegramID(database, chatID)
+	registered := false
+	if err == nil || user != nil && user.Role != nil {
+		registered = true
+	}
+
+	if !registered {
+		role := getUserFSMRole(chatID)
+		if role != "" {
+			auth.HandleFSMMessage(chatID, text, role, bot, database)
+			return
+		}
+
+		bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Вы не зарегистрированы. Пожалуйста, нажмите /start для начала."))
+		return
+	}
+	userID := msg.From.ID
+	if handlers.GetAddScoreState(userID) != nil {
+		handlers.HandleAddScoreText(bot, database, msg)
+		return
+	}
+	if handlers.GetRemoveScoreState(userID) != nil {
+		handlers.HandleRemoveText(bot, database, msg)
+		return
+	}
+	if handlers.GetSetPeriodState(userID) != nil {
+		handlers.HandleSetPeriodInput(bot, database, msg)
+		return
+	}
+	if handlers.GetAuctionState(userID) != nil {
+		handlers.HandleAuctionText(bot, database, msg)
+		return
+	}
+	if handlers.GetExportState(userID) != nil {
+		handlers.HandleExportText(bot, database, msg)
+		return
+	}
+	if handlers.GetAddChildFSMState(userID) != "" {
+		handlers.HandleAddChildText(bot, database, msg)
+		return
+	}
+
+	switch text {
+	//case "/start":
+	//
+	//	var role string
+	//	var confirmed int
+	//	err := database.QueryRow(`SELECT role, confirmed FROM users WHERE telegram_id = ?`, chatID).Scan(&role, &confirmed)
+	//	if err == nil || confirmed == 1 {
+	//		db.SetUserFSMRole(chatID, role)
+	//		keyboard := menu.GetRoleMenu(role)
+	//		msg := tgbotapi.NewMessage(chatID, "Добро пожаловать! Выберите действие:")
+	//		msg.ReplyMarkup = keyboard
+	//		bot.Send(msg)
+	//		return
+	//	}
+	//	msg := tgbotapi.NewMessage(chatID, "Выберите роль для регистрации:")
+	//	roles := tgbotapi.NewInlineKeyboardMarkup(
+	//		tgbotapi.NewInlineKeyboardRow(
+	//			tgbotapi.NewInlineKeyboardButtonData("Ученик", "reg_student"),
+	//			tgbotapi.NewInlineKeyboardButtonData("Родитель", "reg_parent"),
+	//		),
+	//		tgbotapi.NewInlineKeyboardRow(
+	//			tgbotapi.NewInlineKeyboardButtonData("Учитель", "reg_teacher"),
+	//			tgbotapi.NewInlineKeyboardButtonData("Администрация", "reg_administration"),
+	//		),
+	//	)
+	//	msg.ReplyMarkup = roles
+	//	bot.Send(msg)
 	case "/addscore", "➕ Начислить баллы":
 		go handlers.StartAddScoreFSM(bot, database, msg)
 	case "/removescore", "📉 Списать баллы":
@@ -157,6 +199,7 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 			go handlers.ShowPendingScores(bot, database, chatID)
 		}
 	case "📥 Заявки на авторизацию":
+		adminID, _ := strconv.ParseInt(os.Getenv("ADMIN_ID"), 10, 64)
 		if chatID == adminID {
 			go handlers.ShowPendingUsers(bot, database, chatID)
 		}
@@ -246,16 +289,13 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		}
 		return
 	}
-	if data == "select_all_students" {
-		handlers.HandleAddScoreCallback(bot, database, cb)
-		return
-	}
 	if strings.HasPrefix(data, "addscore_category_") ||
 		strings.HasPrefix(data, "addscore_level_") ||
 		strings.HasPrefix(data, "add_class_") ||
 		strings.HasPrefix(data, "addscore_") ||
 		strings.HasPrefix(data, "addscore_student_") ||
-		data == "add_students_done" {
+		data == "add_students_done" ||
+		data == "add_select_all_students" {
 		handlers.HandleAddScoreCallback(bot, database, cb)
 		return
 	}
@@ -264,7 +304,8 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		strings.HasPrefix(data, "remove_class_") ||
 		strings.HasPrefix(data, "removescore_") ||
 		strings.HasPrefix(data, "remove_student_") ||
-		data == "remove_students_done" {
+		data == "remove_students_done" ||
+		data == "remove_select_all_students" {
 		handlers.HandleRemoveCallback(bot, database, cb)
 		return
 	}

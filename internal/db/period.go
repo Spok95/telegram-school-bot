@@ -44,8 +44,8 @@ func CreatePeriod(database *sql.DB, p models.Period) (int64, error) {
 	}
 
 	res, err := database.Exec(`
-		INSERT INTO periods (name, start_date, end_date, is_active) 
-		VALUES (?, ?, ?, 0)`,
+		INSERT INTO periods (name, start_date, end_date) 
+		VALUES (?, ?, ?)`,
 		p.Name,
 		p.StartDate.Format("02.01.2006"),
 		p.EndDate.Format("02.01.2006"),
