@@ -157,32 +157,6 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 	}
 
 	switch text {
-	//case "/start":
-	//
-	//	var role string
-	//	var confirmed int
-	//	err := database.QueryRow(`SELECT role, confirmed FROM users WHERE telegram_id = ?`, chatID).Scan(&role, &confirmed)
-	//	if err == nil || confirmed == 1 {
-	//		db.SetUserFSMRole(chatID, role)
-	//		keyboard := menu.GetRoleMenu(role)
-	//		msg := tgbotapi.NewMessage(chatID, "Добро пожаловать! Выберите действие:")
-	//		msg.ReplyMarkup = keyboard
-	//		bot.Send(msg)
-	//		return
-	//	}
-	//	msg := tgbotapi.NewMessage(chatID, "Выберите роль для регистрации:")
-	//	roles := tgbotapi.NewInlineKeyboardMarkup(
-	//		tgbotapi.NewInlineKeyboardRow(
-	//			tgbotapi.NewInlineKeyboardButtonData("Ученик", "reg_student"),
-	//			tgbotapi.NewInlineKeyboardButtonData("Родитель", "reg_parent"),
-	//		),
-	//		tgbotapi.NewInlineKeyboardRow(
-	//			tgbotapi.NewInlineKeyboardButtonData("Учитель", "reg_teacher"),
-	//			tgbotapi.NewInlineKeyboardButtonData("Администрация", "reg_administration"),
-	//		),
-	//	)
-	//	msg.ReplyMarkup = roles
-	//	bot.Send(msg)
 	case "/addscore", "➕ Начислить баллы":
 		go handlers.StartAddScoreFSM(bot, database, msg)
 	case "/removescore", "📉 Списать баллы":
@@ -296,7 +270,9 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		strings.HasPrefix(data, "addscore_") ||
 		strings.HasPrefix(data, "addscore_student_") ||
 		data == "add_students_done" ||
-		data == "add_select_all_students" {
+		data == "add_select_all_students" ||
+		data == "add_back" ||
+		data == "add_cancel" {
 		handlers.HandleAddScoreCallback(bot, database, cb)
 		return
 	}
