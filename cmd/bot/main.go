@@ -282,7 +282,9 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		strings.HasPrefix(data, "removescore_") ||
 		strings.HasPrefix(data, "remove_student_") ||
 		data == "remove_students_done" ||
-		data == "remove_select_all_students" {
+		data == "remove_select_all_students" ||
+		data == "remove_back" ||
+		data == "remove_cancel" {
 		handlers.HandleRemoveCallback(bot, database, cb)
 		return
 	}
