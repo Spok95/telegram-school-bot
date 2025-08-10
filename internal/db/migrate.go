@@ -121,6 +121,17 @@ CREATE TABLE IF NOT EXISTS role_changes (
 	if err != nil {
 		return logError("role_changes", err)
 	}
+	_, err = database.Exec(`
+CREATE TABLE IF NOT EXISTS parent_link_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  parent_id INTEGER NOT NULL,
+  student_id INTEGER NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+`)
+	if err != nil {
+		return logError("parent_link_requests", err)
+	}
 	if err := SeedScoreLevels(database); err != nil {
 		log.Fatal("❌ Ошибка при наполнении таблиц:", err)
 	}

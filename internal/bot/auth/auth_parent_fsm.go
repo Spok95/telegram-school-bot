@@ -3,9 +3,12 @@ package auth
 import (
 	"database/sql"
 	"fmt"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"log"
+	"strconv"
 	"strings"
+
+	"github.com/Spok95/telegram-school-bot/internal/bot/shared/fsmutil"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 type ParentFSMState string
@@ -27,6 +30,41 @@ type ParentRegisterData struct {
 	ParentName  string
 }
 
+func parentBackCancelRow() []tgbotapi.InlineKeyboardButton {
+	return fsmutil.BackCancelRow("parent_back", "parent_cancel")
+}
+
+func parentClassNumberRows() [][]tgbotapi.InlineKeyboardButton {
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for i := 1; i <= 11; i++ {
+		cb := fmt.Sprintf("parent_class_num_%d", i)
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d класс", i), cb),
+		))
+	}
+	rows = append(rows, parentBackCancelRow())
+	return rows
+}
+
+func parentClassLetterRows() [][]tgbotapi.InlineKeyboardButton {
+	letters := []string{"А", "Б", "В", "Г", "Д"}
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, l := range letters {
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(l, "parent_class_letter_"+l),
+		))
+	}
+	rows = append(rows, parentBackCancelRow())
+	return rows
+}
+
+func parentEditMenu(bot *tgbotapi.BotAPI, chatID int64, messageID int, text string, rows [][]tgbotapi.InlineKeyboardButton) {
+	cfg := tgbotapi.NewEditMessageText(chatID, messageID, text)
+	mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
+	cfg.ReplyMarkup = &mk
+	bot.Send(cfg)
+}
+
 func StartParentRegistration(chatID int64, user *tgbotapi.User, bot *tgbotapi.BotAPI, database *sql.DB) {
 	parentFSM[chatID] = StateParentStudentName
 	parentName := strings.TrimSpace(fmt.Sprintf("%s %s", user.FirstName, user.LastName))
@@ -35,6 +73,14 @@ func StartParentRegistration(chatID int64, user *tgbotapi.User, bot *tgbotapi.Bo
 }
 
 func HandleParentFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *sql.DB) {
+	trimmed := strings.TrimSpace(msg)
+	if strings.EqualFold(trimmed, "отмена") || strings.EqualFold(trimmed, "/cancel") {
+		delete(parentFSM, chatID)
+		delete(parentData, chatID)
+		bot.Send(tgbotapi.NewMessage(chatID, "🚫 Регистрация отменена. Нажмите /start, чтобы начать заново."))
+		return
+	}
+
 	state := parentFSM[chatID]
 
 	switch state {
@@ -44,7 +90,84 @@ func HandleParentFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *s
 		}
 		parentData[chatID].StudentName = msg
 		parentFSM[chatID] = StateParentClassNumber
-		SendParentClassNumberButtons(chatID, bot)
+		msgOut := tgbotapi.NewMessage(chatID, "Выберите номер класса ребёнка:")
+		msgOut.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(parentClassNumberRows()...)
+		bot.Send(msgOut)
+	}
+}
+
+func HandleParentCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.CallbackQuery) {
+	chatID := cq.Message.Chat.ID
+	data := cq.Data
+	state := parentFSM[chatID]
+
+	if data == "parent_cancel" {
+		delete(parentFSM, chatID)
+		delete(parentData, chatID)
+		fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
+		bot.Send(tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "🚫 Регистрация отменена. Нажмите /start, чтобы начать заново."))
+		return
+	}
+	if data == "parent_back" {
+		switch state {
+		case StateParentClassNumber:
+			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
+			bot.Send(tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "Введите ФИО ребёнка:"))
+			parentFSM[chatID] = StateParentStudentName
+		case StateParentClassLetter:
+			parentFSM[chatID] = StateParentClassNumber
+			parentEditMenu(bot, chatID, cq.Message.MessageID, "Выберите номер класса ребёнка:", parentClassNumberRows())
+		case StateParentWaiting:
+			bot.Request(tgbotapi.NewCallback(cq.ID, "Заявка уже отправлена, ожидайте подтверждения."))
+		default:
+			bot.Request(tgbotapi.NewCallback(cq.ID, "Действие недоступно на этом шаге."))
+		}
+		return
+	}
+
+	if strings.HasPrefix(data, "parent_class_num_") {
+		numStr := strings.TrimPrefix(data, "parent_class_num_")
+		num, _ := strconv.Atoi(numStr)
+		if parentData[chatID] == nil {
+			parentData[chatID] = &ParentRegisterData{}
+		}
+		parentData[chatID].ClassNumber = num
+		parentFSM[chatID] = StateParentClassLetter
+		parentEditMenu(bot, chatID, cq.Message.MessageID, "Выберите букву класса:", parentClassLetterRows())
+		return
+	}
+
+	if strings.HasPrefix(data, "parent_class_letter_") {
+		letter := strings.TrimPrefix(data, "parent_class_letter_")
+		parentData[chatID].ClassLetter = letter
+		parentFSM[chatID] = StateParentWaiting
+
+		studentID, err := FindStudentID(database, parentData[chatID])
+
+		fmt.Println()
+		log.Printf("Файл auth_parent_fsm: %d", studentID)
+		fmt.Println()
+
+		if err != nil {
+			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
+			bot.Send(tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "❌ Ученик не найден. Введите ФИО заново:"))
+			parentFSM[chatID] = StateParentStudentName
+			return
+		}
+
+		err = SaveParentRequest(database, chatID, studentID, parentData[chatID].ParentName)
+		if err != nil {
+			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
+			bot.Send(tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "Ошибка при сохранении. Попробуйте позже."))
+			delete(parentFSM, chatID)
+			delete(parentData, chatID)
+			return
+		}
+		fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
+		bot.Send(tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "Заявка на регистрацию родителя отправлена администратору. Ожидайте подтверждения."))
+		delete(parentFSM, chatID)
+		delete(parentData, chatID)
+		return
 	}
 }
 
@@ -97,65 +220,4 @@ func SaveParentRequest(database *sql.DB, parentTelegramID int64, studentID int, 
 
 	log.Printf("[PARENT_SUCCESS] linked parent (tg_id=%d) to student_id=%d", parentTelegramID, studentID)
 	return nil
-}
-
-func HandleParentClassNumber(chatID int64, num int, bot *tgbotapi.BotAPI) {
-	if parentData[chatID] == nil {
-		parentData[chatID] = &ParentRegisterData{}
-	}
-	parentData[chatID].ClassNumber = num
-	parentFSM[chatID] = StateParentClassLetter
-	SendParentClassLetterButtons(chatID, bot)
-}
-
-func HandleParentClassLetter(chatID int64, letter string, bot *tgbotapi.BotAPI, database *sql.DB) {
-	if parentData[chatID] == nil {
-		bot.Send(tgbotapi.NewMessage(chatID, "Произошла ошибка. Начните регистрацию заново."))
-		return
-	}
-	parentData[chatID].ClassLetter = letter
-	parentFSM[chatID] = StateParentWaiting
-
-	// Проверка ученика
-	studentID, err := FindStudentID(database, parentData[chatID])
-	if err != nil {
-		bot.Send(tgbotapi.NewMessage(chatID, "❌ Ученик не найден. Введите ФИО заново:"))
-		parentFSM[chatID] = StateParentStudentName
-		return
-	}
-
-	err = SaveParentRequest(database, chatID, studentID, parentData[chatID].ParentName)
-	if err != nil {
-		bot.Send(tgbotapi.NewMessage(chatID, "Ошибка при сохранении. Попробуйте позже."))
-		delete(parentFSM, chatID)
-		delete(parentData, chatID)
-		return
-	}
-	bot.Send(tgbotapi.NewMessage(chatID, "Заявка на регистрацию родителя отправлена администратору. Ожидайте подтверждения."))
-
-	delete(parentFSM, chatID)
-	delete(parentData, chatID)
-}
-
-func SendParentClassNumberButtons(chatID int64, bot *tgbotapi.BotAPI) {
-	var rows [][]tgbotapi.InlineKeyboardButton
-	for i := 1; i <= 11; i++ {
-		text := fmt.Sprintf("%d класс", i)
-		data := fmt.Sprintf("parent_class_num_%d", i)
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(text, data)))
-	}
-	msg := tgbotapi.NewMessage(chatID, "Выберите номер класса ребёнка:")
-	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
-	bot.Send(msg)
-}
-
-func SendParentClassLetterButtons(chatID int64, bot *tgbotapi.BotAPI) {
-	letters := []string{"А", "Б", "В", "Г", "Д"}
-	var rows [][]tgbotapi.InlineKeyboardButton
-	for _, l := range letters {
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(l, "parent_class_letter_"+l)))
-	}
-	msg := tgbotapi.NewMessage(chatID, "Выберите букву класса:")
-	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
-	bot.Send(msg)
 }

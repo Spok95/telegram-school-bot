@@ -3,8 +3,9 @@ package db
 import (
 	"database/sql"
 	"fmt"
-	"github.com/Spok95/telegram-school-bot/internal/models"
 	"log"
+
+	"github.com/Spok95/telegram-school-bot/internal/models"
 )
 
 func SeedScoreLevels(database *sql.DB) error {
@@ -86,7 +87,7 @@ func SeedStudents(database *sql.DB) error {
 			}
 
 			for i := 1; i <= 10; i++ {
-				name := fmt.Sprintf("Ученик %d%s-%d", grade, letter, i)
+				name := fmt.Sprintf("Ученик %d%s %d", grade, letter, i)
 				telegramID := startTelegramID
 				startTelegramID++
 

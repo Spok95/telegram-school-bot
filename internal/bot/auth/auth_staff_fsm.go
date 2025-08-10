@@ -2,6 +2,8 @@ package auth
 
 import (
 	"database/sql"
+	"strings"
+
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -21,6 +23,14 @@ func StartStaffRegistration(chatID int64, msg string, bot *tgbotapi.BotAPI, data
 }
 
 func HandleStaffFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *sql.DB, role string) {
+	trimmed := strings.TrimSpace(msg)
+	if strings.EqualFold(trimmed, "отмена") || strings.EqualFold(trimmed, "/cancel") {
+		delete(staffFSM, chatID)
+		delete(staffData, chatID)
+		bot.Send(tgbotapi.NewMessage(chatID, "🚫 Регистрация отменена. Нажмите /start, чтобы начать заново."))
+		return
+	}
+
 	state := staffFSM[chatID]
 
 	switch state {

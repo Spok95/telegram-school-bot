@@ -177,6 +177,7 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		adminID, _ := strconv.ParseInt(os.Getenv("ADMIN_ID"), 10, 64)
 		if chatID == adminID {
 			go handlers.ShowPendingUsers(bot, database, chatID)
+			go handlers.ShowPendingParentLinks(bot, database, chatID)
 		}
 	case "/setperiod", "📅 Установить период":
 		if *user.Role == "admin" {
@@ -213,8 +214,13 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		return
 	}
 
-	if strings.HasPrefix(data, "confirm_") ||
-		strings.HasPrefix(data, "reject_") {
+	if strings.HasPrefix(data, "confirm_link_") || strings.HasPrefix(data, "reject_link_") {
+		handlers.HandleParentLinkApprovalCallback(cb, bot, database, chatID)
+		return
+	}
+
+	if strings.HasPrefix(data, "confirm_user_") ||
+		strings.HasPrefix(data, "reject_user_") {
 		handlers.HandleAdminCallback(cb, database, bot, chatID)
 		return
 	}
@@ -224,44 +230,27 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		handlers.HandleScoreApprovalCallback(cb, bot, database, chatID)
 		return
 	}
-
+	// Student
 	if strings.HasPrefix(data, "student_class_num_") ||
-		strings.HasPrefix(data, "student_class_num_") {
+		strings.HasPrefix(data, "student_class_letter_") ||
+		data == "student_back" || data == "student_cancel" {
 		auth.HandleStudentCallback(cb, bot, database)
 		return
 	}
-
-	if strings.HasPrefix(data, "student_class_letter_") ||
-		strings.HasPrefix(data, "student_class_letter_") {
-		auth.HandleStudentCallback(cb, bot, database)
-		return
-	}
-
-	if strings.HasPrefix(data, "parent_class_num_") {
-		numStr := strings.TrimPrefix(data, "parent_class_num_")
-		num, err := strconv.Atoi(numStr)
-		if err != nil {
-			bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Неверный номер класса"))
+	if handlers.GetAddChildFSMState(chatID) != "" {
+		// Назад/Отмена add-child
+		if data == "addchild_back" || data == "addchild_cancel" ||
+			strings.HasPrefix(data, "parent_class_num_") ||
+			strings.HasPrefix(data, "parent_class_letter_") {
+			handlers.HandleAddChildCallback(bot, database, cb)
 			return
 		}
-
-		// Если активен FSM по добавлению ребёнка — вызываем его хендлер
-		if handlers.GetAddChildFSMState(chatID) == "add_child_class_number" {
-			handlers.HandleAddChildClassNumber(chatID, num, bot)
-		} else {
-			auth.HandleParentClassNumber(chatID, num, bot)
-		}
-		return
 	}
-
-	if strings.HasPrefix(data, "parent_class_letter_") {
-		letter := strings.TrimPrefix(data, "parent_class_letter_")
-
-		if handlers.GetAddChildFSMState(chatID) != "" {
-			handlers.HandleAddChildClassLetter(chatID, letter, bot, database)
-		} else {
-			auth.HandleParentClassLetter(chatID, letter, bot, database)
-		}
+	// Parent
+	if strings.HasPrefix(data, "parent_class_num_") ||
+		strings.HasPrefix(data, "parent_class_letter_") ||
+		data == "parent_back" || data == "parent_cancel" {
+		auth.HandleParentCallback(bot, database, cb)
 		return
 	}
 	if strings.HasPrefix(data, "addscore_category_") ||

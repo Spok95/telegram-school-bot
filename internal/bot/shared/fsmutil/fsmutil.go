@@ -1,9 +1,10 @@
 package fsmutil
 
 import (
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"strings"
 	"sync"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 // pending — простая защита от повторной обработки "тяжёлых" действий.
@@ -41,7 +42,8 @@ func ClearPending(chatID int64, key string) {
 // DisableMarkup "гасит" inline‑клавиатуру у сообщения (one‑shot клавиатура).
 // Вызываем сразу после обработки callback'а, чтобы предотвратить повторные клики.
 func DisableMarkup(bot *tgbotapi.BotAPI, chatID int64, messageID int) {
-	edit := tgbotapi.NewEditMessageReplyMarkup(chatID, messageID, tgbotapi.InlineKeyboardMarkup{})
+	empty := tgbotapi.InlineKeyboardMarkup{InlineKeyboard: make([][]tgbotapi.InlineKeyboardButton, 0)}
+	edit := tgbotapi.NewEditMessageReplyMarkup(chatID, messageID, empty)
 	bot.Send(edit)
 }
 

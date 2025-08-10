@@ -3,10 +3,12 @@ package auth
 import (
 	"database/sql"
 	"fmt"
-	"github.com/Spok95/telegram-school-bot/internal/db"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"strconv"
 	"strings"
+
+	"github.com/Spok95/telegram-school-bot/internal/bot/shared/fsmutil"
+	"github.com/Spok95/telegram-school-bot/internal/db"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 type StudentFSMState string
@@ -27,6 +29,39 @@ type StudentRegisterData struct {
 	ClassLetter string
 }
 
+// ==== helpers ====
+func studentBackCancelRow() []tgbotapi.InlineKeyboardButton {
+	return fsmutil.BackCancelRow("student_back", "student_cancel")
+}
+func studentClassNumberRows() [][]tgbotapi.InlineKeyboardButton {
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for i := 1; i <= 11; i++ {
+		cb := fmt.Sprintf("student_class_num_%d", i)
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d класс", i), cb),
+		))
+	}
+	rows = append(rows, studentBackCancelRow())
+	return rows
+}
+func studentClassLetterRows() [][]tgbotapi.InlineKeyboardButton {
+	letters := []string{"А", "Б", "В", "Г", "Д"}
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, l := range letters {
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(l, "student_class_letter_"+l),
+		))
+	}
+	rows = append(rows, studentBackCancelRow())
+	return rows
+}
+func studentEditMenu(bot *tgbotapi.BotAPI, chatID int64, messageID int, text string, rows [][]tgbotapi.InlineKeyboardButton) {
+	cfg := tgbotapi.NewEditMessageText(chatID, messageID, text)
+	mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
+	cfg.ReplyMarkup = &mk
+	bot.Send(cfg)
+}
+
 // Начало FSM ученика
 func StartStudentRegistration(chatID int64, msg string, bot *tgbotapi.BotAPI, database *sql.DB) {
 	delete(studentFSM, chatID)
@@ -38,13 +73,23 @@ func StartStudentRegistration(chatID int64, msg string, bot *tgbotapi.BotAPI, da
 
 // Обработка шагов FSM
 func HandleStudentFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *sql.DB) {
+	trimmed := strings.TrimSpace(msg)
+	if strings.EqualFold(trimmed, "отмена") || strings.EqualFold(trimmed, "/cancel") {
+		delete(studentFSM, chatID)
+		delete(studentData, chatID)
+		bot.Send(tgbotapi.NewMessage(chatID, "🚫 Регистрация отменена. Нажмите /start, чтобы начать заново."))
+		return
+	}
+
 	state := studentFSM[chatID]
 
 	switch state {
 	case StateStudentName:
 		studentData[chatID] = &StudentRegisterData{Name: msg}
 		studentFSM[chatID] = StateStudentClassNum
-		showClassNumberButtons(chatID, bot)
+		msgOut := tgbotapi.NewMessage(chatID, "Выберите номер класса:")
+		msgOut.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(studentClassNumberRows()...)
+		bot.Send(msgOut)
 	}
 }
 
@@ -62,6 +107,29 @@ func SaveStudentRequest(database *sql.DB, chatID int64, data *StudentRegisterDat
 func HandleStudentCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, database *sql.DB) {
 	chatID := cb.Message.Chat.ID
 	data := cb.Data
+	if data == "student_cancel" {
+		delete(studentFSM, chatID)
+		delete(studentData, chatID)
+		fsmutil.DisableMarkup(bot, chatID, cb.Message.MessageID)
+		bot.Send(tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "🚫 Регистрация отменена. Нажмите /start, чтобы начать заново."))
+		return
+	}
+	if data == "student_back" {
+		switch studentFSM[chatID] {
+		case StateStudentClassNum:
+			fsmutil.DisableMarkup(bot, chatID, cb.Message.MessageID)
+			bot.Send(tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "Введите ваше ФИО:"))
+			studentFSM[chatID] = StateStudentName
+		case StateStudentLetterBtn:
+			studentFSM[chatID] = StateStudentClassNum
+			studentEditMenu(bot, chatID, cb.Message.MessageID, "Выберите номер класса:", studentClassNumberRows())
+		case StateStudentWaitingConfirm:
+			bot.Request(tgbotapi.NewCallback(cb.ID, "Заявка уже отправлена, ожидайте подтверждения."))
+		default:
+			bot.Request(tgbotapi.NewCallback(cb.ID, "Действие недоступно на этом шаге."))
+		}
+		return
+	}
 
 	if strings.HasPrefix(data, "student_class_num_") {
 		numStr := strings.TrimPrefix(data, "student_class_num_")
@@ -75,7 +143,7 @@ func HandleStudentCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, dat
 		}
 		studentData[chatID].ClassNumber = int64(num)
 		studentFSM[chatID] = StateStudentLetterBtn
-		showClassLetterButtons(chatID, bot)
+		studentEditMenu(bot, chatID, cb.Message.MessageID, "Выберите букву класса:", studentClassLetterRows())
 		return
 	}
 
@@ -86,38 +154,17 @@ func HandleStudentCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, dat
 
 		err := SaveStudentRequest(database, chatID, studentData[chatID])
 		if err != nil {
-			bot.Send(tgbotapi.NewMessage(chatID, "Ошибка при сохранении заявки. Попробуйте позже."))
+			fsmutil.DisableMarkup(bot, chatID, cb.Message.MessageID)
+			bot.Send(tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "Ошибка при сохранении заявки. Попробуйте позже."))
 			delete(studentFSM, chatID)
 			delete(studentData, chatID)
 			return
 		}
 
-		bot.Send(tgbotapi.NewMessage(chatID, "Заявка на регистрацию отправлена администратору. Ожидайте подтверждения."))
+		fsmutil.DisableMarkup(bot, chatID, cb.Message.MessageID)
+		bot.Send(tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "Заявка на регистрацию отправлена администратору. Ожидайте подтверждения."))
 		delete(studentFSM, chatID)
 		delete(studentData, chatID)
 		return
 	}
-}
-
-func showClassNumberButtons(chatID int64, bot *tgbotapi.BotAPI) {
-	var rows [][]tgbotapi.InlineKeyboardButton
-	for i := 1; i <= 11; i++ {
-		btn := tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d класс", i), fmt.Sprintf("student_class_num_%d", i))
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(btn))
-	}
-	msg := tgbotapi.NewMessage(chatID, "Выберите номер класса:")
-	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
-	bot.Send(msg)
-}
-
-func showClassLetterButtons(chatID int64, bot *tgbotapi.BotAPI) {
-	letters := []string{"А", "Б", "В", "Г", "Д"}
-	var rows [][]tgbotapi.InlineKeyboardButton
-	for _, l := range letters {
-		btn := tgbotapi.NewInlineKeyboardButtonData(l, fmt.Sprintf("student_class_letter_%s", l))
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(btn))
-	}
-	msg := tgbotapi.NewMessage(chatID, "Выберите букву класса:")
-	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
-	bot.Send(msg)
 }
