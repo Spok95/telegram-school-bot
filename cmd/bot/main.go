@@ -2,6 +2,11 @@ package main
 
 import (
 	"database/sql"
+	"log"
+	"os"
+	"strconv"
+	"strings"
+
 	"github.com/Spok95/telegram-school-bot/internal/bot/auth"
 	"github.com/Spok95/telegram-school-bot/internal/bot/handlers"
 	"github.com/Spok95/telegram-school-bot/internal/bot/menu"
@@ -9,10 +14,6 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/joho/godotenv"
-	"log"
-	"os"
-	"strconv"
-	"strings"
 )
 
 func main() {
@@ -315,7 +316,9 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		strings.HasPrefix(data, "export_class_number_") ||
 		strings.HasPrefix(data, "export_class_letter_") ||
 		strings.HasPrefix(data, "export_select_student_") ||
-		data == "export_students_done" {
+		data == "export_students_done" ||
+		data == "export_back" ||
+		data == "export_cancel" {
 		handlers.HandleExportCallback(bot, database, cb)
 		return
 	}
