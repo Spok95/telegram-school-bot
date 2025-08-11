@@ -203,6 +203,13 @@ func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 		return
 	}
 
+	key := fmt.Sprintf("auction:%d", chatID)
+	if !fsmutil.SetPending(chatID, key) {
+		bot.Send(tgbotapi.NewMessage(chatID, "⏳ Запрос уже обрабатывается…"))
+		return
+	}
+	defer fsmutil.ClearPending(chatID, key)
+
 	state.PointsToRemove = points
 	notEnough := []string{}
 	for _, studentID := range state.SelectedStudentIDs {

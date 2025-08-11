@@ -162,6 +162,8 @@ func HandleExportCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			state.PeriodMode = "custom"
 			state.Step = ExportStepCustomStartDate
 
+			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
+
 			rows := [][]tgbotapi.InlineKeyboardButton{
 				fsmutil.BackCancelRow("export_cancel", "export_cancel"),
 			}
