@@ -119,7 +119,7 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 				if containsInt64(state.SelectedStudentIDs, s.ID) {
 					label = "✅ " + label
 				}
-				callback := fmt.Sprintf("addscore_student_%d", s.ID)
+				callback := fmt.Sprintf("add_score_student_%d", s.ID)
 				buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
 					tgbotapi.NewInlineKeyboardButtonData(label, callback),
 				))
@@ -136,7 +136,7 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 			categories, _ := db.GetAllCategories(database, string(*user.Role))
 			var buttons [][]tgbotapi.InlineKeyboardButton
 			for _, c := range categories {
-				callback := fmt.Sprintf("addscore_category_%d", c.ID)
+				callback := fmt.Sprintf("add_score_category_%d", c.ID)
 				buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
 					tgbotapi.NewInlineKeyboardButtonData(c.Name, callback),
 				))
@@ -149,7 +149,7 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 			levels, _ := db.GetLevelsByCategoryID(database, state.CategoryID)
 			var buttons [][]tgbotapi.InlineKeyboardButton
 			for _, l := range levels {
-				callback := fmt.Sprintf("addscore_level_%d", l.ID)
+				callback := fmt.Sprintf("add_score_level_%d", l.ID)
 				label := fmt.Sprintf("%s (%d)", l.Label, l.Value)
 				buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
 					tgbotapi.NewInlineKeyboardButtonData(label, callback),
@@ -193,7 +193,7 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		}
 		var buttons [][]tgbotapi.InlineKeyboardButton
 		for _, s := range students {
-			callback := fmt.Sprintf("addscore_student_%d", s.ID)
+			callback := fmt.Sprintf("add_score_student_%d", s.ID)
 			buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData(s.Name, callback),
 			))
@@ -207,18 +207,35 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		return
 	}
 
-	if strings.HasPrefix(data, "addscore_student_") || data == "add_select_all_students" {
-		idStr := strings.TrimPrefix(data, "addscore_student_")
+	if strings.HasPrefix(data, "add_score_student_") || data == "add_select_all_students" {
+		idStr := strings.TrimPrefix(data, "add_score_student_")
 		id, _ := strconv.ParseInt(idStr, 10, 64)
 
 		if data != "add_select_all_students" {
-			if !containsInt64(state.SelectedStudentIDs, id) {
+			// toggle: если уже выбран — снимаем
+			removed := false
+			for i, sid := range state.SelectedStudentIDs {
+				if sid == id {
+					state.SelectedStudentIDs = append(state.SelectedStudentIDs[:i], state.SelectedStudentIDs[i+1:]...)
+					removed = true
+					break
+				}
+			}
+			if !removed {
 				state.SelectedStudentIDs = append(state.SelectedStudentIDs, id)
 			}
 		} else {
+			// выбрать всех
 			students, _ := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
 			for _, s := range students {
-				if !containsInt64(state.SelectedStudentIDs, s.ID) {
+				found := false
+				for _, sid := range state.SelectedStudentIDs {
+					if sid == s.ID {
+						found = true
+						break
+					}
+				}
+				if !found {
 					state.SelectedStudentIDs = append(state.SelectedStudentIDs, s.ID)
 				}
 			}
@@ -232,7 +249,7 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 			if containsInt64(state.SelectedStudentIDs, s.ID) {
 				label = "✅ " + label
 			}
-			callback := fmt.Sprintf("addscore_student_%d", s.ID)
+			callback := fmt.Sprintf("add_score_student_%d", s.ID)
 			buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData(label, callback),
 			))
@@ -257,7 +274,7 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		categories, _ := db.GetAllCategories(database, string(*user.Role))
 		var buttons [][]tgbotapi.InlineKeyboardButton
 		for _, c := range categories {
-			callback := fmt.Sprintf("addscore_category_%d", c.ID)
+			callback := fmt.Sprintf("add_score_category_%d", c.ID)
 			buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData(c.Name, callback),
 			))
@@ -267,14 +284,14 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		return
 	}
 
-	if strings.HasPrefix(data, "addscore_category_") {
-		catID, _ := strconv.Atoi(strings.TrimPrefix(data, "addscore_category_"))
+	if strings.HasPrefix(data, "add_score_category_") {
+		catID, _ := strconv.Atoi(strings.TrimPrefix(data, "add_score_category_"))
 		state.CategoryID = catID
 		state.Step = 5
 		levels, _ := db.GetLevelsByCategoryID(database, catID)
 		var buttons [][]tgbotapi.InlineKeyboardButton
 		for _, l := range levels {
-			callback := fmt.Sprintf("addscore_level_%d", l.ID)
+			callback := fmt.Sprintf("add_score_level_%d", l.ID)
 			label := fmt.Sprintf("%s (%d)", l.Label, l.Value)
 			buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData(label, callback),
@@ -285,8 +302,8 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		return
 	}
 
-	if strings.HasPrefix(data, "addscore_level_") {
-		lvlID, _ := strconv.Atoi(strings.TrimPrefix(data, "addscore_level_"))
+	if strings.HasPrefix(data, "add_score_level_") {
+		lvlID, _ := strconv.Atoi(strings.TrimPrefix(data, "add_score_level_"))
 		state.LevelID = lvlID
 		state.Step = 6
 

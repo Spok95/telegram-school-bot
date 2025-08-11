@@ -25,7 +25,7 @@ var addChildData = make(map[int64]*auth.ParentRegisterData)
 // ===== helpers (как в export/add/remove) =====
 
 func addChildBackCancelRow() []tgbotapi.InlineKeyboardButton {
-	return fsmutil.BackCancelRow("addchild_back", "addchild_cancel")
+	return fsmutil.BackCancelRow("add_child_back", "add_child_cancel")
 }
 
 func addChildClassNumberRows() [][]tgbotapi.InlineKeyboardButton {
@@ -125,7 +125,7 @@ func HandleAddChildCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi
 	state := GetAddChildFSMState(chatID)
 
 	// Отмена
-	if data == "addchild_cancel" {
+	if data == "add_child_cancel" {
 		delete(addChildFSM, chatID)
 		delete(addChildData, chatID)
 		fsmutil.DisableMarkup(bot, chatID, messageID)
@@ -133,7 +133,7 @@ func HandleAddChildCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi
 		return
 	}
 	// Назад
-	if data == "addchild_back" {
+	if data == "add_child_back" {
 		switch state {
 		case StateAddChildClassNumber:
 			// назад к ФИО — карточку гасим

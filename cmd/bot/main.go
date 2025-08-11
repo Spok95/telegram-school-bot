@@ -157,11 +157,11 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 	}
 
 	switch text {
-	case "/addscore", "➕ Начислить баллы":
+	case "/add_score", "➕ Начислить баллы":
 		go handlers.StartAddScoreFSM(bot, database, msg)
-	case "/removescore", "📉 Списать баллы":
+	case "/remove_score", "📉 Списать баллы":
 		go handlers.StartRemoveScoreFSM(bot, database, msg)
-	case "/myscore", "📊 Мой рейтинг":
+	case "/my_score", "📊 Мой рейтинг":
 		go handlers.HandleMyScore(bot, database, msg)
 	case "➕ Добавить ребёнка":
 		go handlers.StartAddChild(bot, database, msg)
@@ -179,7 +179,7 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 			go handlers.ShowPendingUsers(bot, database, chatID)
 			go handlers.ShowPendingParentLinks(bot, database, chatID)
 		}
-	case "/setperiod", "📅 Установить период":
+	case "/set_period", "📅 Установить период":
 		if *user.Role == "admin" {
 			go handlers.StartSetPeriodFSM(bot, msg)
 		}
@@ -214,13 +214,13 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		return
 	}
 
-	if strings.HasPrefix(data, "confirm_link_") || strings.HasPrefix(data, "reject_link_") {
+	if strings.HasPrefix(data, "link_confirm_") || strings.HasPrefix(data, "link_reject_") {
 		handlers.HandleParentLinkApprovalCallback(cb, bot, database, chatID)
 		return
 	}
 
-	if strings.HasPrefix(data, "confirm_user_") ||
-		strings.HasPrefix(data, "reject_user_") {
+	if strings.HasPrefix(data, "confirm_") ||
+		strings.HasPrefix(data, "reject_") {
 		handlers.HandleAdminCallback(cb, database, bot, chatID)
 		return
 	}
@@ -239,7 +239,7 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 	}
 	if handlers.GetAddChildFSMState(chatID) != "" {
 		// Назад/Отмена add-child
-		if data == "addchild_back" || data == "addchild_cancel" ||
+		if data == "add_child_back" || data == "add_child_cancel" ||
 			strings.HasPrefix(data, "parent_class_num_") ||
 			strings.HasPrefix(data, "parent_class_letter_") {
 			handlers.HandleAddChildCallback(bot, database, cb)
@@ -253,11 +253,11 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		auth.HandleParentCallback(bot, database, cb)
 		return
 	}
-	if strings.HasPrefix(data, "addscore_category_") ||
-		strings.HasPrefix(data, "addscore_level_") ||
+	if strings.HasPrefix(data, "add_score_category_") ||
+		strings.HasPrefix(data, "add_score_level_") ||
 		strings.HasPrefix(data, "add_class_") ||
-		strings.HasPrefix(data, "addscore_") ||
-		strings.HasPrefix(data, "addscore_student_") ||
+		strings.HasPrefix(data, "add_score_") ||
+		strings.HasPrefix(data, "add_score_student_") ||
 		data == "add_students_done" ||
 		data == "add_select_all_students" ||
 		data == "add_back" ||
@@ -268,7 +268,7 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 	if strings.HasPrefix(data, "remove_category_") ||
 		strings.HasPrefix(data, "remove_level_") ||
 		strings.HasPrefix(data, "remove_class_") ||
-		strings.HasPrefix(data, "removescore_") ||
+		strings.HasPrefix(data, "remove_score_") ||
 		strings.HasPrefix(data, "remove_student_") ||
 		data == "remove_students_done" ||
 		data == "remove_select_all_students" ||

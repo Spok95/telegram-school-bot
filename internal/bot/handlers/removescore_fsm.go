@@ -217,13 +217,30 @@ func HandleRemoveCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 		id, _ := strconv.ParseInt(idStr, 10, 64)
 
 		if data != "remove_select_all_students" {
-			if !containsInt64(state.SelectedStudentIDs, id) {
+			// toggle
+			removed := false
+			for i, sid := range state.SelectedStudentIDs {
+				if sid == id {
+					state.SelectedStudentIDs = append(state.SelectedStudentIDs[:i], state.SelectedStudentIDs[i+1:]...)
+					removed = true
+					break
+				}
+			}
+			if !removed {
 				state.SelectedStudentIDs = append(state.SelectedStudentIDs, id)
 			}
 		} else {
+			// выбрать всех
 			students, _ := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
 			for _, s := range students {
-				if !containsInt64(state.SelectedStudentIDs, s.ID) {
+				found := false
+				for _, sid := range state.SelectedStudentIDs {
+					if sid == s.ID {
+						found = true
+						break
+					}
+				}
+				if !found {
 					state.SelectedStudentIDs = append(state.SelectedStudentIDs, s.ID)
 				}
 			}

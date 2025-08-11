@@ -92,8 +92,8 @@ func ShowPendingUsers(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
 			msg = fmt.Sprintf("Заявка:\n👤 %s\n🧩 Роль: %s\nTelegramID: %d", name, role, tgID)
 		}
 
-		btnYes := tgbotapi.NewInlineKeyboardButtonData("✅ Подтвердить", fmt.Sprintf("confirm_user_%d", id))
-		brnNo := tgbotapi.NewInlineKeyboardButtonData("❌ Отклонить", fmt.Sprintf("reject_user_%d", id))
+		btnYes := tgbotapi.NewInlineKeyboardButtonData("✅ Подтвердить", fmt.Sprintf("confirm_%d", id))
+		brnNo := tgbotapi.NewInlineKeyboardButtonData("❌ Отклонить", fmt.Sprintf("reject_%d", id))
 		markup := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(btnYes, brnNo))
 
 		message := tgbotapi.NewMessage(adminID, msg)
@@ -108,8 +108,8 @@ func HandleAdminCallback(callback *tgbotapi.CallbackQuery, database *sql.DB, bot
 	chatID := callback.Message.Chat.ID
 	adminUsername := callback.From.UserName
 
-	if strings.HasPrefix(data, "confirm_user_") {
-		idStr := strings.TrimPrefix(data, "confirm_user_")
+	if strings.HasPrefix(data, "confirm_") {
+		idStr := strings.TrimPrefix(data, "confirm_")
 
 		err := ConfirmUser(database, bot, idStr, adminID)
 		if err != nil {
@@ -120,8 +120,8 @@ func HandleAdminCallback(callback *tgbotapi.CallbackQuery, database *sql.DB, bot
 		newText := fmt.Sprintf("✅ Заявка подтверждена.\nПодтвердил: @%s", adminUsername)
 		edit := tgbotapi.NewEditMessageText(chatID, messageID, newText)
 		bot.Send(edit)
-	} else if strings.HasPrefix(data, "reject_user_") {
-		idStr := strings.TrimPrefix(data, "reject_user_")
+	} else if strings.HasPrefix(data, "reject_") {
+		idStr := strings.TrimPrefix(data, "reject_")
 
 		err := RejectUser(database, bot, idStr, adminID)
 		if err != nil {
@@ -263,8 +263,8 @@ func ShowPendingParentLinks(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64
 		)
 		markup := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("✅ Подтвердить", fmt.Sprintf("confirm_link_%d", id)),
-				tgbotapi.NewInlineKeyboardButtonData("❌ Отклонить", fmt.Sprintf("reject_link_%d", id)),
+				tgbotapi.NewInlineKeyboardButtonData("✅ Подтвердить", fmt.Sprintf("link_confirm_%d", id)),
+				tgbotapi.NewInlineKeyboardButtonData("❌ Отклонить", fmt.Sprintf("link_reject_%d", id)),
 			),
 		)
 		m := tgbotapi.NewMessage(chatID, msg)
@@ -289,8 +289,8 @@ func HandleParentLinkApprovalCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.
 		return
 	}
 
-	if strings.HasPrefix(data, "confirm_link_") {
-		reqID := strings.TrimPrefix(data, "confirm_link_")
+	if strings.HasPrefix(data, "link_confirm_") {
+		reqID := strings.TrimPrefix(data, "link_confirm_")
 		parentID, studentID, err := getIDs(reqID)
 		if err != nil {
 			bot.Send(tgbotapi.NewMessage(chatID, "❌ Заявка не найдена."))
@@ -331,8 +331,8 @@ func HandleParentLinkApprovalCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.
 		return
 	}
 
-	if strings.HasPrefix(data, "reject_link_") {
-		reqID := strings.TrimPrefix(data, "reject_link_")
+	if strings.HasPrefix(data, "link_reject_") {
+		reqID := strings.TrimPrefix(data, "link_reject_")
 		var parentID int64
 		_ = database.QueryRow(`SELECT parent_id FROM parent_link_requests WHERE id = ?`, reqID).Scan(&parentID)
 		_, _ = database.Exec(`DELETE FROM parent_link_requests WHERE id = ?`, reqID)
