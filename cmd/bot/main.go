@@ -293,7 +293,9 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		strings.HasPrefix(data, "auction_class_number_") ||
 		strings.HasPrefix(data, "auction_class_letter_") ||
 		strings.HasPrefix(data, "auction_select_student_") ||
-		data == "auction_students_done" {
+		data == "auction_students_done" ||
+		data == "auction_back" ||
+		data == "auction_cancel" {
 		handlers.HandleAuctionCallback(bot, database, cb)
 		return
 	}

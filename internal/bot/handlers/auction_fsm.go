@@ -3,13 +3,15 @@ package handlers
 import (
 	"database/sql"
 	"fmt"
-	"github.com/Spok95/telegram-school-bot/internal/db"
-	"github.com/Spok95/telegram-school-bot/internal/models"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"log"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Spok95/telegram-school-bot/internal/bot/shared/fsmutil"
+	"github.com/Spok95/telegram-school-bot/internal/db"
+	"github.com/Spok95/telegram-school-bot/internal/models"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 const (
@@ -31,7 +33,15 @@ type AuctionFSMState struct {
 
 var auctionStates = make(map[int64]*AuctionFSMState)
 
-func StartAuctionFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+// ——— helpers ———
+
+func auctionBackCancelRow() []tgbotapi.InlineKeyboardButton {
+	return fsmutil.BackCancelRow("auction_back", "auction_cancel")
+}
+
+// ——— start ———
+
+func StartAuctionFSM(bot *tgbotapi.BotAPI, _ *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
 	auctionStates[chatID] = &AuctionFSMState{Step: AuctionStepMode}
 
@@ -41,11 +51,16 @@ func StartAuctionFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Messa
 			tgbotapi.NewInlineKeyboardButtonData("🧍 Ученики", "auction_mode_students"),
 			tgbotapi.NewInlineKeyboardButtonData("🏫 Класс", "auction_mode_class"),
 		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "auction_cancel"),
+		),
 	)
 	msgOut := tgbotapi.NewMessage(chatID, text)
 	msgOut.ReplyMarkup = markup
 	bot.Send(msgOut)
 }
+
+// ——— callbacks ———
 
 func HandleAuctionCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.CallbackQuery) {
 	chatID := cq.Message.Chat.ID
@@ -57,21 +72,72 @@ func HandleAuctionCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 	data := cq.Data
 	log.Printf("➡️ Callback от аукциона: %s", data)
 
+	// ❌ Отмена
+	if data == "auction_cancel" {
+		delete(auctionStates, chatID)
+		fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
+		edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "🚫 Аукцион отменён.")
+		bot.Send(edit)
+		return
+	}
+
+	// ⬅ Назад
+	if data == "auction_back" {
+		switch state.Step {
+		case AuctionStepClassNumber: // назад к режиму
+			state.Step = AuctionStepMode
+			text := "Выберите режим аукциона:\n🧍 Ученики — списать с отдельных учеников\n🏫 Класс — списать со всего класса"
+			markup := tgbotapi.NewInlineKeyboardMarkup(
+				tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("🧍 Ученики", "auction_mode_students"),
+					tgbotapi.NewInlineKeyboardButtonData("🏫 Класс", "auction_mode_class"),
+				),
+				tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "auction_cancel"),
+				),
+			)
+			edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, text, markup)
+			bot.Send(edit)
+			return
+		case AuctionStepClassLetter: // назад к номеру
+			state.Step = AuctionStepClassNumber
+			promptClassNumber(cq, bot, "auction_class_number_")
+			return
+		case AuctionStepStudentSelect: // назад к букве
+			state.Step = AuctionStepClassLetter
+			promptClassLetter(cq, bot, "auction_class_letter_")
+			return
+		case AuctionStepPoints: // назад к предыдущему выбору
+			if state.Mode == "students" {
+				state.Step = AuctionStepStudentSelect
+				promptStudentSelect(cq, bot, database)
+			} else {
+				state.Step = AuctionStepClassLetter
+				promptClassLetter(cq, bot, "auction_class_letter_")
+			}
+			return
+		default:
+			// safety: отмена
+			delete(auctionStates, chatID)
+			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
+			edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "🚫 Аукцион отменён.")
+			bot.Send(edit)
+			return
+		}
+	}
+
 	switch {
 	case strings.HasPrefix(data, "auction_mode_"):
-		mode := strings.TrimPrefix(data, "auction_mode_")
-		state.Mode = mode
+		state.Mode = strings.TrimPrefix(data, "auction_mode_")
 		state.Step = AuctionStepClassNumber
-		text := fmt.Sprintf("auction_class_number_")
-		promptClassNumber(cq, bot, text)
+		promptClassNumber(cq, bot, "auction_class_number_")
 
 	case strings.HasPrefix(data, "auction_class_number_"):
 		numStr := strings.TrimPrefix(data, "auction_class_number_")
 		classNumber, _ := strconv.ParseInt(numStr, 10, 64)
 		state.ClassNumber = classNumber
 		state.Step = AuctionStepClassLetter
-		text := fmt.Sprintf("auction_class_letter_")
-		promptClassLetter(cq, bot, text)
+		promptClassLetter(cq, bot, "auction_class_letter_")
 
 	case strings.HasPrefix(data, "auction_class_letter_"):
 		letter := strings.TrimPrefix(data, "auction_class_letter_")
@@ -85,12 +151,13 @@ func HandleAuctionCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 				state.SelectedStudentIDs = append(state.SelectedStudentIDs, s.ID)
 			}
 			state.Step = AuctionStepPoints
-			promptPointsInput(cq.Message, bot)
+			promptPointsInput(cq, bot)
 		}
 
 	case strings.HasPrefix(data, "auction_select_student_"):
 		idStr := strings.TrimPrefix(data, "auction_select_student_")
 		id, _ := strconv.ParseInt(idStr, 10, 64)
+		// toggle
 		found := false
 		for i, existing := range state.SelectedStudentIDs {
 			if existing == id {
@@ -110,19 +177,27 @@ func HandleAuctionCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 			return
 		}
 		state.Step = AuctionStepPoints
-		promptPointsInput(cq.Message, bot)
+		promptPointsInput(cq, bot)
 	}
 }
+
+// ——— text step ———
 
 func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
 	state := auctionStates[chatID]
-
 	if state == nil || state.Step != AuctionStepPoints {
 		return
 	}
 
-	points, err := strconv.Atoi(msg.Text)
+	// текстовая отмена
+	if fsmutil.IsCancelText(msg.Text) {
+		delete(auctionStates, chatID)
+		bot.Send(tgbotapi.NewMessage(chatID, "🚫 Аукцион отменён."))
+		return
+	}
+
+	points, err := strconv.Atoi(strings.TrimSpace(msg.Text))
 	if err != nil || points <= 0 {
 		bot.Send(tgbotapi.NewMessage(chatID, "❌ Введите корректное положительное число."))
 		return
@@ -148,6 +223,7 @@ func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 		delete(auctionStates, chatID)
 		return
 	}
+
 	user, err := db.GetUserByTelegramID(database, chatID)
 	if err != nil {
 		log.Println("❌ Ошибка получения пользователя:", err)
@@ -164,7 +240,7 @@ func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 	for _, studentID := range state.SelectedStudentIDs {
 		score := models.Score{
 			StudentID:  studentID,
-			CategoryID: 999,
+			CategoryID: 999, // спец-категория для аукциона
 			Points:     points,
 			Type:       "remove",
 			Comment:    &comment,
@@ -183,32 +259,37 @@ func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 	delete(auctionStates, chatID)
 }
 
-func promptClassNumber(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, text string) {
-	msg := tgbotapi.NewMessage(cq.Message.Chat.ID, "🔢 Выберите номер класса:")
-	rows := [][]tgbotapi.InlineKeyboardButton{}
+// ——— menus (edit current message) ———
+
+func promptClassNumber(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, prefix string) {
+	chatID := cq.Message.Chat.ID
+	var rows [][]tgbotapi.InlineKeyboardButton
 	for i := 1; i <= 11; i++ {
-		btn := tgbotapi.NewInlineKeyboardButtonData(strconv.Itoa(i), fmt.Sprintf("%s%d", text, i))
+		btn := tgbotapi.NewInlineKeyboardButtonData(strconv.Itoa(i), fmt.Sprintf("%s%d", prefix, i))
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(btn))
 	}
-	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
-	bot.Send(msg)
+	rows = append(rows, auctionBackCancelRow())
+	edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "🔢 Выберите номер класса:", tgbotapi.NewInlineKeyboardMarkup(rows...))
+	bot.Send(edit)
 }
 
-func promptClassLetter(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, text string) {
-	msg := tgbotapi.NewMessage(cq.Message.Chat.ID, "🔠 Выберите букву класса:")
+func promptClassLetter(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, prefix string) {
+	chatID := cq.Message.Chat.ID
 	letters := []string{"А", "Б", "В", "Г", "Д"}
 	row := []tgbotapi.InlineKeyboardButton{}
 	for _, l := range letters {
-		row = append(row, tgbotapi.NewInlineKeyboardButtonData(l, text+l))
+		row = append(row, tgbotapi.NewInlineKeyboardButtonData(l, prefix+l))
 	}
-	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(row)
-	bot.Send(msg)
+	rows := [][]tgbotapi.InlineKeyboardButton{row, auctionBackCancelRow()}
+	edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "🔠 Выберите букву класса:", tgbotapi.NewInlineKeyboardMarkup(rows...))
+	bot.Send(edit)
 }
 
 func promptStudentSelect(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, database *sql.DB) {
 	chatID := cq.Message.Chat.ID
 	state := auctionStates[chatID]
 	students, _ := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
+
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for _, student := range students {
 		selected := ""
@@ -225,14 +306,25 @@ func promptStudentSelect(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, datab
 	if len(state.SelectedStudentIDs) > 0 {
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Готово", "auction_students_done")))
 	}
+	rows = append(rows, auctionBackCancelRow())
 
 	edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "👥 Выберите учеников для аукциона:", tgbotapi.NewInlineKeyboardMarkup(rows...))
 	bot.Send(edit)
 }
 
-func promptPointsInput(msg *tgbotapi.Message, bot *tgbotapi.BotAPI) {
-	bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "✏️ Введите количество баллов для списания:"))
+func promptPointsInput(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI) {
+	chatID := cq.Message.Chat.ID
+	rows := [][]tgbotapi.InlineKeyboardButton{auctionBackCancelRow()}
+	edit := tgbotapi.NewEditMessageTextAndMarkup(
+		chatID,
+		cq.Message.MessageID,
+		"✏️ Введите количество баллов для списания (или отправьте «отмена»):",
+		tgbotapi.NewInlineKeyboardMarkup(rows...),
+	)
+	bot.Send(edit)
 }
+
+// ——— accessors ———
 
 func GetAuctionState(userID int64) *AuctionFSMState {
 	return auctionStates[userID]
