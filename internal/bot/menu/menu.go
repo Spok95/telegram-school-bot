@@ -66,6 +66,7 @@ func adminMenu() tgbotapi.ReplyKeyboardMarkup {
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("📥 Экспорт отчёта"),
+			tgbotapi.NewKeyboardButton("🗂 Справочники"),
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("📅 Установить период"),

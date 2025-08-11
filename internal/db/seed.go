@@ -38,7 +38,7 @@ func SeedScoreLevels(database *sql.DB) error {
 		_, err := database.Exec(`
 INSERT INTO score_levels (value, label, category_id)
 VALUES (?, ?, ?)
-ON CONFLICT(value, label, category_id) DO NOTHING
+ON CONFLICT(category_id, value) DO NOTHING
 `, level.Value, level.Label, level.CategoryID)
 		if err != nil {
 			return fmt.Errorf("insert score_level: %w", err)

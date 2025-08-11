@@ -151,6 +151,10 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		handlers.HandleExportText(bot, database, msg)
 		return
 	}
+	if handlers.GetCatalogState(userID) != nil {
+		handlers.HandleCatalogText(bot, database, msg)
+		return
+	}
 	if handlers.GetAddChildFSMState(userID) != "" {
 		handlers.HandleAddChildText(bot, database, msg)
 		return
@@ -189,6 +193,10 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		}
 	case "/auction", "🎯 Аукцион":
 		go handlers.StartAuctionFSM(bot, database, msg)
+	case "🗂 Справочники":
+		if *user.Role == "admin" {
+			go handlers.StartCatalogFSM(bot, database, msg)
+		}
 	default:
 		role := getUserFSMRole(chatID)
 		if role == "" {
@@ -319,6 +327,11 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 			return
 		}
 		handlers.ShowStudentRating(bot, database, chatID, int64(studentID))
+		return
+	}
+	if strings.HasPrefix(data, "catalog_") ||
+		data == "catalog_back" || data == "catalog_cancel" {
+		handlers.HandleCatalogCallback(bot, database, cb)
 		return
 	}
 

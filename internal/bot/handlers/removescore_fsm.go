@@ -140,9 +140,17 @@ func HandleRemoveCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 		case 5: // назад к категориям
 			state.Step = 4
 			user, _ := db.GetUserByTelegramID(database, chatID)
-			cats, _ := db.GetAllCategories(database, string(*user.Role))
-			var rows [][]tgbotapi.InlineKeyboardButton
+			cats, _ := db.GetCategories(database, false)
+			categories := make([]models.Category, 0, len(cats))
+			role := string(*user.Role)
 			for _, c := range cats {
+				if role != "admin" && role != "administration" && c.Name == "Аукцион" {
+					continue
+				}
+				categories = append(categories, c)
+			}
+			var rows [][]tgbotapi.InlineKeyboardButton
+			for _, c := range categories {
 				cb := fmt.Sprintf("remove_category_%d", c.ID)
 				rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 					tgbotapi.NewInlineKeyboardButtonData(c.Name, cb),
@@ -153,7 +161,7 @@ func HandleRemoveCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			return
 		case 6: // текстовый комментарий → назад к уровням
 			state.Step = 5
-			levels, _ := db.GetLevelsByCategoryID(database, state.CategoryID)
+			levels, _ := db.GetLevelsByCategoryIDFull(database, int64(state.CategoryID), false)
 			var rows [][]tgbotapi.InlineKeyboardButton
 			for _, l := range levels {
 				cb := fmt.Sprintf("remove_level_%d", l.ID)
@@ -275,9 +283,17 @@ func HandleRemoveCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 	if data == "remove_students_done" {
 		state.Step = 4
 		user, _ := db.GetUserByTelegramID(database, chatID)
-		cats, _ := db.GetAllCategories(database, string(*user.Role))
-		var rows [][]tgbotapi.InlineKeyboardButton
+		cats, _ := db.GetCategories(database, false) // только активные
+		categories := make([]models.Category, 0, len(cats))
+		role := string(*user.Role)
 		for _, c := range cats {
+			if role != "admin" && role != "administration" && c.Name == "Аукцион" {
+				continue
+			}
+			categories = append(categories, c)
+		}
+		var rows [][]tgbotapi.InlineKeyboardButton
+		for _, c := range categories {
 			cb := fmt.Sprintf("remove_category_%d", c.ID)
 			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData(c.Name, cb),
@@ -293,7 +309,7 @@ func HandleRemoveCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 		state.CategoryID = catID
 		state.Step = 5
 
-		levels, _ := db.GetLevelsByCategoryID(database, catID)
+		levels, _ := db.GetLevelsByCategoryIDFull(database, int64(state.CategoryID), false)
 		var rows [][]tgbotapi.InlineKeyboardButton
 		for _, l := range levels {
 			cb := fmt.Sprintf("remove_level_%d", l.ID)

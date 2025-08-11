@@ -133,7 +133,15 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		case 5: // выбирали уровень → назад к категории
 			state.Step = 4
 			user, _ := db.GetUserByTelegramID(database, chatID)
-			categories, _ := db.GetAllCategories(database, string(*user.Role))
+			cats, _ := db.GetCategories(database, false)
+			categories := make([]models.Category, 0, len(cats))
+			role := string(*user.Role)
+			for _, c := range cats {
+				if role != "admin" && role != "administration" && c.Name == "Аукцион" {
+					continue
+				}
+				categories = append(categories, c)
+			}
 			var buttons [][]tgbotapi.InlineKeyboardButton
 			for _, c := range categories {
 				callback := fmt.Sprintf("add_score_category_%d", c.ID)
@@ -146,7 +154,7 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 			return
 		case 6: // ввод комментария → назад к уровню
 			state.Step = 5
-			levels, _ := db.GetLevelsByCategoryID(database, state.CategoryID)
+			levels, _ := db.GetLevelsByCategoryIDFull(database, int64(state.CategoryID), false)
 			var buttons [][]tgbotapi.InlineKeyboardButton
 			for _, l := range levels {
 				callback := fmt.Sprintf("add_score_level_%d", l.ID)
@@ -271,7 +279,16 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 	if data == "add_students_done" {
 		state.Step = 4
 		user, _ := db.GetUserByTelegramID(database, chatID)
-		categories, _ := db.GetAllCategories(database, string(*user.Role))
+		cats, _ := db.GetCategories(database, false) // только активные
+		categories := make([]models.Category, 0, len(cats))
+		role := string(*user.Role)
+		for _, c := range cats {
+			if role != "admin" && role != "administration" && c.Name == "Аукцион" {
+				continue
+			}
+			categories = append(categories, c)
+		}
+
 		var buttons [][]tgbotapi.InlineKeyboardButton
 		for _, c := range categories {
 			callback := fmt.Sprintf("add_score_category_%d", c.ID)
@@ -288,7 +305,7 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		catID, _ := strconv.Atoi(strings.TrimPrefix(data, "add_score_category_"))
 		state.CategoryID = catID
 		state.Step = 5
-		levels, _ := db.GetLevelsByCategoryID(database, catID)
+		levels, _ := db.GetLevelsByCategoryIDFull(database, int64(state.CategoryID), false)
 		var buttons [][]tgbotapi.InlineKeyboardButton
 		for _, l := range levels {
 			callback := fmt.Sprintf("add_score_level_%d", l.ID)
