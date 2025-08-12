@@ -3,10 +3,11 @@ package handlers
 import (
 	"database/sql"
 	"fmt"
+	"log"
+
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"log"
 )
 
 func HandleMyScore(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
@@ -166,6 +167,7 @@ func ShowStudentRating(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, stu
 			continue
 		}
 		summary[label] = sum
+		total += sum
 	}
 
 	text := fmt.Sprintf("📊 Общий рейтинг: %d баллов\n\n", total)

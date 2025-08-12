@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Spok95/telegram-school-bot/internal/bot/handlers"
 	"github.com/Spok95/telegram-school-bot/internal/bot/shared/fsmutil"
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -93,15 +94,19 @@ func HandleStudentFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *
 	}
 }
 
-func SaveStudentRequest(database *sql.DB, chatID int64, data *StudentRegisterData) error {
+func SaveStudentRequest(database *sql.DB, chatID int64, data *StudentRegisterData) (int64, error) {
 	classID, err := db.ClassIDByNumberAndLetter(database, data.ClassNumber, data.ClassLetter)
 	if err != nil {
-		return fmt.Errorf("❌ Ошибка: выбранный класс не существует. Обратитесь к администратору.%w", err)
+		return 0, fmt.Errorf("❌ Ошибка: выбранный класс не существует. %w", err)
 	}
-	_, err = database.Exec(`INSERT INTO users (telegram_id, name, role, class_id, class_number, class_letter, confirmed) 
+	res, err := database.Exec(`INSERT INTO users (telegram_id, name, role, class_id, class_number, class_letter, confirmed) 
 			VALUES (?, ?, 'student', ?, ?, ?, 0)`,
 		chatID, data.Name, classID, data.ClassNumber, data.ClassLetter)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	newID, _ := res.LastInsertId()
+	return newID, nil
 }
 
 func HandleStudentCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, database *sql.DB) {
@@ -152,7 +157,7 @@ func HandleStudentCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, dat
 		studentData[chatID].ClassLetter = letter
 		studentFSM[chatID] = StateStudentWaitingConfirm
 
-		err := SaveStudentRequest(database, chatID, studentData[chatID])
+		id, err := SaveStudentRequest(database, chatID, studentData[chatID])
 		if err != nil {
 			fsmutil.DisableMarkup(bot, chatID, cb.Message.MessageID)
 			bot.Send(tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "Ошибка при сохранении заявки. Попробуйте позже."))
@@ -160,7 +165,7 @@ func HandleStudentCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, dat
 			delete(studentData, chatID)
 			return
 		}
-
+		handlers.NotifyAdminsAboutNewUser(bot, database, id)
 		fsmutil.DisableMarkup(bot, chatID, cb.Message.MessageID)
 		bot.Send(tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "Заявка на регистрацию отправлена администратору. Ожидайте подтверждения."))
 		delete(studentFSM, chatID)

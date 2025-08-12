@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Spok95/telegram-school-bot/internal/bot/handlers"
 	"github.com/Spok95/telegram-school-bot/internal/bot/shared/fsmutil"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -155,7 +156,7 @@ func HandleParentCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			return
 		}
 
-		err = SaveParentRequest(database, chatID, studentID, parentData[chatID].ParentName)
+		parentID, err := SaveParentRequest(database, chatID, studentID, parentData[chatID].ParentName)
 		if err != nil {
 			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
 			bot.Send(tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "Ошибка при сохранении. Попробуйте позже."))
@@ -163,6 +164,7 @@ func HandleParentCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			delete(parentData, chatID)
 			return
 		}
+		handlers.NotifyAdminsAboutNewUser(bot, database, parentID)
 		fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
 		bot.Send(tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "Заявка на регистрацию родителя отправлена администратору. Ожидайте подтверждения."))
 		delete(parentFSM, chatID)
@@ -180,12 +182,12 @@ func FindStudentID(database *sql.DB, data *ParentRegisterData) (int, error) {
 	return id, err
 }
 
-func SaveParentRequest(database *sql.DB, parentTelegramID int64, studentID int, parentName string) error {
+func SaveParentRequest(database *sql.DB, parentTelegramID int64, studentID int, parentName string) (int64, error) {
 	var parentID int64
 	tx, err := database.Begin()
 	if err != nil {
 		log.Printf("[PARENT_ERROR] failed to begin transaction: %v", err)
-		return err
+		return 0, err
 	}
 	err = tx.QueryRow(`SELECT id FROM users WHERE telegram_id = ?`, parentTelegramID).Scan(&parentID)
 	if err == sql.ErrNoRows {
@@ -197,12 +199,12 @@ func SaveParentRequest(database *sql.DB, parentTelegramID int64, studentID int, 
 		if err != nil {
 			log.Printf("[PARENT_ERROR] failed to insert parent user: %v", err)
 			tx.Rollback()
-			return err
+			return 0, err
 		}
 		parentID, _ = res.LastInsertId()
 	} else if err != nil {
 		tx.Rollback()
-		return err
+		return 0, err
 	}
 
 	// Привязка к ученику
@@ -210,14 +212,14 @@ func SaveParentRequest(database *sql.DB, parentTelegramID int64, studentID int, 
 	if err != nil {
 		log.Printf("[PARENT_ERROR] failed to insert into parents_students: %v", err)
 		tx.Rollback()
-		return err
+		return 0, err
 	}
 	err = tx.Commit()
 	if err != nil {
 		log.Printf("[PARENT_ERROR] failed to commit transaction: %v", err)
-		return err
+		return 0, err
 	}
 
 	log.Printf("[PARENT_SUCCESS] linked parent (tg_id=%d) to student_id=%d", parentTelegramID, studentID)
-	return nil
+	return parentID, nil
 }

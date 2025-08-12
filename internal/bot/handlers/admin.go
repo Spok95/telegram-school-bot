@@ -203,6 +203,47 @@ func RejectUser(database *sql.DB, bot *tgbotapi.BotAPI, name string, adminID int
 	return nil
 }
 
+// Уведомление админам о новой заявке на авторизацию пользователя
+func NotifyAdminsAboutNewUser(bot *tgbotapi.BotAPI, database *sql.DB, userID int64) {
+	// читаем профиль со всем, что нужно для карточки
+	var (
+		name, role         string
+		tgID               int64
+		classNum, classLet sql.NullString
+	)
+	_ = database.QueryRow(`SELECT name, role, telegram_id, class_number, class_letter FROM users WHERE id = ?`, userID).
+		Scan(&name, &role, &tgID, &classNum, &classLet)
+
+	// формируем текст
+	msg := fmt.Sprintf("Заявка на авторизацию:\n👤 %s\n🧩 Роль: %s\nTelegramID: %d", name, role, tgID)
+	if role == "student" && classNum.Valid && classLet.Valid {
+		msg = fmt.Sprintf("Заявка на авторизацию:\n👤 %s\n🏫 Класс: %s%s\n🧩 Роль: %s\nTelegramID: %d",
+			name, classNum.String, classLet.String, role, tgID)
+	}
+
+	// кнопки подтверждения/отклонения такие же, как в ShowPendingUsers
+	btnYes := tgbotapi.NewInlineKeyboardButtonData("✅ Подтвердить", fmt.Sprintf("confirm_%d", userID))
+	btnNo := tgbotapi.NewInlineKeyboardButtonData("❌ Отклонить", fmt.Sprintf("reject_%d", userID))
+	markup := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(btnYes, btnNo))
+
+	// уведомляем всех админов
+	rows, err := database.Query(`SELECT telegram_id FROM users WHERE role IN ('admin', 'administration') AND confirmed = 1 AND is_active = 1`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var adminTG int64
+		if err := rows.Scan(&adminTG); err != nil {
+			continue
+		}
+		m := tgbotapi.NewMessage(adminTG, msg)
+		m.ReplyMarkup = markup
+		bot.Send(m)
+	}
+}
+
 func NotifyAdminsAboutScoreRequest(bot *tgbotapi.BotAPI, database *sql.DB, score models.Score, studentName string) {
 	action := "начисления"
 	if score.Type == "remove" {

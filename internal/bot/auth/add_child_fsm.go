@@ -1,4 +1,4 @@
-package handlers
+package auth
 
 import (
 	"database/sql"
@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Spok95/telegram-school-bot/internal/bot/auth"
+	"github.com/Spok95/telegram-school-bot/internal/bot/handlers"
 	"github.com/Spok95/telegram-school-bot/internal/bot/shared/fsmutil"
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -21,7 +21,7 @@ const (
 )
 
 var addChildFSM = make(map[int64]string)
-var addChildData = make(map[int64]*auth.ParentRegisterData)
+var addChildData = make(map[int64]*ParentRegisterData)
 
 // ===== helpers (как в export/add/remove) =====
 
@@ -65,7 +65,7 @@ func addChildEditMenu(bot *tgbotapi.BotAPI, chatID int64, messageID int, text st
 func StartAddChild(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
 	addChildFSM[chatID] = StateAddChildName
-	addChildData[chatID] = &auth.ParentRegisterData{}
+	addChildData[chatID] = &ParentRegisterData{}
 	bot.Send(tgbotapi.NewMessage(chatID, "Введите ФИО ребёнка, которого хотите добавить:\n(или напишите Отмена)"))
 }
 
@@ -184,7 +184,7 @@ func handleAddChildFinish(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 	addChildFSM[chatID] = StateAddChildWaiting
 
 	// Находим ученика
-	studentID, err := auth.FindStudentID(database, &auth.ParentRegisterData{
+	studentID, err := FindStudentID(database, &ParentRegisterData{
 		StudentName: addChildData[chatID].StudentName,
 		ClassNumber: addChildData[chatID].ClassNumber,
 		ClassLetter: addChildData[chatID].ClassLetter,
@@ -212,7 +212,7 @@ func handleAddChildFinish(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 	}
 
 	// Уведомляем админов о новой заявке (отдельные кнопки подтверждения/отклонения)
-	NotifyAdminsAboutParentLink(bot, database, reqID)
+	handlers.NotifyAdminsAboutParentLink(bot, database, reqID)
 
 	fsmutil.DisableMarkup(bot, chatID, messageID)
 	bot.Send(tgbotapi.NewEditMessageText(chatID, messageID, "📨 Заявка на добавление ребёнка отправлена администратору. Ожидайте подтверждения."))

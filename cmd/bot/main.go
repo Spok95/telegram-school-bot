@@ -159,8 +159,8 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		handlers.HandleCatalogText(bot, database, msg)
 		return
 	}
-	if handlers.GetAddChildFSMState(userID) != "" {
-		handlers.HandleAddChildText(bot, database, msg)
+	if auth.GetAddChildFSMState(userID) != "" {
+		auth.HandleAddChildText(bot, database, msg)
 		return
 	}
 
@@ -172,7 +172,7 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 	case "/my_score", "📊 Мой рейтинг":
 		go handlers.HandleMyScore(bot, database, msg)
 	case "➕ Добавить ребёнка":
-		go handlers.StartAddChild(bot, database, msg)
+		go auth.StartAddChild(bot, database, msg)
 	case "📊 Рейтинг ребёнка":
 		if *user.Role == models.Parent {
 			go handlers.HandleParentRatingRequest(bot, database, chatID, user.ID)
@@ -253,12 +253,12 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		auth.HandleStudentCallback(cb, bot, database)
 		return
 	}
-	if handlers.GetAddChildFSMState(chatID) != "" {
+	if auth.GetAddChildFSMState(chatID) != "" {
 		// Назад/Отмена add-child
 		if data == "add_child_back" || data == "add_child_cancel" ||
 			strings.HasPrefix(data, "parent_class_num_") ||
 			strings.HasPrefix(data, "parent_class_letter_") {
-			handlers.HandleAddChildCallback(bot, database, cb)
+			auth.HandleAddChildCallback(bot, database, cb)
 			return
 		}
 	}
@@ -318,7 +318,7 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 	if data == "add_another_child_yes" {
 		bot.Send(tgbotapi.NewMessage(chatID, "Введите ФИО следующего ребёнка:"))
 		msg := &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: chatID}} // мок-сообщение для FSM
-		handlers.StartAddChild(bot, database, msg)
+		auth.StartAddChild(bot, database, msg)
 		return
 	}
 	if data == "add_another_child_no" {

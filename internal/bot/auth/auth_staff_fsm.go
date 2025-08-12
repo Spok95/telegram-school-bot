@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"strings"
 
+	"github.com/Spok95/telegram-school-bot/internal/bot/handlers"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -38,13 +39,14 @@ func HandleStaffFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *sq
 		staffData[chatID] = msg
 		staffFSM[chatID] = StateStaffWait
 
-		err := SaveStaffRequest(database, chatID, msg, role)
+		id, err := SaveStaffRequest(database, chatID, msg, role)
 		if err != nil {
 			bot.Send(tgbotapi.NewMessage(chatID, "Ошибка при сохранении заявки. Попробуйте позже."))
 			delete(staffFSM, chatID)
 			delete(staffData, chatID)
 			return
 		}
+		handlers.NotifyAdminsAboutNewUser(bot, database, id)
 		bot.Send(tgbotapi.NewMessage(chatID, "Заявка на регистрацию отправлена администратору. Ожидайте подтверждения."))
 
 		delete(staffFSM, chatID)
@@ -52,10 +54,14 @@ func HandleStaffFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *sq
 	}
 }
 
-func SaveStaffRequest(database *sql.DB, telegramID int64, name, role string) error {
-	_, err := database.Exec(`
+func SaveStaffRequest(database *sql.DB, telegramID int64, name, role string) (int64, error) {
+	res, err := database.Exec(`
 		INSERT INTO users (telegram_id, name, role, confirmed)
 		VALUES (?, ?, ?, 0)
 	`, telegramID, name, role)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	id, _ := res.LastInsertId()
+	return id, nil
 }
