@@ -9,6 +9,7 @@ import (
 
 	"github.com/Spok95/telegram-school-bot/internal/bot/auth"
 	"github.com/Spok95/telegram-school-bot/internal/bot/shared/fsmutil"
+	"github.com/Spok95/telegram-school-bot/internal/db"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -82,7 +83,10 @@ func HandleAddChildText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Me
 
 	switch state {
 	case StateAddChildName:
-		addChildData[chatID].StudentName = msg.Text
+		fio := strings.TrimSpace(msg.Text)
+		fio = db.ToTitleRU(fio)
+
+		addChildData[chatID].StudentName = fio
 		addChildFSM[chatID] = StateAddChildClassNumber
 
 		out := tgbotapi.NewMessage(chatID, "Выберите номер класса ребёнка:")

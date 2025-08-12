@@ -70,6 +70,7 @@ func adminMenu() tgbotapi.ReplyKeyboardMarkup {
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("📅 Установить период"),
+			tgbotapi.NewKeyboardButton("👥 Пользователи"),
 		),
 	)
 }

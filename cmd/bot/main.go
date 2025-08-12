@@ -151,6 +151,10 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		handlers.HandleExportText(bot, database, msg)
 		return
 	}
+	if handlers.GetAdminUsersState(userID) != nil {
+		handlers.HandleAdminUsersText(bot, database, msg)
+		return
+	}
 	if handlers.GetCatalogState(userID) != nil {
 		handlers.HandleCatalogText(bot, database, msg)
 		return
@@ -190,6 +194,10 @@ func handleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 	case "/export", "📥 Экспорт отчёта":
 		if *user.Role == "admin" || *user.Role == "administration" {
 			go handlers.StartExportFSM(bot, msg)
+		}
+	case "👥 Пользователи":
+		if *user.Role == "admin" {
+			go handlers.StartAdminUsersFSM(bot, database, msg)
 		}
 	case "/auction", "🎯 Аукцион":
 		go handlers.StartAuctionFSM(bot, database, msg)
@@ -327,6 +335,10 @@ func handleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 			return
 		}
 		handlers.ShowStudentRating(bot, database, chatID, int64(studentID))
+		return
+	}
+	if strings.HasPrefix(data, "admusr_") {
+		handlers.HandleAdminUsersCallback(bot, database, cb)
 		return
 	}
 	if strings.HasPrefix(data, "catalog_") ||
