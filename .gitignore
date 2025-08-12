@@ -33,6 +33,7 @@ config.yaml
 *.db
 *.sqlite
 *.sqlite3
+data/*.db
 
 # Telebot session (если сохраняешь состояние бота в файл)
 *.session.json

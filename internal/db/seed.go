@@ -22,7 +22,7 @@ func SeedScoreLevels(database *sql.DB) error {
 			return err
 		}
 	}
-	_, err := database.Exec(`INSERT OR IGNORE INTO categories (id, name, label) VALUES (?, ?, ?)`, 999, "Аукцион", "Аукцион")
+	_, err := database.Exec(`INSERT OR IGNORE INTO categories (name, label) VALUES (?, ?)`, "Аукцион", "Аукцион")
 	if err != nil {
 		log.Fatalf("ошибка вставки категории Аукцион: %v", err)
 	}

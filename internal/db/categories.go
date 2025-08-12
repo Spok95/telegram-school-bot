@@ -227,3 +227,17 @@ func SetLevelActive(database *sql.DB, id int64, active bool) error {
 	}
 	return nil
 }
+
+func GetCategoryIDByName(database *sql.DB, name string) int {
+	var id int
+	row := database.QueryRow(`SELECT id FROM categories WHERE name = ?`, name)
+	_ = row.Scan(&id)
+	return id
+}
+
+func GetCategoryNameByID(database *sql.DB, id int) string {
+	var name string
+	row := database.QueryRow(`SELECT name FROM categories WHERE id = ?`, id)
+	_ = row.Scan(&name)
+	return name
+}

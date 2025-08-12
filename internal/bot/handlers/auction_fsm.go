@@ -244,10 +244,11 @@ func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 	}
 
 	comment := "Аукцион"
+	catID := db.GetCategoryIDByName(database, "Аукцион")
 	for _, studentID := range state.SelectedStudentIDs {
 		score := models.Score{
 			StudentID:  studentID,
-			CategoryID: 999, // спец-категория для аукциона
+			CategoryID: int64(catID), // спец-категория для аукциона
 			Points:     points,
 			Type:       "remove",
 			Comment:    &comment,
