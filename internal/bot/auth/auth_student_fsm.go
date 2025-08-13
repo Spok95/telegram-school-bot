@@ -100,7 +100,7 @@ func SaveStudentRequest(database *sql.DB, chatID int64, data *StudentRegisterDat
 		return 0, fmt.Errorf("❌ Ошибка: выбранный класс не существует. %w", err)
 	}
 	res, err := database.Exec(`INSERT INTO users (telegram_id, name, role, class_id, class_number, class_letter, confirmed) 
-			VALUES (?, ?, 'student', ?, ?, ?, 0)`,
+			VALUES ($1, $2, 'student', $3, $4, $5, 0)`,
 		chatID, data.Name, classID, data.ClassNumber, data.ClassLetter)
 	if err != nil {
 		return 0, err

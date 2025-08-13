@@ -13,7 +13,7 @@ import (
 func GetUserByTelegramID(db *sql.DB, telegramID int64) (*models.User, error) {
 	query := `
 SELECT id, telegram_id, name, role, class_id, class_name, class_number, class_letter, child_id, confirmed, is_active
-FROM users WHERE telegram_id = ?`
+FROM users WHERE telegram_id = $1`
 
 	row := db.QueryRow(query, telegramID)
 
@@ -30,7 +30,7 @@ func GetStudentsByClass(database *sql.DB, number int64, letter string) ([]models
 	query := `
 SELECT id, telegram_id, name, role, class_id, class_name, class_number, class_letter, child_id, confirmed, is_active
 FROM users
-WHERE role = 'student' AND class_number = ? AND class_letter = ?`
+WHERE role = 'student' AND class_number = $1 AND class_letter = $2`
 
 	rows, err := database.Query(query, number, letter)
 	if err != nil {
@@ -55,7 +55,7 @@ func GetChildrenByParentID(db *sql.DB, parentID int64) ([]models.User, error) {
 		SELECT u.id, u.name, u.class_number, u.class_letter
 		FROM users u
 		JOIN parents_students ps ON ps.student_id = u.id
-		WHERE ps.parent_id = ?
+		WHERE ps.parent_id = $1
 	`, parentID)
 	if err != nil {
 		return nil, err
@@ -78,7 +78,7 @@ func GetUserByID(database *sql.DB, id int64) (models.User, error) {
 	query := `
 SELECT id, telegram_id, name, role, class_id, class_name, class_number, class_letter, child_id, confirmed, is_active
 FROM users
-WHERE id = ?
+WHERE id = $1
 `
 	err := database.QueryRow(query, id).Scan(
 		&user.ID,
@@ -98,7 +98,7 @@ WHERE id = ?
 
 func ClassIDByNumberAndLetter(database *sql.DB, number int64, letter string) (int64, error) {
 	var classID int64
-	query := `SELECT id FROM classes WHERE number = ? AND letter = ?`
+	query := `SELECT id FROM classes WHERE number = $1 AND letter = $2`
 	err := database.QueryRow(query, number, letter).Scan(&classID)
 	if err != nil {
 		log.Println("Ошибка при поиске class_id:", err)
@@ -120,16 +120,16 @@ func UpdateUserRoleWithAudit(database *sql.DB, targetUserID int64, newRole strin
 	}()
 
 	var oldRole string
-	if err = tx.QueryRow(`SELECT role FROM users WHERE id = ?`, targetUserID).Scan(&oldRole); err != nil {
+	if err = tx.QueryRow(`SELECT role FROM users WHERE id = $1`, targetUserID).Scan(&oldRole); err != nil {
 		return err
 	}
 
-	if _, err = tx.Exec(`UPDATE users SET role = ? WHERE id = ?`, newRole, targetUserID); err != nil {
+	if _, err = tx.Exec(`UPDATE users SET role = $1 WHERE id = $2`, newRole, targetUserID); err != nil {
 		return err
 	}
 
 	if _, err = tx.Exec(`INSERT INTO role_changes (user_id, old_role, new_role, changed_by, changed_at)
-	                     VALUES (?, ?, ?, ?, datetime('now'))`, targetUserID, oldRole, newRole, changedBy); err != nil {
+	                     VALUES ($1, $2, $3, $4, NOW())`, targetUserID, oldRole, newRole, changedBy); err != nil {
 		return err
 	}
 
@@ -154,12 +154,12 @@ func FindUsersByQuery(database *sql.DB, q string, limit int) ([]models.User, err
 	const query = `
 SELECT id, telegram_id, name, role, class_id, class_name, class_number, class_letter, child_id, confirmed, is_active
 FROM users
-WHERE name LIKE ?              -- TitleCase
-   OR name LIKE ?              -- UPPER
-   OR name LIKE ?              -- как ввели
-   OR (CAST(class_number AS TEXT) || UPPER(class_letter)) LIKE ?
+WHERE name LIKE $1              -- TitleCase
+   OR name LIKE $2              -- UPPER
+   OR name LIKE $3              -- как ввели
+   OR (CAST(class_number AS TEXT) || UPPER(class_letter)) LIKE $4
 ORDER BY name ASC
-LIMIT ?`
+LIMIT $5`
 
 	rows, err := database.Query(
 		query,
@@ -227,25 +227,25 @@ func ChangeRoleWithCleanup(database *sql.DB, targetUserID int64, newRole string,
 	}()
 
 	var oldRole string
-	if err = tx.QueryRow(`SELECT role FROM users WHERE id = ?`, targetUserID).Scan(&oldRole); err != nil {
+	if err = tx.QueryRow(`SELECT role FROM users WHERE id = $1`, targetUserID).Scan(&oldRole); err != nil {
 		return err
 	}
 
 	// Если уходим со student — чистим класс
 	if oldRole == "student" && newRole != "student" {
-		if _, err = tx.Exec(`UPDATE users SET class_id=NULL, class_number=NULL, class_letter=NULL WHERE id=?`, targetUserID); err != nil {
+		if _, err = tx.Exec(`UPDATE users SET class_id=NULL, class_number=NULL, class_letter=NULL WHERE id=$1`, targetUserID); err != nil {
 			return err
 		}
 	}
 	// Если уходим с parent — рвём связи с детьми
 	if oldRole == "parent" && newRole != "parent" {
-		if _, err = tx.Exec(`DELETE FROM parents_students WHERE parent_id = ?`, targetUserID); err != nil {
+		if _, err = tx.Exec(`DELETE FROM parents_students WHERE parent_id = $1`, targetUserID); err != nil {
 			return err
 		}
 	}
 	// Если новая роль не student — гарантированно нет класса
 	if newRole != "student" {
-		if _, err = tx.Exec(`UPDATE users SET role=?, class_id=NULL, class_number=NULL, class_letter=NULL WHERE id=?`, newRole, targetUserID); err != nil {
+		if _, err = tx.Exec(`UPDATE users SET role=$1, class_id=NULL, class_number=NULL, class_letter=NULL WHERE id=$2`, newRole, targetUserID); err != nil {
 			return err
 		}
 	} else {
@@ -254,7 +254,7 @@ func ChangeRoleWithCleanup(database *sql.DB, targetUserID int64, newRole string,
 	}
 
 	if _, err = tx.Exec(`INSERT INTO role_changes (user_id, old_role, new_role, changed_by, changed_at)
-	                     VALUES (?, ?, ?, ?, datetime('now'))`, targetUserID, oldRole, newRole, changedBy); err != nil {
+	                     VALUES ($1, $2, $3, $4, NOW())`, targetUserID, oldRole, newRole, changedBy); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -273,13 +273,13 @@ func ChangeRoleToStudentWithAudit(database *sql.DB, targetUserID int64, classNum
 	}()
 
 	var oldRole string
-	if err = tx.QueryRow(`SELECT role FROM users WHERE id = ?`, targetUserID).Scan(&oldRole); err != nil {
+	if err = tx.QueryRow(`SELECT role FROM users WHERE id = $1`, targetUserID).Scan(&oldRole); err != nil {
 		return err
 	}
 
 	// если был parent — порвём связи
 	if oldRole == "parent" {
-		if _, err = tx.Exec(`DELETE FROM parents_students WHERE parent_id = ?`, targetUserID); err != nil {
+		if _, err = tx.Exec(`DELETE FROM parents_students WHERE parent_id = $1`, targetUserID); err != nil {
 			return err
 		}
 	}
@@ -290,13 +290,13 @@ func ChangeRoleToStudentWithAudit(database *sql.DB, targetUserID int64, classNum
 		return fmt.Errorf("класс %d%s не найден: %w", classNumber, classLetter, err)
 	}
 
-	if _, err = tx.Exec(`UPDATE users SET role='student', class_id=?, class_number=?, class_letter=? WHERE id=?`,
+	if _, err = tx.Exec(`UPDATE users SET role='student', class_id=$1, class_number=$2, class_letter=$3 WHERE id=$4`,
 		cid, classNumber, classLetter, targetUserID); err != nil {
 		return err
 	}
 
 	if _, err = tx.Exec(`INSERT INTO role_changes (user_id, old_role, new_role, changed_by, changed_at)
-	                     VALUES (?, ?, 'student', ?, datetime('now'))`, targetUserID, oldRole, changedBy); err != nil {
+	                     VALUES ($1, $2, 'student', $3, NOW())`, targetUserID, oldRole, changedBy); err != nil {
 		return err
 	}
 	return tx.Commit()

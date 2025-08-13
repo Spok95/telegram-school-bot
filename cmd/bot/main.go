@@ -36,7 +36,7 @@ func main() {
 	log.Printf("Бот запущен как %s", bot.Self.UserName)
 
 	// Инициализация БД через db.Init()
-	database, err := db.Init()
+	database, err := db.MustOpen()
 	if err != nil {
 		log.Fatalf("Ошибка подключения к БД: %v", err)
 	}

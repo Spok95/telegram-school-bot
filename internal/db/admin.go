@@ -2,11 +2,12 @@ package db
 
 import (
 	"database/sql"
-	"github.com/Spok95/telegram-school-bot/internal/models"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"log"
 	"os"
 	"strconv"
+
+	"github.com/Spok95/telegram-school-bot/internal/models"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 var UserFSMRole = make(map[int64]string)
@@ -19,14 +20,14 @@ func EnsureAdmin(chatID int64, database *sql.DB, text string, bot *tgbotapi.BotA
 
 		// Проверяем, существует ли админ в базе
 		var exists bool
-		err := database.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE telegram_id = ?)`, chatID).Scan(&exists)
+		err := database.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE telegram_id = $1)`, chatID).Scan(&exists)
 		if err != nil {
 			bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Ошибка авторизации админа."))
 			return
 		}
 
 		if !exists {
-			_, err := database.Exec(`INSERT INTO users (telegram_id, name, role, confirmed) VALUES (?, ?, ?, 1)`,
+			_, err := database.Exec(`INSERT INTO users (telegram_id, name, role, confirmed) VALUES ($1, $2, $3, TRUE)`,
 				chatID, "Администратор", models.Admin)
 			if err != nil {
 				bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Ошибка создания записи админа."))
@@ -36,8 +37,8 @@ func EnsureAdmin(chatID int64, database *sql.DB, text string, bot *tgbotapi.BotA
 			_, err = database.Exec(`
 				INSERT INTO role_changes (user_id, old_role, new_role, changed_by, changed_at)
 				VALUES (
-					(SELECT id FROM users WHERE telegram_id = ?),
-					'', 'admin', ?, datetime('now')
+					(SELECT id FROM users WHERE telegram_id = $1),
+					'', 'admin', $2, NOW()
 				)
 			`, adminID, adminID)
 			if err != nil {

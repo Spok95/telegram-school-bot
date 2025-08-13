@@ -3,7 +3,6 @@ package auth
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 
@@ -190,10 +189,6 @@ func handleAddChildFinish(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 		ClassLetter: addChildData[chatID].ClassLetter,
 	})
 
-	fmt.Println()
-	log.Printf("Файл add_child_fsm: %d", studentID)
-	fmt.Println()
-
 	if err != nil {
 		fsmutil.DisableMarkup(bot, chatID, messageID)
 		bot.Send(tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ученик не найден. Введите ФИО заново:"))
@@ -227,7 +222,7 @@ func handleAddChildFinish(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 func CreateParentLinkRequest(database *sql.DB, parentTelegramID int64, studentID int) (int64, error) {
 	// находим parent_id по telegram_id
 	var parentID int64
-	err := database.QueryRow(`SELECT id FROM users WHERE telegram_id = ? AND role = 'parent' AND confirmed = 1`, parentTelegramID).Scan(&parentID)
+	err := database.QueryRow(`SELECT id FROM users WHERE telegram_id = $1 AND role = 'parent' AND confirmed = 1`, parentTelegramID).Scan(&parentID)
 	if err != nil {
 		return 0, fmt.Errorf("родитель не найден/не подтверждён: %w", err)
 	}
@@ -235,7 +230,7 @@ func CreateParentLinkRequest(database *sql.DB, parentTelegramID int64, studentID
 	// создаём заявку
 	res, err := database.Exec(`
 		INSERT INTO parent_link_requests (parent_id, student_id, created_at)
-		VALUES (?, ?, CURRENT_TIMESTAMP)
+		VALUES ($1, $2, CURRENT_TIMESTAMP)
 	`, parentID, studentID)
 	if err != nil {
 		return 0, err

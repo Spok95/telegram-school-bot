@@ -145,10 +145,6 @@ func HandleParentCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 
 		studentID, err := FindStudentID(database, parentData[chatID])
 
-		fmt.Println()
-		log.Printf("Файл auth_parent_fsm: %d", studentID)
-		fmt.Println()
-
 		if err != nil {
 			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
 			bot.Send(tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "❌ Ученик не найден. Введите ФИО заново:"))
@@ -177,7 +173,7 @@ func FindStudentID(database *sql.DB, data *ParentRegisterData) (int, error) {
 	var id int
 	err := database.QueryRow(`
 		SELECT id FROM users
-		WHERE name = ? AND class_number = ? AND class_letter = ? AND role = 'student' AND confirmed = 1
+		WHERE name = $1 AND class_number = $2 AND class_letter = $3 AND role = 'student' AND confirmed = 1
 	`, data.StudentName, data.ClassNumber, data.ClassLetter).Scan(&id)
 	return id, err
 }
@@ -189,12 +185,12 @@ func SaveParentRequest(database *sql.DB, parentTelegramID int64, studentID int, 
 		log.Printf("[PARENT_ERROR] failed to begin transaction: %v", err)
 		return 0, err
 	}
-	err = tx.QueryRow(`SELECT id FROM users WHERE telegram_id = ?`, parentTelegramID).Scan(&parentID)
+	err = tx.QueryRow(`SELECT id FROM users WHERE telegram_id = $1`, parentTelegramID).Scan(&parentID)
 	if err == sql.ErrNoRows {
 		// Вставка родителя в users
 		res, err := tx.Exec(`
 		INSERT INTO users (telegram_id, name, role, confirmed)
-		VALUES (?, ?, 'parent', 0)
+		VALUES ($1, $2, 'parent', 0)
 	`, parentTelegramID, parentName)
 		if err != nil {
 			log.Printf("[PARENT_ERROR] failed to insert parent user: %v", err)
@@ -208,7 +204,7 @@ func SaveParentRequest(database *sql.DB, parentTelegramID int64, studentID int, 
 	}
 
 	// Привязка к ученику
-	_, err = tx.Exec(`INSERT INTO parents_students (parent_id, student_id) VALUES (?, ?)`, parentID, studentID)
+	_, err = tx.Exec(`INSERT INTO parents_students (parent_id, student_id) VALUES ($1, $2)`, parentID, studentID)
 	if err != nil {
 		log.Printf("[PARENT_ERROR] failed to insert into parents_students: %v", err)
 		tx.Rollback()

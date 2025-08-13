@@ -3,8 +3,9 @@ package db
 import (
 	"database/sql"
 	"log"
-	_ "modernc.org/sqlite"
 	"path/filepath"
+
+	_ "modernc.org/sqlite"
 )
 
 func Init() (*sql.DB, error) {

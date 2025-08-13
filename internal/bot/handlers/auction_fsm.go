@@ -326,7 +326,7 @@ func promptPointsInput(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI) {
 	edit := tgbotapi.NewEditMessageTextAndMarkup(
 		chatID,
 		cq.Message.MessageID,
-		"✏️ Введите количество баллов для списания (или отправьте «отмена»):",
+		"✏️ Введите количество баллов для списания:",
 		tgbotapi.NewInlineKeyboardMarkup(rows...),
 	)
 	bot.Send(edit)

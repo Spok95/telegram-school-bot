@@ -105,10 +105,6 @@ func showLevels(bot *tgbotapi.BotAPI, chatID int64, messageID int, catID int64, 
 	c, _ := db.GetCategoryByID(database, catID)
 	levels, _ := db.GetLevelsByCategoryIDFull(database, catID, true)
 
-	fmt.Println()
-	fmt.Println("Функция showLevels", levels)
-	fmt.Println()
-
 	text := fmt.Sprintf("📶 Уровни категории «%s»", c.Name)
 
 	var rows [][]tgbotapi.InlineKeyboardButton

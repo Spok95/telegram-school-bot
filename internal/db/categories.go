@@ -9,7 +9,7 @@ import (
 
 func GetLevelByID(database *sql.DB, levelID int) (*models.ScoreLevel, error) {
 	var level models.ScoreLevel
-	err := database.QueryRow("SELECT id, value, label, category_id FROM score_levels WHERE id = ?", levelID).Scan(&level.ID, &level.Value, &level.Label, &level.CategoryID)
+	err := database.QueryRow("SELECT id, value, label, category_id FROM score_levels WHERE id = $1", levelID).Scan(&level.ID, &level.Value, &level.Label, &level.CategoryID)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +47,7 @@ func GetAllCategories(database *sql.DB, role string) ([]models.Category, error) 
 func GetCategories(database *sql.DB, includeInactive bool) ([]models.Category, error) {
 	query := "SELECT id, name, label, is_active FROM categories"
 	if !includeInactive {
-		query += " WHERE is_active = 1"
+		query += " WHERE is_active = TRUE"
 	}
 	query += " ORDER BY id"
 
@@ -73,7 +73,7 @@ func GetCategories(database *sql.DB, includeInactive bool) ([]models.Category, e
 func GetCategoryByID(database *sql.DB, id int64) (*models.Category, error) {
 	var c models.Category
 	err := database.QueryRow(
-		"SELECT id, name, label, is_active FROM categories WHERE id = ?",
+		"SELECT id, name, label, is_active FROM categories WHERE id = $1",
 		id,
 	).Scan(&c.ID, &c.Name, &c.Label, &c.IsActive)
 	if err != nil {
@@ -85,7 +85,7 @@ func GetCategoryByID(database *sql.DB, id int64) (*models.Category, error) {
 // создать (name, label) — label уже есть в схеме
 func CreateCategory(database *sql.DB, name, label string) (int64, error) {
 	res, err := database.Exec(
-		"INSERT INTO categories(name, label, is_active) VALUES(?,?,1)",
+		"INSERT INTO categories(name, label, is_active) VALUES($1,$2,TRUE)",
 		name, label,
 	)
 	if err != nil {
@@ -101,7 +101,7 @@ func CreateCategory(database *sql.DB, name, label string) (int64, error) {
 // переименовать (меняем name; при желании добавь и UpdateCategoryLabel)
 func RenameCategory(database *sql.DB, id int64, name string) error {
 	res, err := database.Exec(
-		"UPDATE categories SET name = ? WHERE id = ?",
+		"UPDATE categories SET name = $1 WHERE id = $2",
 		name, id,
 	)
 	if err != nil {
@@ -121,7 +121,7 @@ func SetCategoryActive(database *sql.DB, id int64, active bool) error {
 		val = 1
 	}
 	res, err := database.Exec(
-		"UPDATE categories SET is_active = ? WHERE id = ?",
+		"UPDATE categories SET is_active = $1 WHERE id = $2",
 		val, id,
 	)
 	if err != nil {
@@ -135,7 +135,7 @@ func SetCategoryActive(database *sql.DB, id int64, active bool) error {
 }
 
 func GetLevelsByCategoryID(database *sql.DB, categoryID int) ([]models.ScoreLevel, error) {
-	rows, err := database.Query("SELECT id, value, label, category_id FROM score_levels WHERE category_id = ?", categoryID)
+	rows, err := database.Query("SELECT id, value, label, category_id FROM score_levels WHERE category_id = $1", categoryID)
 	if err != nil {
 		return nil, err
 	}
@@ -155,9 +155,9 @@ func GetLevelsByCategoryID(database *sql.DB, categoryID int) ([]models.ScoreLeve
 // Уровни
 // список уровней категории (includeInactive как выше)
 func GetLevelsByCategoryIDFull(database *sql.DB, catID int64, includeInactive bool) ([]models.ScoreLevel, error) {
-	query := "SELECT id, value, label, category_id, is_active FROM score_levels WHERE category_id = ?"
+	query := "SELECT id, value, label, category_id, is_active FROM score_levels WHERE category_id = $1"
 	if !includeInactive {
-		query += " AND is_active = 1"
+		query += " AND is_active = TRUE"
 	}
 	query += " ORDER BY value"
 
@@ -181,7 +181,7 @@ func GetLevelsByCategoryIDFull(database *sql.DB, catID int64, includeInactive bo
 
 func CreateLevel(database *sql.DB, catID int64, value int, label string) (int64, error) {
 	res, err := database.Exec(
-		"INSERT INTO score_levels(value, label, category_id, is_active) VALUES(?,?,?,1)",
+		"INSERT INTO score_levels(value, label, category_id, is_active) VALUES($1,$2,$3,TRUE)",
 		value, label, catID,
 	)
 	if err != nil {
@@ -196,7 +196,7 @@ func CreateLevel(database *sql.DB, catID int64, value int, label string) (int64,
 
 func RenameLevel(database *sql.DB, id int64, label string) error {
 	res, err := database.Exec(
-		"UPDATE score_levels SET label = ? WHERE id = ?",
+		"UPDATE score_levels SET label = $1 WHERE id = $2",
 		label, id,
 	)
 	if err != nil {
@@ -215,7 +215,7 @@ func SetLevelActive(database *sql.DB, id int64, active bool) error {
 		val = 1
 	}
 	res, err := database.Exec(
-		"UPDATE score_levels SET is_active = ? WHERE id = ?",
+		"UPDATE score_levels SET is_active = $1 WHERE id = $2",
 		val, id,
 	)
 	if err != nil {
@@ -230,14 +230,14 @@ func SetLevelActive(database *sql.DB, id int64, active bool) error {
 
 func GetCategoryIDByName(database *sql.DB, name string) int {
 	var id int
-	row := database.QueryRow(`SELECT id FROM categories WHERE name = ?`, name)
+	row := database.QueryRow(`SELECT id FROM categories WHERE name = $1`, name)
 	_ = row.Scan(&id)
 	return id
 }
 
 func GetCategoryNameByID(database *sql.DB, id int) string {
 	var name string
-	row := database.QueryRow(`SELECT name FROM categories WHERE id = ?`, id)
+	row := database.QueryRow(`SELECT name FROM categories WHERE id = $1`, id)
 	_ = row.Scan(&name)
 	return name
 }
