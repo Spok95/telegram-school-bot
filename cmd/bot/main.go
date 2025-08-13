@@ -42,20 +42,20 @@ func main() {
 	}
 	defer database.Close()
 
-	if err := db.Migrate(database); err != nil {
-		log.Fatal("Миграция не удалась:", err)
-	}
+	//if err := db.Migrate(database); err != nil {
+	//	log.Fatal("Миграция не удалась:", err)
+	//}
 
 	// ...............................................
 	// Только если база пустая — наполняем
-	var count int
-	err = database.QueryRow(`SELECT COUNT(*) FROM users WHERE role = 'student'`).Scan(&count)
-	if err != nil {
-		log.Fatalf("Ошибка при проверке пользователей: %v", err)
-	}
-	if count == 0 {
-		db.SeedStudents(database)
-	}
+	//var count int
+	//err = database.QueryRow(`SELECT COUNT(*) FROM users WHERE role = 'student'`).Scan(&count)
+	//if err != nil {
+	//	log.Fatalf("Ошибка при проверке пользователей: %v", err)
+	//}
+	//if count == 0 {
+	//	db.SeedStudents(database)
+	//}
 	// ...............................................
 
 	err = db.SetActivePeriod(database)

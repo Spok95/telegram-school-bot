@@ -160,9 +160,9 @@ func HandleParentCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			delete(parentData, chatID)
 			return
 		}
-		handlers.NotifyAdminsAboutNewUser(bot, database, parentID)
 		fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
 		bot.Send(tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "Заявка на регистрацию родителя отправлена администратору. Ожидайте подтверждения."))
+		handlers.NotifyAdminsAboutNewUser(bot, database, parentID)
 		delete(parentFSM, chatID)
 		delete(parentData, chatID)
 		return
@@ -173,7 +173,7 @@ func FindStudentID(database *sql.DB, data *ParentRegisterData) (int, error) {
 	var id int
 	err := database.QueryRow(`
 		SELECT id FROM users
-		WHERE name = $1 AND class_number = $2 AND class_letter = $3 AND role = 'student' AND confirmed = 1
+		WHERE name = $1 AND class_number = $2 AND class_letter = $3 AND role = 'student' AND confirmed = TRUE
 	`, data.StudentName, data.ClassNumber, data.ClassLetter).Scan(&id)
 	return id, err
 }
@@ -190,7 +190,7 @@ func SaveParentRequest(database *sql.DB, parentTelegramID int64, studentID int, 
 		// Вставка родителя в users
 		res, err := tx.Exec(`
 		INSERT INTO users (telegram_id, name, role, confirmed)
-		VALUES ($1, $2, 'parent', 0)
+		VALUES ($1, $2, 'parent', FALSE)
 	`, parentTelegramID, parentName)
 		if err != nil {
 			log.Printf("[PARENT_ERROR] failed to insert parent user: %v", err)

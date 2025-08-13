@@ -46,8 +46,8 @@ func HandleStaffFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *sq
 			delete(staffData, chatID)
 			return
 		}
-		handlers.NotifyAdminsAboutNewUser(bot, database, id)
 		bot.Send(tgbotapi.NewMessage(chatID, "Заявка на регистрацию отправлена администратору. Ожидайте подтверждения."))
+		handlers.NotifyAdminsAboutNewUser(bot, database, id)
 
 		delete(staffFSM, chatID)
 		delete(staffData, chatID)
@@ -57,7 +57,7 @@ func HandleStaffFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *sq
 func SaveStaffRequest(database *sql.DB, telegramID int64, name, role string) (int64, error) {
 	res, err := database.Exec(`
 		INSERT INTO users (telegram_id, name, role, confirmed)
-		VALUES ($1, $2, $3, 0)
+		VALUES ($1, $2, $3, FALSE)
 	`, telegramID, name, role)
 	if err != nil {
 		return 0, err

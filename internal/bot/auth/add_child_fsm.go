@@ -222,7 +222,7 @@ func handleAddChildFinish(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 func CreateParentLinkRequest(database *sql.DB, parentTelegramID int64, studentID int) (int64, error) {
 	// находим parent_id по telegram_id
 	var parentID int64
-	err := database.QueryRow(`SELECT id FROM users WHERE telegram_id = $1 AND role = 'parent' AND confirmed = 1`, parentTelegramID).Scan(&parentID)
+	err := database.QueryRow(`SELECT id FROM users WHERE telegram_id = $1 AND role = 'parent' AND confirmed = TRUE`, parentTelegramID).Scan(&parentID)
 	if err != nil {
 		return 0, fmt.Errorf("родитель не найден/не подтверждён: %w", err)
 	}

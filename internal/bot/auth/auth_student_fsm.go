@@ -100,7 +100,7 @@ func SaveStudentRequest(database *sql.DB, chatID int64, data *StudentRegisterDat
 		return 0, fmt.Errorf("❌ Ошибка: выбранный класс не существует. %w", err)
 	}
 	res, err := database.Exec(`INSERT INTO users (telegram_id, name, role, class_id, class_number, class_letter, confirmed) 
-			VALUES ($1, $2, 'student', $3, $4, $5, 0)`,
+			VALUES ($1, $2, 'student', $3, $4, $5, FALSE)`,
 		chatID, data.Name, classID, data.ClassNumber, data.ClassLetter)
 	if err != nil {
 		return 0, err
@@ -165,9 +165,9 @@ func HandleStudentCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, dat
 			delete(studentData, chatID)
 			return
 		}
-		handlers.NotifyAdminsAboutNewUser(bot, database, id)
 		fsmutil.DisableMarkup(bot, chatID, cb.Message.MessageID)
 		bot.Send(tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "Заявка на регистрацию отправлена администратору. Ожидайте подтверждения."))
+		handlers.NotifyAdminsAboutNewUser(bot, database, id)
 		delete(studentFSM, chatID)
 		delete(studentData, chatID)
 		return

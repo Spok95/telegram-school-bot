@@ -63,6 +63,33 @@ CREATE TABLE periods (
                          is_active  BOOLEAN NOT NULL DEFAULT FALSE
 );
 
+-- Флаг активности категорий (как в migrate.go)
+ALTER TABLE categories
+    ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
+
+-- Уровни баллов (как в migrate.go)
+CREATE TABLE IF NOT EXISTS score_levels (
+                                            id BIGSERIAL PRIMARY KEY,
+                                            value INT NOT NULL,
+                                            label TEXT NOT NULL,
+                                            category_id BIGINT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+                                            is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                                            UNIQUE (category_id, value)
+);
+
+-- Быстрый индекс уникальности (как в migrate.go)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_score_levels_category_value
+    ON score_levels(category_id, value);
+
+-- Заявки на привязку родителя к ребёнку (как в migrate.go)
+CREATE TABLE IF NOT EXISTS parent_link_requests (
+                                                    id BIGSERIAL PRIMARY KEY,
+                                                    parent_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                                                    student_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                                                    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+
 -- Индексы
 CREATE INDEX idx_scores_student_created ON scores(student_id, created_at);
 CREATE INDEX idx_scores_category       ON scores(category_id);

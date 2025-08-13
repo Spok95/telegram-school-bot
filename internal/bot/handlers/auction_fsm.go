@@ -70,7 +70,6 @@ func HandleAuctionCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 	}
 
 	data := cq.Data
-	log.Printf("➡️ Callback от аукциона: %s", data)
 
 	// ❌ Отмена
 	if data == "auction_cancel" {

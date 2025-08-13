@@ -9,6 +9,32 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/models"
 )
 
+func scanScoreWithUserLight(rows *sql.Rows) (models.ScoreWithUser, error) {
+	var s models.ScoreWithUser
+	err := rows.Scan(
+		&s.StudentName,
+		&s.ClassNumber,
+		&s.ClassLetter,
+		&s.CategoryLabel,
+		&s.Points,
+		&s.Comment,
+		&s.AddedByName,
+		&s.CreatedAt,
+	)
+	return s, err
+}
+
+// полный скан — для выборок по ученику/классу/школе
+func scanScoreWithUserFull(rows *sql.Rows) (models.ScoreWithUser, error) {
+	var s models.ScoreWithUser
+	err := rows.Scan(
+		&s.ID, &s.StudentID, &s.CategoryID, &s.Points, &s.Type, &s.Comment,
+		&s.Status, &s.ApprovedBy, &s.ApprovedAt, &s.CreatedBy, &s.CreatedAt, &s.PeriodID,
+		&s.StudentName, &s.ClassNumber, &s.ClassLetter, &s.CategoryLabel, &s.AddedByName,
+	)
+	return s, err
+}
+
 func AddScore(database *sql.DB, score models.Score) error {
 	query := `
 INSERT INTO scores (
@@ -177,21 +203,12 @@ func GetApprovedScoreSum(database *sql.DB, studentID int64) (int, error) {
 func GetScoresByPeriod(database *sql.DB, periodID int) ([]models.ScoreWithUser, error) {
 	row := database.QueryRow(`SELECT start_date, end_date FROM periods WHERE id = $1`, periodID)
 
-	var startDateStr, endDateStr string
-	if err := row.Scan(&startDateStr, &endDateStr); err != nil {
+	var startDate, endDate time.Time
+	if err := row.Scan(&startDate, &endDate); err != nil {
 		return nil, err
 	}
-	startDate, err := time.Parse("02.01.2006", startDateStr)
-	if err != nil {
-		return nil, err
-	}
-	endDate, err := time.Parse("02.01.2006", endDateStr)
-	if err != nil {
-		return nil, err
-	}
-
 	// включаем весь последний день
-	endDate = endDate.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
+	endDate = endDate.Add(24*time.Hour - time.Nanosecond)
 
 	query := `
 	SELECT
@@ -217,17 +234,13 @@ func GetScoresByPeriod(database *sql.DB, periodID int) ([]models.ScoreWithUser, 
 	defer rows.Close()
 
 	var result []models.ScoreWithUser
-
-	log.Println("⏬ Получаем строки из запроса ...")
-
 	for rows.Next() {
-		var s models.ScoreWithUser
-		if err := rows.Scan(&s.StudentName, &s.ClassNumber, &s.ClassLetter, &s.CategoryLabel, &s.Points, &s.Comment, &s.AddedByName, &s.CreatedAt); err != nil {
+		s, err := scanScoreWithUserLight(rows)
+		if err != nil {
 			return nil, err
 		}
 		result = append(result, s)
 	}
-	log.Printf("✅ Получена запись: %+v", result)
 	return result, nil
 }
 
@@ -254,37 +267,13 @@ func GetScoresByStudentAndDateRange(database *sql.DB, studentID int64, from, to 
 	defer rows.Close()
 
 	var result []models.ScoreWithUser
-
-	log.Println("⏬ Получаем строки из запроса ...")
-
 	for rows.Next() {
-		var s models.ScoreWithUser
-		err := rows.Scan(
-			&s.ID,
-			&s.StudentID,
-			&s.CategoryID,
-			&s.Points,
-			&s.Type,
-			&s.Comment,
-			&s.Status,
-			&s.ApprovedBy,
-			&s.ApprovedAt,
-			&s.CreatedBy,
-			&s.CreatedAt,
-			&s.PeriodID,
-			&s.StudentName,
-			&s.ClassNumber,
-			&s.ClassLetter,
-			&s.CategoryLabel,
-			&s.AddedByName,
-		)
-
+		s, err := scanScoreWithUserFull(rows)
 		if err != nil {
 			return nil, err
 		}
 		result = append(result, s)
 	}
-	log.Printf("✅ Получена запись: %+v", result)
 	return result, nil
 }
 
@@ -311,37 +300,13 @@ func GetScoresByClassAndDateRange(database *sql.DB, classNumber int, classLetter
 	defer rows.Close()
 
 	var result []models.ScoreWithUser
-
-	log.Println("⏬ Получаем строки из запроса ...")
-
 	for rows.Next() {
-		var s models.ScoreWithUser
-		err := rows.Scan(
-			&s.ID,
-			&s.StudentID,
-			&s.CategoryID,
-			&s.Points,
-			&s.Type,
-			&s.Comment,
-			&s.Status,
-			&s.ApprovedBy,
-			&s.ApprovedAt,
-			&s.CreatedBy,
-			&s.CreatedAt,
-			&s.PeriodID,
-			&s.StudentName,
-			&s.ClassNumber,
-			&s.ClassLetter,
-			&s.CategoryLabel,
-			&s.AddedByName,
-		)
-
+		s, err := scanScoreWithUserFull(rows)
 		if err != nil {
 			return nil, err
 		}
 		result = append(result, s)
 	}
-	log.Printf("✅ Получена запись: %+v", result)
 	return result, nil
 }
 
@@ -369,58 +334,26 @@ func GetScoresByDateRange(database *sql.DB, from, to time.Time) ([]models.ScoreW
 	defer rows.Close()
 
 	var result []models.ScoreWithUser
-
-	log.Println("⏬ Получаем строки из запроса ...")
-
 	for rows.Next() {
-		var s models.ScoreWithUser
-		err := rows.Scan(
-			&s.ID,
-			&s.StudentID,
-			&s.CategoryID,
-			&s.Points,
-			&s.Type,
-			&s.Comment,
-			&s.Status,
-			&s.ApprovedBy,
-			&s.ApprovedAt,
-			&s.CreatedBy,
-			&s.CreatedAt,
-			&s.PeriodID,
-			&s.StudentName,
-			&s.ClassNumber,
-			&s.ClassLetter,
-			&s.CategoryLabel,
-			&s.AddedByName,
-		)
-
+		s, err := scanScoreWithUserFull(rows)
 		if err != nil {
 			return nil, err
 		}
 		result = append(result, s)
 	}
-	log.Printf("✅ Получена запись: %+v", result)
 	return result, nil
 }
 
 func GetScoresByStudentAndPeriod(database *sql.DB, selectedStudentID int64, periodID int) ([]models.ScoreWithUser, error) {
 	row := database.QueryRow(`SELECT start_date, end_date FROM periods WHERE id = $1`, periodID)
 
-	var startDateStr, endDateStr string
-	if err := row.Scan(&startDateStr, &endDateStr); err != nil {
-		return nil, err
-	}
-	startDate, err := time.Parse("02.01.2006", startDateStr)
-	if err != nil {
-		return nil, err
-	}
-	endDate, err := time.Parse("02.01.2006", endDateStr)
-	if err != nil {
+	var startDate, endDate time.Time
+	if err := row.Scan(&startDate, &endDate); err != nil {
 		return nil, err
 	}
 
 	// включаем весь последний день
-	endDate = endDate.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
+	endDate = endDate.Add(24*time.Hour - time.Nanosecond)
 
 	query := `
 	SELECT 
@@ -443,58 +376,26 @@ func GetScoresByStudentAndPeriod(database *sql.DB, selectedStudentID int64, peri
 	defer rows.Close()
 
 	var result []models.ScoreWithUser
-
-	log.Println("⏬ Получаем строки из запроса ...")
-
 	for rows.Next() {
-		var s models.ScoreWithUser
-		err := rows.Scan(
-			&s.ID,
-			&s.StudentID,
-			&s.CategoryID,
-			&s.Points,
-			&s.Type,
-			&s.Comment,
-			&s.Status,
-			&s.ApprovedBy,
-			&s.ApprovedAt,
-			&s.CreatedBy,
-			&s.CreatedAt,
-			&s.PeriodID,
-			&s.StudentName,
-			&s.ClassNumber,
-			&s.ClassLetter,
-			&s.CategoryLabel,
-			&s.AddedByName,
-		)
-
+		s, err := scanScoreWithUserFull(rows)
 		if err != nil {
 			return nil, err
 		}
 		result = append(result, s)
 	}
-	log.Printf("✅ Получена запись: %+v", result)
 	return result, nil
 }
 
 func GetScoresByClassAndPeriod(database *sql.DB, classNumber int64, classLetter string, periodID int64) ([]models.ScoreWithUser, error) {
 	row := database.QueryRow(`SELECT start_date, end_date FROM periods WHERE id = $1`, periodID)
 
-	var startDateStr, endDateStr string
-	if err := row.Scan(&startDateStr, &endDateStr); err != nil {
-		return nil, err
-	}
-	startDate, err := time.Parse("02.01.2006", startDateStr)
-	if err != nil {
-		return nil, err
-	}
-	endDate, err := time.Parse("02.01.2006", endDateStr)
-	if err != nil {
+	var startDate, endDate time.Time
+	if err := row.Scan(&startDate, &endDate); err != nil {
 		return nil, err
 	}
 
 	// включаем весь последний день
-	endDate = endDate.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
+	endDate = endDate.Add(24*time.Hour - time.Nanosecond)
 
 	query := `
 	SELECT 
@@ -517,36 +418,12 @@ func GetScoresByClassAndPeriod(database *sql.DB, classNumber int64, classLetter 
 	defer rows.Close()
 
 	var result []models.ScoreWithUser
-
-	log.Println("⏬ Получаем строки из запроса ...")
-
 	for rows.Next() {
-		var s models.ScoreWithUser
-		err := rows.Scan(
-			&s.ID,
-			&s.StudentID,
-			&s.CategoryID,
-			&s.Points,
-			&s.Type,
-			&s.Comment,
-			&s.Status,
-			&s.ApprovedBy,
-			&s.ApprovedAt,
-			&s.CreatedBy,
-			&s.CreatedAt,
-			&s.PeriodID,
-			&s.StudentName,
-			&s.ClassNumber,
-			&s.ClassLetter,
-			&s.CategoryLabel,
-			&s.AddedByName,
-		)
-
+		s, err := scanScoreWithUserFull(rows)
 		if err != nil {
 			return nil, err
 		}
 		result = append(result, s)
 	}
-	log.Printf("✅ Получена запись: %+v", result)
 	return result, nil
 }

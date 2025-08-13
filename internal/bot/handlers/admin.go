@@ -24,7 +24,7 @@ func ShowPendingUsers(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
 	}
 
 	var count int
-	err = database.QueryRow(`SELECT COUNT(*) FROM users WHERE confirmed = 0 AND role != 'admin'`).Scan(&count)
+	err = database.QueryRow(`SELECT COUNT(*) FROM users WHERE confirmed = FALSE AND role != 'admin'`).Scan(&count)
 	if err != nil {
 		log.Println("Ошибка при подсчете заявок:", err)
 		bot.Send(tgbotapi.NewMessage(chatID, "❌ Ошибка при проверке заявок."))
@@ -37,7 +37,7 @@ func ShowPendingUsers(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
 	}
 
 	rows, err := database.Query(`
-		SELECT id, name, role, telegram_id FROM users WHERE confirmed = 0 AND role != 'admin'
+		SELECT id, name, role, telegram_id FROM users WHERE confirmed = FALSE AND role != 'admin'
 	`)
 	if err != nil {
 		bot.Send(tgbotapi.NewMessage(adminID, "Ошибка при получении заявок."))
@@ -141,7 +141,7 @@ func HandleAdminCallback(callback *tgbotapi.CallbackQuery, database *sql.DB, bot
 	bot.Request(callbackConfig)
 }
 
-func ConfirmUser(database *sql.DB, bot *tgbotapi.BotAPI, name string, adminID int64) error {
+func ConfirmUser(database *sql.DB, bot *tgbotapi.BotAPI, name string, adminTG int64) error {
 	tx, err := database.Begin()
 	if err != nil {
 		return err
@@ -149,21 +149,21 @@ func ConfirmUser(database *sql.DB, bot *tgbotapi.BotAPI, name string, adminID in
 	defer tx.Rollback()
 
 	var telegramID int64
-	err = database.QueryRow(`SELECT telegram_id FROM users WHERE id = &1`, name).Scan(&telegramID)
+	err = tx.QueryRow(`SELECT telegram_id FROM users WHERE id = $1`, name).Scan(&telegramID)
 	if err != nil {
 		return err
 	}
 
 	// Получаем текущую роль (до подтверждения)
 	var role string
-	err = tx.QueryRow(`SELECT role FROM users WHERE id = $1 AND confirmed = 0`, name).Scan(&role)
+	err = tx.QueryRow(`SELECT role FROM users WHERE id = $1 AND confirmed = FALSE`, name).Scan(&role)
 	if err != nil {
 		// либо уже подтверждён, либо не найден
 		return fmt.Errorf("заявка не найдена или уже обработана")
 	}
 
 	// Подтверждаем, только если ещё не подтверждён
-	res, err := tx.Exec(`UPDATE users SET confirmed = 1 WHERE id = $1 AND confirmed = 0`, name)
+	res, err := tx.Exec(`UPDATE users SET confirmed = TRUE WHERE id = $1 AND confirmed = FALSE`, name)
 	if err != nil {
 		return err
 	}
@@ -172,9 +172,11 @@ func ConfirmUser(database *sql.DB, bot *tgbotapi.BotAPI, name string, adminID in
 		return fmt.Errorf("заявка уже подтверждена другим админом")
 	}
 
-	msg := tgbotapi.NewMessage(telegramID, "✅ Ваша заявка подтверждена. Добро пожаловать!")
-	msg.ReplyMarkup = menu.GetRoleMenu(role)
-	bot.Send(msg)
+	var adminID int64
+	if err := tx.QueryRow(`SELECT id FROM users WHERE telegram_id = $1 AND role = 'admin'`, adminTG).Scan(&adminID); err != nil {
+		// если вдруг админ не заведен в users — можно записать NULL/0 или убрать FK, но лучше завести админа
+		return fmt.Errorf("администратор не найден в users: %w", err)
+	}
 
 	// Фиксируем в истории
 	_, err = tx.Exec(`
@@ -184,7 +186,16 @@ func ConfirmUser(database *sql.DB, bot *tgbotapi.BotAPI, name string, adminID in
 	if err != nil {
 		return err
 	}
-	return tx.Commit()
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	msg := tgbotapi.NewMessage(telegramID, "✅ Ваша заявка подтверждена. Добро пожаловать!")
+	msg.ReplyMarkup = menu.GetRoleMenu(role)
+	_, _ = bot.Send(msg)
+
+	return nil
 }
 
 func RejectUser(database *sql.DB, bot *tgbotapi.BotAPI, name string, adminID int64) error {
@@ -211,8 +222,11 @@ func NotifyAdminsAboutNewUser(bot *tgbotapi.BotAPI, database *sql.DB, userID int
 		tgID               int64
 		classNum, classLet sql.NullString
 	)
-	_ = database.QueryRow(`SELECT name, role, telegram_id, class_number, class_letter FROM users WHERE id = $1`, userID).
-		Scan(&name, &role, &tgID, &classNum, &classLet)
+	if err := database.QueryRow(`SELECT name, role, telegram_id, class_number, class_letter FROM users WHERE id = $1`, userID).
+		Scan(&name, &role, &tgID, &classNum, &classLet); err != nil {
+		log.Printf("notify: user %d not ready yet: %v", userID, err)
+		return
+	}
 
 	// формируем текст
 	msg := fmt.Sprintf("Заявка на авторизацию:\n👤 %s\n🧩 Роль: %s\nTelegramID: %d", name, role, tgID)
@@ -227,7 +241,7 @@ func NotifyAdminsAboutNewUser(bot *tgbotapi.BotAPI, database *sql.DB, userID int
 	markup := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(btnYes, btnNo))
 
 	// уведомляем всех админов
-	rows, err := database.Query(`SELECT telegram_id FROM users WHERE role IN ('admin', 'administration') AND confirmed = TRUE AND is_active = TRUE`)
+	rows, err := database.Query(`SELECT telegram_id FROM users WHERE role = 'admin' AND confirmed = TRUE AND is_active = TRUE`)
 	if err != nil {
 		return
 	}
