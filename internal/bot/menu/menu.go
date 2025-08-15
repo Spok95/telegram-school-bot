@@ -1,19 +1,22 @@
 package menu
 
-import tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+import (
+	"github.com/Spok95/telegram-school-bot/internal/models"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+)
 
 // GetRoleMenu возвращает меню в зависимости от роли пользователя
 func GetRoleMenu(role string) tgbotapi.ReplyKeyboardMarkup {
 	switch role {
-	case "student":
+	case string(models.Student):
 		return studentMenu()
-	case "teacher":
+	case string(models.Teacher):
 		return teacherMenu()
-	case "parent":
+	case string(models.Parent):
 		return parentMenu()
-	case "admin":
+	case string(models.Admin):
 		return adminMenu()
-	case "administration":
+	case string(models.Administration):
 		return administrationMenu()
 	default:
 		return tgbotapi.NewReplyKeyboard() // пустое меню

@@ -174,7 +174,7 @@ func FindStudentID(database *sql.DB, data *ParentRegisterData) (int, error) {
 	err := database.QueryRow(`
 		SELECT id FROM users
 		WHERE name = $1 AND class_number = $2 AND class_letter = $3 AND role = 'student' AND confirmed = TRUE
-	`, data.StudentName, data.ClassNumber, data.ClassLetter).Scan(&id)
+		`, data.StudentName, data.ClassNumber, data.ClassLetter).Scan(&id)
 	return id, err
 }
 
