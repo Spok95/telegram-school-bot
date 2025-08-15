@@ -24,7 +24,7 @@ func HandleMyScore(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 	if *user.Role == models.Parent {
 		var studentInternalID int64
 		err := database.QueryRow(`
-			SELECT student_id FROM parents_students WHERE parent_id = ?
+			SELECT student_id FROM parents_students WHERE parent_id = $1
 		`, user.ID).Scan(&studentInternalID)
 		if err != nil {
 			bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось найти привязанного ученика."))
@@ -36,11 +36,12 @@ func HandleMyScore(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 
 	// Получаем категории и суммы
 	rows, err := database.Query(`
-		SELECT c.label, SUM(s.points) as total
+		SELECT c.label, SUM(s.points) AS total
 		FROM scores s
 		JOIN categories c ON s.category_id = c.id
-		WHERE s.student_id = ? AND s.status = 'approved'
-		GROUP BY s.category_id
+		WHERE s.student_id = $1 AND s.status = 'approved'
+		GROUP BY c.label
+		ORDER BY total DESC
 	`, targetID)
 	if err != nil {
 		bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Ошибка при получении рейтинга."))
@@ -145,11 +146,12 @@ func HandleParentRatingRequest(bot *tgbotapi.BotAPI, database *sql.DB, chatID in
 func ShowStudentRating(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, studentID int64) {
 	// Получаем категории и суммы
 	rows, err := database.Query(`
-		SELECT c.label, SUM(s.points) as total
+		SELECT c.label, SUM(s.points) AS total
 		FROM scores s
 		JOIN categories c ON s.category_id = c.id
-		WHERE s.student_id = ? AND s.status = 'approved'
-		GROUP BY s.category_id
+		WHERE s.student_id = $1 AND s.status = 'approved'
+		GROUP BY c.label
+		ORDER BY total DESC
 	`, studentID)
 	if err != nil {
 		bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Ошибка при получении рейтинга."))

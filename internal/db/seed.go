@@ -17,12 +17,12 @@ func SeedScoreLevels(database *sql.DB) error {
 		"Дежурство",
 	}
 	for _, name := range categories {
-		_, err := database.Exec(`INSERT OR IGNORE INTO categories (name, label) VALUES (?, ?);`, name, name)
+		_, err := database.Exec(`INSERT OR IGNORE INTO categories (name, label) VALUES ($1, $2);`, name, name)
 		if err != nil {
 			return err
 		}
 	}
-	_, err := database.Exec(`INSERT OR IGNORE INTO categories (name, label) VALUES (?, ?)`, "Аукцион", "Аукцион")
+	_, err := database.Exec(`INSERT OR IGNORE INTO categories (name, label) VALUES ($1, $2)`, "Аукцион", "Аукцион")
 	if err != nil {
 		log.Fatalf("ошибка вставки категории Аукцион: %v", err)
 	}
@@ -37,7 +37,7 @@ func SeedScoreLevels(database *sql.DB) error {
 	for _, level := range levels {
 		_, err := database.Exec(`
 INSERT INTO score_levels (value, label, category_id)
-VALUES (?, ?, ?)
+VALUES ($1, $2, $3)
 ON CONFLICT(category_id, value) DO NOTHING
 `, level.Value, level.Label, level.CategoryID)
 		if err != nil {
@@ -57,7 +57,7 @@ ON CONFLICT(category_id, value) DO NOTHING
 			for _, letter := range classLetters {
 				_, err := database.Exec(`
 INSERT INTO classes (number, letter)
-VALUES (?, ?)
+VALUES ($1, $2)
 ON CONFLICT(number, letter) DO NOTHING;
 `, grade, letter)
 
@@ -80,7 +80,7 @@ func SeedStudents(database *sql.DB) error {
 		for _, letter := range classLetters {
 			var classID int
 			err := database.QueryRow(`
-			SELECT id FROM classes WHERE number = ? AND letter = ? LIMIT 1
+			SELECT id FROM classes WHERE number = $1 AND letter = $2 LIMIT 1
 		`, grade, letter).Scan(&classID)
 			if err != nil {
 				return fmt.Errorf("❌ не удалось найти class_id для %d%s: %w", grade, letter, err)
@@ -93,7 +93,7 @@ func SeedStudents(database *sql.DB) error {
 
 				_, err := database.Exec(`
 INSERT OR IGNORE INTO users (telegram_id, name, role, class_number, class_letter, class_id, confirmed, is_active)
-VALUES (?, ?, 'student', ?, ?, ?, 1, 1);
+VALUES ($1, $2, 'student', $3, $4, $5, TRUE, TRUE);
 `, telegramID, name, grade, letter, classID)
 				if err != nil {
 					return fmt.Errorf("❌ ошибка при вставке ученика %s: %w", name, err)

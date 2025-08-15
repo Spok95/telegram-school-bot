@@ -3,11 +3,12 @@ package handlers
 import (
 	"database/sql"
 	"fmt"
+	"log"
+	"time"
+
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"log"
-	"time"
 )
 
 const (

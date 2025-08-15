@@ -70,7 +70,6 @@ func HandleAuctionCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 	}
 
 	data := cq.Data
-	log.Printf("➡️ Callback от аукциона: %s", data)
 
 	// ❌ Отмена
 	if data == "auction_cancel" {
@@ -326,7 +325,7 @@ func promptPointsInput(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI) {
 	edit := tgbotapi.NewEditMessageTextAndMarkup(
 		chatID,
 		cq.Message.MessageID,
-		"✏️ Введите количество баллов для списания (или отправьте «отмена»):",
+		"✏️ Введите количество баллов для списания:",
 		tgbotapi.NewInlineKeyboardMarkup(rows...),
 	)
 	bot.Send(edit)
