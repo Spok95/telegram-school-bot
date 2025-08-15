@@ -27,20 +27,21 @@ func EnsureAdmin(chatID int64, database *sql.DB, text string, bot *tgbotapi.BotA
 		}
 
 		if !exists {
-			_, err := database.Exec(`INSERT INTO users (telegram_id, name, role, confirmed) VALUES ($1, $2, $3, TRUE)`,
-				chatID, "Администратор", models.Admin)
+			_, err := database.Exec(`INSERT INTO users (telegram_id, name, role, confirmed, is_active) VALUES ($1, $2, $3, TRUE, TRUE) ON CONFLICT DO NOTHING`,
+				chatID, "Админ", models.Admin)
 			if err != nil {
 				bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Ошибка создания записи админа."))
 				return
 			}
 
+			user, err := GetUserByTelegramID(database, chatID)
 			_, err = database.Exec(`
 				INSERT INTO role_changes (user_id, old_role, new_role, changed_by, changed_at)
 				VALUES (
 					(SELECT id FROM users WHERE telegram_id = $1),
 					'', 'admin', $2, NOW()
-				)
-			`, adminID, adminID)
+				) ON CONFLICT DO NOTHING
+			`, adminID, user.ID)
 			if err != nil {
 				log.Println("❌ Ошибка записи в role_changes:", err)
 			}

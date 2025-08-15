@@ -36,11 +36,12 @@ func HandleMyScore(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 
 	// Получаем категории и суммы
 	rows, err := database.Query(`
-		SELECT c.label, SUM(s.points) as total
+		SELECT c.label, SUM(s.points) AS total
 		FROM scores s
 		JOIN categories c ON s.category_id = c.id
 		WHERE s.student_id = $1 AND s.status = 'approved'
-		GROUP BY s.category_id
+		GROUP BY c.label
+		ORDER BY total DESC
 	`, targetID)
 	if err != nil {
 		bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Ошибка при получении рейтинга."))
@@ -145,11 +146,12 @@ func HandleParentRatingRequest(bot *tgbotapi.BotAPI, database *sql.DB, chatID in
 func ShowStudentRating(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, studentID int64) {
 	// Получаем категории и суммы
 	rows, err := database.Query(`
-		SELECT c.label, SUM(s.points) as total
+		SELECT c.label, SUM(s.points) AS total
 		FROM scores s
 		JOIN categories c ON s.category_id = c.id
 		WHERE s.student_id = $1 AND s.status = 'approved'
-		GROUP BY s.category_id
+		GROUP BY c.label
+		ORDER BY total DESC
 	`, studentID)
 	if err != nil {
 		bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Ошибка при получении рейтинга."))

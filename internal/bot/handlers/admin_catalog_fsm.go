@@ -269,7 +269,7 @@ func HandleCatalogText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 		}
 		name := strings.TrimSpace(msg.Text)
 		if name == "" {
-			bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Имя не может быть пустым. Введите ещё раз или отправьте «отмена»."))
+			bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Имя не может быть пустым. Введите ещё раз."))
 			return
 		}
 		key := fmt.Sprintf("catalog:renamecat:%d", chatID)
@@ -286,13 +286,13 @@ func HandleCatalogText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 	case "level_value":
 		val, err := strconv.Atoi(strings.TrimSpace(msg.Text))
 		if err != nil || val <= 0 {
-			bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Неверное значение. Введите число (например, 100/200/300) или «отмена»."))
+			bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Неверное значение. Введите число (например, 100/200/300)."))
 			return
 		}
 		st.TempLevelValue = &val
 		st.Awaiting = "level_label"
 		rows := [][]tgbotapi.InlineKeyboardButton{catBackCancel()}
-		msgOut := tgbotapi.NewMessage(chatID, "✏️ Введите название уровня (label), например «Хорошо/Очень хорошо/Великолепно».")
+		msgOut := tgbotapi.NewMessage(chatID, "✏️ Введите название уровня (label), например «Базовый/Средний/Высокий».")
 		msgOut.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
 		bot.Send(msgOut)
 
@@ -302,7 +302,7 @@ func HandleCatalogText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 		}
 		label := strings.TrimSpace(msg.Text)
 		if label == "" {
-			bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Название не может быть пустым. Введите ещё раз или «отмена»."))
+			bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Название не может быть пустым. Введите ещё раз."))
 			return
 		}
 		key := fmt.Sprintf("catalog:addlevel:%d", chatID)

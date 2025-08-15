@@ -99,13 +99,14 @@ func SaveStudentRequest(database *sql.DB, chatID int64, data *StudentRegisterDat
 	if err != nil {
 		return 0, fmt.Errorf("❌ Ошибка: выбранный класс не существует. %w", err)
 	}
-	res, err := database.Exec(`INSERT INTO users (telegram_id, name, role, class_id, class_number, class_letter, confirmed) 
-			VALUES ($1, $2, 'student', $3, $4, $5, FALSE)`,
-		chatID, data.Name, classID, data.ClassNumber, data.ClassLetter)
-	if err != nil {
+	var newID int64
+	if err := database.QueryRow(`
+    	INSERT INTO users (telegram_id, name, role, class_id, class_number, class_letter, confirmed)
+    	VALUES ($1,$2,'student',$3,$4,$5,FALSE)
+    	RETURNING id
+		`, chatID, data.Name, classID, data.ClassNumber, data.ClassLetter).Scan(&newID); err != nil {
 		return 0, err
 	}
-	newID, _ := res.LastInsertId()
 	return newID, nil
 }
 

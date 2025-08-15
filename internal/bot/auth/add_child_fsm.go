@@ -228,12 +228,15 @@ func CreateParentLinkRequest(database *sql.DB, parentTelegramID int64, studentID
 	}
 
 	// создаём заявку
-	res, err := database.Exec(`
+	var reqID int64
+	err = database.QueryRow(`
 		INSERT INTO parent_link_requests (parent_id, student_id, created_at)
-		VALUES ($1, $2, CURRENT_TIMESTAMP)
-	`, parentID, studentID)
+		VALUES ($1,$2,NOW())
+		RETURNING id
+		`, parentID, studentID).Scan(&reqID)
+
 	if err != nil {
 		return 0, err
 	}
-	return res.LastInsertId()
+	return reqID, nil
 }

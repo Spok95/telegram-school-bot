@@ -32,6 +32,14 @@ CREATE TABLE categories (
                             label TEXT NOT NULL
 );
 
+CREATE TABLE periods (
+                         id BIGSERIAL PRIMARY KEY,
+                         name TEXT NOT NULL,
+                         start_date DATE NOT NULL,
+                         end_date   DATE NOT NULL,
+                         is_active  BOOLEAN NOT NULL DEFAULT FALSE
+);
+
 CREATE TABLE scores (
                         id BIGSERIAL PRIMARY KEY,
                         student_id  BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -43,8 +51,13 @@ CREATE TABLE scores (
                         approved_by BIGINT REFERENCES users(id),
                         approved_at TIMESTAMP,
                         created_by  BIGINT NOT NULL REFERENCES users(id),
-                        created_at  TIMESTAMP NOT NULL DEFAULT NOW()
+                        created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+                        period_id   BIGINT REFERENCES periods(id) ON DELETE SET NULL
 );
+
+-- Индекс под выборки по периоду
+CREATE INDEX IF NOT EXISTS scores_student_status_period_idx
+    ON scores (student_id, status, period_id);
 
 CREATE TABLE role_changes (
                               id BIGSERIAL PRIMARY KEY,
@@ -55,19 +68,11 @@ CREATE TABLE role_changes (
                               changed_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE periods (
-                         id BIGSERIAL PRIMARY KEY,
-                         name TEXT NOT NULL,
-                         start_date DATE NOT NULL,
-                         end_date   DATE NOT NULL,
-                         is_active  BOOLEAN NOT NULL DEFAULT FALSE
-);
-
--- Флаг активности категорий (как в migrate.go)
+-- Флаг активности категорий
 ALTER TABLE categories
     ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
 
--- Уровни баллов (как в migrate.go)
+-- Уровни баллов
 CREATE TABLE IF NOT EXISTS score_levels (
                                             id BIGSERIAL PRIMARY KEY,
                                             value INT NOT NULL,
@@ -77,11 +82,11 @@ CREATE TABLE IF NOT EXISTS score_levels (
                                             UNIQUE (category_id, value)
 );
 
--- Быстрый индекс уникальности (как в migrate.go)
+-- Быстрый индекс уникальности
 CREATE UNIQUE INDEX IF NOT EXISTS uq_score_levels_category_value
     ON score_levels(category_id, value);
 
--- Заявки на привязку родителя к ребёнку (как в migrate.go)
+-- Заявки на привязку родителя к ребёнку
 CREATE TABLE IF NOT EXISTS parent_link_requests (
                                                     id BIGSERIAL PRIMARY KEY,
                                                     parent_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

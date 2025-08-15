@@ -86,7 +86,7 @@ func HandleScoreApprovalCallback(callback *tgbotapi.CallbackQuery, bot *tgbotapi
 	} else if currentStatus != "pending" {
 		resultText = "⏳ Заявка уже обработана ранее."
 	} else if action == "approve" {
-		err = db.ApproveScore(database, scoreID, userID, time.Now())
+		err = db.ApproveScore(database, scoreID, user.ID, time.Now())
 		if err == nil {
 			resultText = fmt.Sprintf("✅ Заявка подтверждена.\nПодтвердил: @%s", user.Name)
 		} else {
@@ -94,7 +94,7 @@ func HandleScoreApprovalCallback(callback *tgbotapi.CallbackQuery, bot *tgbotapi
 			resultText = "❌ Ошибка при подтверждении заявки."
 		}
 	} else {
-		err = db.RejectScore(database, scoreID, userID, time.Now())
+		err = db.RejectScore(database, scoreID, user.ID, time.Now())
 		if err == nil {
 			resultText = fmt.Sprintf("❌ Заявка отклонена.\nОтклонил: @%s", user.Name)
 		} else {

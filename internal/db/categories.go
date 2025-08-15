@@ -84,14 +84,12 @@ func GetCategoryByID(database *sql.DB, id int64) (*models.Category, error) {
 
 // создать (name, label) — label уже есть в схеме
 func CreateCategory(database *sql.DB, name, label string) (int64, error) {
-	res, err := database.Exec(
-		"INSERT INTO categories(name, label, is_active) VALUES($1,$2,TRUE)",
-		name, label,
-	)
-	if err != nil {
-		return 0, err
-	}
-	id, err := res.LastInsertId()
+	var id int64
+	err := database.
+		QueryRow(
+			"INSERT INTO categories(name, label, is_active) VALUES($1,$2,TRUE) RETURNING id",
+			name, label,
+		).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -109,27 +107,23 @@ func RenameCategory(database *sql.DB, id int64, name string) error {
 	}
 	aff, _ := res.RowsAffected()
 	if aff == 0 {
-		return errors.New("category not found")
+		return errors.New("категория не найдена")
 	}
 	return nil
 }
 
 // включить/выключить (is_active)
 func SetCategoryActive(database *sql.DB, id int64, active bool) error {
-	val := 0
-	if active {
-		val = 1
-	}
 	res, err := database.Exec(
 		"UPDATE categories SET is_active = $1 WHERE id = $2",
-		val, id,
+		active, id,
 	)
 	if err != nil {
 		return err
 	}
 	aff, _ := res.RowsAffected()
 	if aff == 0 {
-		return errors.New("category not found")
+		return errors.New("категория не найдена")
 	}
 	return nil
 }
@@ -180,14 +174,11 @@ func GetLevelsByCategoryIDFull(database *sql.DB, catID int64, includeInactive bo
 }
 
 func CreateLevel(database *sql.DB, catID int64, value int, label string) (int64, error) {
-	res, err := database.Exec(
-		"INSERT INTO score_levels(value, label, category_id, is_active) VALUES($1,$2,$3,TRUE)",
+	var id int64
+	err := database.QueryRow(
+		"INSERT INTO score_levels(value, label, category_id, is_active) VALUES($1,$2,$3,TRUE) RETURNING id",
 		value, label, catID,
-	)
-	if err != nil {
-		return 0, err
-	}
-	id, err := res.LastInsertId()
+	).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -204,26 +195,22 @@ func RenameLevel(database *sql.DB, id int64, label string) error {
 	}
 	aff, _ := res.RowsAffected()
 	if aff == 0 {
-		return errors.New("level not found")
+		return errors.New("уровень не найден")
 	}
 	return nil
 }
 
 func SetLevelActive(database *sql.DB, id int64, active bool) error {
-	val := 0
-	if active {
-		val = 1
-	}
 	res, err := database.Exec(
 		"UPDATE score_levels SET is_active = $1 WHERE id = $2",
-		val, id,
+		active, id,
 	)
 	if err != nil {
 		return err
 	}
 	aff, _ := res.RowsAffected()
 	if aff == 0 {
-		return errors.New("level not found")
+		return errors.New("уровень не найден")
 	}
 	return nil
 }

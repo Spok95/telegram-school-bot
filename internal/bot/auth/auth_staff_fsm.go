@@ -55,13 +55,14 @@ func HandleStaffFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *sq
 }
 
 func SaveStaffRequest(database *sql.DB, telegramID int64, name, role string) (int64, error) {
-	res, err := database.Exec(`
+	var id int64
+	err := database.QueryRow(`
 		INSERT INTO users (telegram_id, name, role, confirmed)
-		VALUES ($1, $2, $3, FALSE)
-	`, telegramID, name, role)
+		VALUES ($1,$2,$3,FALSE)
+		RETURNING id
+		`, telegramID, name, role).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
-	id, _ := res.LastInsertId()
 	return id, nil
 }

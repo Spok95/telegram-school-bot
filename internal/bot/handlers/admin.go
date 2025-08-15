@@ -222,9 +222,12 @@ func NotifyAdminsAboutNewUser(bot *tgbotapi.BotAPI, database *sql.DB, userID int
 		tgID               int64
 		classNum, classLet sql.NullString
 	)
-	if err := database.QueryRow(`SELECT name, role, telegram_id, class_number, class_letter FROM users WHERE id = $1`, userID).
-		Scan(&name, &role, &tgID, &classNum, &classLet); err != nil {
-		log.Printf("notify: user %d not ready yet: %v", userID, err)
+	if err := database.QueryRow(`
+		SELECT name, role, telegram_id, class_number, class_letter
+		FROM users
+		WHERE id = $1
+		`, userID).Scan(&name, &role, &tgID, &classNum, &classLet); err != nil {
+		log.Printf("NotifyAdminsAboutNewUser: запись %d ещё не готова: %v", userID, err)
 		return
 	}
 
@@ -359,7 +362,11 @@ func HandleParentLinkApprovalCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.
 		defer tx.Rollback()
 
 		// Создаём связь (id в users, не telegram_id!)
-		if _, err = tx.Exec(`INSERT OR IGNORE INTO parents_students(parent_id, student_id) VALUES($1,$2)`, parentID, studentID); err != nil {
+		if _, err = tx.Exec(`
+			INSERT INTO parents_students(parent_id, student_id)
+			VALUES($1,$2)
+			ON CONFLICT (parent_id, student_id) DO NOTHING
+			`, parentID, studentID); err != nil {
 			return
 		}
 		if _, err = tx.Exec(`DELETE FROM parent_link_requests WHERE id = $1`, reqID); err != nil {

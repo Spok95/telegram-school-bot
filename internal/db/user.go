@@ -10,12 +10,12 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/models"
 )
 
-func GetUserByTelegramID(db *sql.DB, telegramID int64) (*models.User, error) {
+func GetUserByTelegramID(database *sql.DB, telegramID int64) (*models.User, error) {
 	query := `
 SELECT id, telegram_id, name, role, class_id, class_name, class_number, class_letter, child_id, confirmed, is_active
 FROM users WHERE telegram_id = $1`
 
-	row := db.QueryRow(query, telegramID)
+	row := database.QueryRow(query, telegramID)
 
 	var u models.User
 	err := row.Scan(&u.ID, &u.TelegramID, &u.Name, &u.Role, &u.ClassID, &u.ClassName, &u.ClassNumber, &u.ClassLetter, &u.ChildID, &u.Confirmed, &u.IsActive)
@@ -50,8 +50,8 @@ WHERE role = 'student' AND class_number = $1 AND class_letter = $2`
 	return students, nil
 }
 
-func GetChildrenByParentID(db *sql.DB, parentID int64) ([]models.User, error) {
-	rows, err := db.Query(`
+func GetChildrenByParentID(database *sql.DB, parentID int64) ([]models.User, error) {
+	rows, err := database.Query(`
 		SELECT u.id, u.name, u.class_number, u.class_letter
 		FROM users u
 		JOIN parents_students ps ON ps.student_id = u.id
