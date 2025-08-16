@@ -26,3 +26,15 @@ psql:
 
 migrate:
 	docker compose up migrate
+
+migrate-status:
+	goose -dir ./migrations postgres "$(DATABASE_URL)" status
+
+migrate-up:
+	goose -dir ./migrations postgres "$(DATABASE_URL)" up
+
+migrate-down:
+	goose -dir ./migrations postgres "$(DATABASE_URL)" down
+
+migrate-redo:
+	goose -dir ./migrations postgres "$(DATABASE_URL)" redo
