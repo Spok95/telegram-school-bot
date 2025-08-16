@@ -23,17 +23,17 @@ workspace.xml
 httpRequests/
 
 # Configuration
-config.yaml
-.env
-
-# Mac OS
-.DS_Store
+config.yam
 
 # SQLite базы данных (если будешь использовать)
 *.db
 *.sqlite
 *.sqlite3
-data/*.db
+data/*.dbl
+.env
+
+# Mac OS
+.DS_Store
 
 # Telebot session (если сохраняешь состояние бота в файл)
 *.session.json
