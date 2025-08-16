@@ -8,6 +8,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/joho/godotenv"
+	"github.com/pressly/goose/v3"
 )
 
 func main() {
@@ -35,6 +36,10 @@ func main() {
 		log.Fatalf("Ошибка подключения к БД: %v", err)
 	}
 	defer database.Close()
+
+	if err := goose.Up(database, "./migrations"); err != nil {
+		log.Fatalf("❌ Ошибка миграций: %v", err)
+	}
 
 	err = db.SetActivePeriod(database)
 	if err != nil {
