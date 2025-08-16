@@ -1,3 +1,4 @@
+-- +goose Up
 CREATE TABLE users (
                        id BIGSERIAL PRIMARY KEY,
                        telegram_id BIGINT UNIQUE NOT NULL,
@@ -78,9 +79,9 @@ CREATE TABLE IF NOT EXISTS score_levels (
                                             value INT NOT NULL,
                                             label TEXT NOT NULL,
                                             category_id BIGINT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
-                                            is_active BOOLEAN NOT NULL DEFAULT TRUE,
-                                            UNIQUE (category_id, value)
-);
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    UNIQUE (category_id, value)
+    );
 
 -- Быстрый индекс уникальности
 CREATE UNIQUE INDEX IF NOT EXISTS uq_score_levels_category_value
@@ -90,13 +91,25 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_score_levels_category_value
 CREATE TABLE IF NOT EXISTS parent_link_requests (
                                                     id BIGSERIAL PRIMARY KEY,
                                                     parent_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                                                    student_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                                                    created_at TIMESTAMP NOT NULL DEFAULT NOW()
-);
-
+    student_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
 
 -- Индексы
 CREATE INDEX idx_scores_student_created ON scores(student_id, created_at);
 CREATE INDEX idx_scores_category       ON scores(category_id);
 CREATE INDEX idx_users_role            ON users(role);
 CREATE UNIQUE INDEX idx_users_telegram ON users(telegram_id);
+
+-- +goose Down
+DROP TABLE IF EXISTS parent_link_requests;
+DROP TABLE IF EXISTS score_levels;
+ALTER TABLE categories DROP COLUMN IF EXISTS is_active;
+DROP TABLE IF EXISTS role_changes;
+DROP INDEX IF EXISTS scores_student_status_period_idx;
+DROP TABLE IF EXISTS scores;
+DROP TABLE IF EXISTS periods;
+DROP TABLE IF EXISTS categories;
+DROP TABLE IF EXISTS parents_students;
+DROP TABLE IF EXISTS classes;
+DROP TABLE IF EXISTS users;
