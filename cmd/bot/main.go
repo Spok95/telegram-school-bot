@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/Spok95/telegram-school-bot/internal/app"
+	"github.com/Spok95/telegram-school-bot/internal/bot/handlers/migrations"
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/joho/godotenv"
@@ -37,7 +38,12 @@ func main() {
 	}
 	defer database.Close()
 
-	if err := goose.Up(database, "./migrations"); err != nil {
+	// Включаем встроенные миграции (из embed.FS)
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("postgres"); err != nil {
+		log.Fatalf("❌ Goose dialect error: %v", err)
+	}
+	if err := goose.Up(database, "."); err != nil {
 		log.Fatalf("❌ Ошибка миграций: %v", err)
 	}
 
