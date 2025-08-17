@@ -116,6 +116,60 @@ func GetPendingScores(database *sql.DB) ([]models.Score, error) {
 	return results, nil
 }
 
+// AddScoreInstant: создать начисление сразу approved и обновить коллективный рейтинг
+func AddScoreInstant(database *sql.DB, score models.Score, approvedBy int64, approvedAt time.Time) error {
+	if score.Type != "add" {
+		return fmt.Errorf("AddScoreInstant: поддерживается только type='add'")
+	}
+	if score.Points == 0 {
+		return fmt.Errorf("AddScoreInstant: points не может быть 0")
+	}
+
+	// 1) Обязателен активный период
+	period, err := GetActivePeriod(database)
+	if err != nil {
+		return fmt.Errorf("получение активного периода: %w", err)
+	}
+	if period == nil {
+		return fmt.Errorf("нет активного периода")
+	}
+
+	tx, err := database.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// 2) Вставка сразу approved с обязательным period_id
+	_, err = tx.Exec(`
+		INSERT INTO scores (
+			student_id, category_id, points, type, comment,
+			status, approved_by, approved_at, created_by, created_at, period_id
+		) VALUES ($1,$2,$3,'add',$4,'approved',$5,$6,$7,NOW(),$8)
+	`,
+		score.StudentID, score.CategoryID, score.Points, score.Comment,
+		approvedBy, approvedAt, score.CreatedBy, period.ID,
+	)
+	if err != nil {
+		return err
+	}
+
+	// 3) Обновляем коллективный рейтинг класса (+30% от |points|)
+	adj := score.Points
+	if adj < 0 {
+		adj = -adj
+	}
+	if _, err := tx.Exec(`
+		UPDATE classes
+		SET collective_score = collective_score + $1
+		WHERE id = (SELECT class_id FROM users WHERE id = $2)
+	`, (adj*30)/100, score.StudentID); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
 // ApproveScore подтверждает заявку и обновляет рейтинг ученика и класса
 func ApproveScore(database *sql.DB, scoreID int64, adminID int64, approvedAt time.Time) error {
 	tx, err := database.Begin()

@@ -208,6 +208,7 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		strings.HasPrefix(data, "add_class_") ||
 		strings.HasPrefix(data, "add_score_") ||
 		strings.HasPrefix(data, "add_score_student_") ||
+		strings.HasPrefix(data, "add_confirm:") ||
 		data == "add_students_done" ||
 		data == "add_select_all_students" ||
 		data == "add_back" ||
