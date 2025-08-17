@@ -22,6 +22,7 @@ type AddFSMState struct {
 	CategoryID         int
 	LevelID            int
 	Comment            string
+	RequestID          string
 }
 
 var addStates = make(map[int64]*AddFSMState)
@@ -98,6 +99,69 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		return
 	}
 
+	// Обработка подтверждения (мгновенная запись)
+	if strings.HasPrefix(data, "add_confirm:") {
+		rid := strings.TrimPrefix(data, "add_confirm:")
+
+		// простая проверка идемпотентности по request_id
+		if rid == "" || rid != state.RequestID {
+			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
+			return
+		}
+
+		// one-shot защита на чат: если уже обрабатывается — игнор
+		key := fmt.Sprintf("add_confirm:%s", rid)
+		if !fsmutil.SetPending(chatID, key) {
+			return
+		}
+		defer fsmutil.ClearPending(chatID, key)
+
+		// погасим клавиатуру до операций, чтобы второй клик не сработал
+		fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
+
+		level, _ := db.GetLevelByID(database, state.LevelID)
+		user, _ := db.GetUserByTelegramID(database, chatID)
+		var createdBy int64
+		if user != nil {
+			createdBy = user.ID
+		} else {
+			// Если по какой-то причине пользователя не нашли — фиксируем и выходим мягко
+			log.Printf("HandleAddScoreCallback: user is nil for telegram id=%d", chatID)
+			edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "⚠️ Не удалось определить пользователя. Попробуйте ещё раз.")
+			bot.Send(edit)
+			delete(addStates, chatID)
+			return
+		}
+		now := time.Now()
+
+		// Уточним активный период (не критично, AddScoreInstant сам подхватит, если есть)
+		_ = db.SetActivePeriod(database)
+
+		for _, sid := range state.SelectedStudentIDs {
+			score := models.Score{
+				StudentID:  sid,
+				CategoryID: int64(state.CategoryID),
+				Points:     level.Value,
+				Type:       "add",
+				CreatedBy:  createdBy,
+			}
+			// комментарий для начислений — опционален; в UX подтверждения мы его не спрашиваем
+			trim := strings.TrimSpace(state.Comment)
+			if trim != "" {
+				c := trim
+				score.Comment = &c
+			}
+			if err := db.AddScoreInstant(database, score, createdBy, now); err != nil {
+				log.Printf("AddScoreInstant error student=%d: %v", sid, err)
+			}
+		}
+
+		edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "✅ Баллы начислены. 30% учтены в коллективном рейтинге класса.")
+		bot.Send(edit)
+		delete(addStates, chatID)
+		return
+	}
+
 	// ⬅ Назад
 	if data == "add_back" {
 		switch state.Step {
@@ -135,7 +199,10 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 			user, _ := db.GetUserByTelegramID(database, chatID)
 			cats, _ := db.GetCategories(database, false)
 			categories := make([]models.Category, 0, len(cats))
-			role := string(*user.Role)
+			role := ""
+			if user != nil && user.Role != nil {
+				role = string(*user.Role)
+			}
 			for _, c := range cats {
 				if role != "admin" && role != "administration" && c.Name == "Аукцион" {
 					continue
@@ -281,7 +348,11 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		user, _ := db.GetUserByTelegramID(database, chatID)
 		cats, _ := db.GetCategories(database, false) // только активные
 		categories := make([]models.Category, 0, len(cats))
-		role := string(*user.Role)
+		role := ""
+		if user != nil && user.Role != nil {
+			role = string(*user.Role)
+		}
+
 		for _, c := range cats {
 			if role != "admin" && role != "administration" && c.Name == "Аукцион" {
 				continue
@@ -324,9 +395,55 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		state.LevelID = lvlID
 		state.Step = 6
 
-		// запрос комментария (необязателен) с Back/Cancel
-		rows := [][]tgbotapi.InlineKeyboardButton{addBackCancelRow()}
-		addEditMenu(bot, chatID, cq.Message.MessageID, "Введите комментарий (необязательно, например: за участие):", rows)
+		// === Новый шаг: карточка подтверждения (без текстового комментария) ===
+
+		// уровень
+		level, _ := db.GetLevelByID(database, state.LevelID)
+		points := level.Value
+
+		// имя категории (без отдельного метода — через общий список)
+		catName := fmt.Sprintf("Категория #%d", state.CategoryID)
+		if cats, err := db.GetCategories(database, false); err == nil {
+			for _, c := range cats {
+				if c.ID == state.CategoryID {
+					catName = c.Name
+					break
+				}
+			}
+		}
+
+		period, err := db.GetActivePeriod(database)
+		if err != nil || period == nil {
+			edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "❌ Нет активного периода. Установите активный период и попробуйте снова.")
+			bot.Send(edit)
+			delete(addStates, chatID)
+			return
+		}
+
+		// имена учеников
+		var names []string
+		for _, sid := range state.SelectedStudentIDs {
+			u, err := db.GetUserByID(database, sid)
+			if err != nil || u.ID == 0 || strings.TrimSpace(u.Name) == "" {
+				names = append(names, fmt.Sprintf("ID:%d", sid))
+			} else {
+				names = append(names, u.Name)
+			}
+		}
+
+		state.RequestID = fmt.Sprintf("%d_%d", chatID, time.Now().UnixNano())
+
+		text := fmt.Sprintf(
+			"Подтверждение начисления\n\nКласс: %d%s\nКатегория: %s\nКоличество баллов: %d\nУченики:\n• %s\n\nПодтвердить начисление?",
+			state.ClassNumber, state.ClassLetter, catName, points, strings.Join(names, "\n• "),
+		)
+		rows := [][]tgbotapi.InlineKeyboardButton{
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("✅ Да", "add_confirm:"+state.RequestID),
+			),
+			addBackCancelRow(),
+		}
+		addEditMenu(bot, chatID, cq.Message.MessageID, text, rows)
 		return
 	}
 }
@@ -336,62 +453,14 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 func HandleAddScoreText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
 	state, ok := addStates[chatID]
-	if !ok || state.Step != 6 {
+	if !ok {
 		return
 	}
 
-	// текстовая отмена
-	if fsmutil.IsCancelText(msg.Text) {
-		delete(addStates, chatID)
-		bot.Send(tgbotapi.NewMessage(chatID, "🚫 Начисление отменено."))
+	if state.Step == 6 {
+		bot.Send(tgbotapi.NewMessage(chatID, "Нажмите «✅ Да» или используйте «Назад/Отмена» ниже."))
 		return
 	}
-
-	state.Comment = strings.TrimSpace(msg.Text)
-
-	// one‑shot защита от двойного сабмита
-	key := fmt.Sprintf("add:%d", chatID)
-	if !fsmutil.SetPending(chatID, key) {
-		bot.Send(tgbotapi.NewMessage(chatID, "⏳ Запрос уже обрабатывается…"))
-		return
-	}
-	defer fsmutil.ClearPending(chatID, key)
-
-	level, _ := db.GetLevelByID(database, state.LevelID)
-	user, _ := db.GetUserByTelegramID(database, chatID)
-	createdBy := user.ID
-	comment := state.Comment
-
-	_ = db.SetActivePeriod(database)
-	period, err := db.GetActivePeriod(database)
-	if err != nil || period == nil {
-		bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось определить активный период."))
-		delete(addStates, chatID)
-		return
-	}
-
-	for _, sid := range state.SelectedStudentIDs {
-		score := models.Score{
-			StudentID:  sid,
-			CategoryID: int64(state.CategoryID),
-			Points:     level.Value,
-			Type:       "add",
-			Comment:    &comment,
-			Status:     "pending",
-			CreatedBy:  createdBy,
-			CreatedAt:  time.Now(),
-			PeriodID:   &period.ID,
-		}
-		_ = db.AddScore(database, score)
-
-		student, err := db.GetUserByID(database, sid)
-		if err != nil {
-			log.Println("Ошибка получения ученика:", err)
-			continue
-		}
-		NotifyAdminsAboutScoreRequest(bot, database, score, student.Name)
-	}
-	bot.Send(tgbotapi.NewMessage(chatID, "Заявки на начисление баллов отправлены на подтверждение."))
 	delete(addStates, chatID)
 }
 
