@@ -188,16 +188,18 @@ func SaveParentRequest(database *sql.DB, parentTelegramID int64, studentID int, 
 	err = tx.QueryRow(`SELECT id FROM users WHERE telegram_id = $1`, parentTelegramID).Scan(&parentID)
 	if err == sql.ErrNoRows {
 		// Вставка родителя в users
-		res, err := tx.Exec(`
-		INSERT INTO users (telegram_id, name, role, confirmed)
-		VALUES ($1, $2, 'parent', FALSE)
-	`, parentTelegramID, parentName)
+		err := tx.QueryRow(`
+			INSERT INTO users (telegram_id, name, role, confirmed)
+			VALUES ($1, $2, 'parent', FALSE)
+			ON CONFLICT (telegram_id) DO UPDATE
+			SET name = EXCLUDED.name, role = 'parent'
+			RETURNING id
+		`, parentTelegramID, parentName).Scan(&parentID)
 		if err != nil {
-			log.Printf("[PARENT_ERROR] failed to insert parent user: %v", err)
+			log.Printf("[PARENT_ERROR] upsert parent failed: %v", err)
 			tx.Rollback()
 			return 0, err
 		}
-		parentID, _ = res.LastInsertId()
 	} else if err != nil {
 		tx.Rollback()
 		return 0, err
