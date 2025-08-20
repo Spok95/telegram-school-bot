@@ -116,11 +116,11 @@ func HandleSetPeriodCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotap
 	}
 
 	data := cb.Data
-
+	perAnswer(bot, cb)
 	// Выходы — первыми
 	if data == perCancel || data == perBackToMenu {
-		mk := tgbotapi.NewInlineKeyboardMarkup() // без кнопок
-		perReplace(bot, chatID, state, "🚫 Отменено.", mk)
+		perClearMarkup(bot, chatID, state)
+		perSend(bot, chatID, state, "🚫 Отменено.", tgbotapi.NewInlineKeyboardMarkup())
 		delete(periodStates, chatID)
 		return
 	}
@@ -156,7 +156,8 @@ func HandleSetPeriodCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotap
 			perReplace(bot, chatID, state, fmt.Sprintf("❌ Ошибка сохранения: %v", err), mk)
 			return
 		}
-		perReplace(bot, chatID, state, "✅ Новый период успешно создан.", tgbotapi.NewInlineKeyboardMarkup())
+		perClearMarkup(bot, chatID, state)
+		perSend(bot, chatID, state, "✅ Новый период успешно создан.", tgbotapi.NewInlineKeyboardMarkup())
 		delete(periodStates, chatID)
 		return
 	}
@@ -185,7 +186,34 @@ func perReplace(bot *tgbotapi.BotAPI, chatID int64, state *SetPeriodState, text 
 		bot.Request(tgbotapi.NewDeleteMessage(chatID, state.MessageID))
 	}
 	msg := tgbotapi.NewMessage(chatID, text)
-	msg.ReplyMarkup = mk
+	if len(mk.InlineKeyboard) > 0 {
+		msg.ReplyMarkup = mk
+	}
 	sent, _ := bot.Send(msg)
 	state.MessageID = sent.MessageID
+}
+
+// Ответить на нажатие кнопки (убирает крутилку у пользователя)
+func perAnswer(bot *tgbotapi.BotAPI, cb *tgbotapi.CallbackQuery) {
+	_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, ""))
+}
+
+// Отправить новое сообщение без удаления предыдущего
+func perSend(bot *tgbotapi.BotAPI, chatID int64, st *SetPeriodState, text string, mk tgbotapi.InlineKeyboardMarkup) {
+	msg := tgbotapi.NewMessage(chatID, text)
+	if len(mk.InlineKeyboard) > 0 {
+		msg.ReplyMarkup = mk
+	}
+	sent, _ := bot.Send(msg)
+	st.MessageID = sent.MessageID
+}
+
+// Убрать inline-клавиатуру у текущего бот-сообщения (делает кнопки неактивными)
+func perClearMarkup(bot *tgbotapi.BotAPI, chatID int64, st *SetPeriodState) {
+	if st.MessageID == 0 {
+		return
+	}
+	empty := tgbotapi.NewEditMessageReplyMarkup(chatID, st.MessageID,
+		tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{}})
+	_, _ = bot.Request(empty)
 }

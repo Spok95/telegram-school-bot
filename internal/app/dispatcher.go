@@ -2,6 +2,7 @@ package app
 
 import (
 	"database/sql"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -151,6 +152,8 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
 	data := cb.Data
 	chatID := cb.Message.Chat.ID
+
+	log.Printf("CB from %d: %s (msgID=%d)\n", cb.From.ID, cb.Data, cb.Message.MessageID)
 
 	if strings.HasPrefix(data, "reg_") {
 		role := strings.TrimPrefix(data, "reg_")
