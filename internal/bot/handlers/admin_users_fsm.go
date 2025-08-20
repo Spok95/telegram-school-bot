@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Spok95/telegram-school-bot/internal/bot/shared/fsmutil"
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -15,8 +16,9 @@ type adminUsersState struct {
 	Query          string
 	SelectedUserID int64
 	PendingRole    string
-	ClsNum         int64
-	ClsLet         string
+	ClassNumber    int64
+	ClassLetter    string
+	MessageID      int
 }
 
 var adminUsersStates = map[int64]*adminUsersState{}
@@ -25,27 +27,35 @@ func GetAdminUsersState(chatID int64) *adminUsersState { return adminUsersStates
 
 // ─── ENTRY
 
-func StartAdminUsersFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+func StartAdminUsersFSM(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
 	adminUsersStates[chatID] = &adminUsersState{Step: 1}
-	bot.Send(tgbotapi.NewMessage(chatID, "👥 Управление пользователями\nВведите имя или класс (например, 7А) для поиска:"))
+	edit := tgbotapi.NewMessage(chatID, "👥 Управление пользователями\nВведите имя или класс (например, 7А) для поиска:")
+	edit.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+		fsmutil.BackCancelRow("admusr_back_to_menu", "admusr_cancel"))
+	sent, _ := bot.Send(edit)
+	adminUsersStates[chatID].MessageID = sent.MessageID
 }
 
 // ─── TEXT HANDLER
 
 func HandleAdminUsersText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
-	st := adminUsersStates[chatID]
-	if st == nil {
+	state := adminUsersStates[chatID]
+	if state == nil {
 		return
 	}
 
-	switch st.Step {
+	switch state.Step {
 	case 1:
-		st.Query = strings.TrimSpace(msg.Text)
-		users, err := db.FindUsersByQuery(database, st.Query, 50)
+		state.Query = strings.TrimSpace(msg.Text)
+		users, err := db.FindUsersByQuery(database, state.Query, 50)
 		if err != nil || len(users) == 0 {
-			bot.Send(tgbotapi.NewMessage(chatID, "Ничего не найдено, попробуйте другой запрос."))
+			edit := tgbotapi.NewEditMessageText(chatID, state.MessageID, "Ничего не найдено, попробуйте другой запрос.")
+			mk := tgbotapi.NewInlineKeyboardMarkup(
+				fsmutil.BackCancelRow("admusr_back_to_menu", "admusr_cancel"))
+			edit.ReplyMarkup = &mk
+			bot.Send(edit)
 			return
 		}
 		text := fmt.Sprintf("Найдено %d пользователей. Выберите:", len(users))
@@ -62,31 +72,34 @@ func HandleAdminUsersText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.
 			btn := tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%s • %s%s", u.Name, labelRole, labelClass), fmt.Sprintf("admusr_pick_%d", u.ID))
 			rows = append(rows, tgbotapi.NewInlineKeyboardRow(btn))
 		}
+		rows = append(rows, fsmutil.BackCancelRow("admusr_back_to_search", "admusr_cancel"))
 		mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
-		msg := tgbotapi.NewMessage(chatID, text)
-		msg.ReplyMarkup = mk
-		bot.Send(msg)
-		st.Step = 2
+		edit := tgbotapi.NewEditMessageText(chatID, state.MessageID, text)
+		edit.ReplyMarkup = &mk
+		bot.Send(edit)
+		state.Step = 2
 	case 3:
-		// ожидаем ввод класса для роли "student"
 		num, let, ok := parseClass(msg.Text)
 		if !ok {
-			bot.Send(tgbotapi.NewMessage(chatID, "Неверный формат. Пример: 7А, 10Б, 11Г."))
+			edit := tgbotapi.NewEditMessageText(chatID, state.MessageID, "Неверный формат. Пример: 7А, 10Б, 11Г.\nВведите класс.")
+			bot.Send(edit)
 			return
 		}
-		st.ClsNum, st.ClsLet = num, let
+		state.ClassNumber, state.ClassLetter = num, let
 
-		question := fmt.Sprintf("Сменить роль на Ученик (%d%s)?", num, let)
-		mk := tgbotapi.NewInlineKeyboardMarkup(
+		question := fmt.Sprintf("Сменить роль на Ученик (%d%s)?", state.ClassNumber, state.ClassLetter)
+		rows := [][]tgbotapi.InlineKeyboardButton{
 			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData("✅ Подтвердить", "admusr_apply_student"),
-				tgbotapi.NewInlineKeyboardButtonData("↩️ Назад", "admusr_back"),
 			),
-		)
-		out := tgbotapi.NewMessage(chatID, question)
-		out.ReplyMarkup = mk
-		bot.Send(out)
-		st.Step = 4
+			fsmutil.BackCancelRow("admusr_back_to_role", "admusr_cancel"),
+		}
+		mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
+		edit := tgbotapi.NewEditMessageText(chatID, state.MessageID, question)
+		edit.ReplyMarkup = &mk
+		bot.Send(edit)
+		state.Step = 4
+		return
 	}
 }
 
@@ -94,17 +107,25 @@ func HandleAdminUsersText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.
 
 func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
 	chatID := cb.Message.Chat.ID
-	st := adminUsersStates[chatID]
-	if st == nil {
+	state := adminUsersStates[chatID]
+	if state == nil {
 		return
 	}
 	data := cb.Data
+
+	// Отмена
+	if data == "admusr_cancel" {
+		fsmutil.DisableMarkup(bot, chatID, state.MessageID)
+		bot.Send(tgbotapi.NewEditMessageText(chatID, state.MessageID, "🚫 Отменено."))
+		delete(adminUsersStates, chatID)
+		return
+	}
 
 	// выбор пользователя из списка
 	if strings.HasPrefix(data, "admusr_pick_") {
 		var uid int64
 		fmt.Sscanf(data, "admusr_pick_%d", &uid)
-		st.SelectedUserID = uid
+		state.SelectedUserID = uid
 
 		rows := [][]tgbotapi.InlineKeyboardButton{
 			tgbotapi.NewInlineKeyboardRow(
@@ -115,43 +136,47 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 				tgbotapi.NewInlineKeyboardButtonData("Админ", "admusr_set_admin"),
 			),
 		}
+
+		rows = append(rows, fsmutil.BackCancelRow("admusr_back_to_list", "admusr_cancel"))
 		mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
-		cfg := tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "Выберите новую роль:")
-		cfg.ReplyMarkup = &mk
-		bot.Send(cfg)
+		edit := tgbotapi.NewEditMessageText(chatID, state.MessageID, "Выберите новую роль:")
+		edit.ReplyMarkup = &mk
+		bot.Send(edit)
 		return
 	}
 
 	if strings.HasPrefix(data, "admusr_set_") {
 		role := strings.TrimPrefix(data, "admusr_set_")
-		st.PendingRole = role
+		state.PendingRole = role
 
 		// Для ученика сначала спросим класс
 		if role == "student" {
-			cfg := tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "Введите класс в формате 7А:")
-			bot.Send(cfg)
-			st.Step = 3
+			mk := tgbotapi.NewInlineKeyboardMarkup(fsmutil.BackCancelRow("admusr_back_to_role", "admusr_cancel"))
+			edit := tgbotapi.NewEditMessageText(chatID, state.MessageID, "Введите класс в формате 7А:")
+			edit.ReplyMarkup = &mk
+			bot.Send(edit)
+			state.Step = 3
 			return
 		}
 		// Для остальных ролей сразу подтверждение
-		mk := tgbotapi.NewInlineKeyboardMarkup(
+		rows := [][]tgbotapi.InlineKeyboardButton{
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("✅ Подтвердить", fmt.Sprintf("admusr_apply_%s", role)),
-				tgbotapi.NewInlineKeyboardButtonData("↩️ Назад", "admusr_back"),
+				tgbotapi.NewInlineKeyboardButtonData("✅ Подтвердить", "admusr_apply_"+role),
 			),
-		)
-
-		question := fmt.Sprintf("Сменить роль на %s?", humanRole(role))
-		cfg := tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, question)
-		cfg.ReplyMarkup = &mk
-		bot.Send(cfg)
+			fsmutil.BackCancelRow("admusr_back_to_role", "admusr_cancel"),
+		}
+		mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
+		edit := tgbotapi.NewEditMessageText(chatID, state.MessageID, fmt.Sprintf("Сменить роль на «%s»?", humanRole(role)))
+		edit.ReplyMarkup = &mk
+		bot.Send(edit)
+		state.Step = 4
 		return
 	}
 	// подтверждение (общий случай) ИЛИ подтверждение для student
 	if strings.HasPrefix(data, "admusr_apply_") || data == "admusr_apply_student" {
 		role := strings.TrimPrefix(data, "admusr_apply_")
 		if role == "" {
-			role = st.PendingRole
+			role = state.PendingRole
 		}
 		admin, _ := db.GetUserByTelegramID(database, chatID)
 		if admin == nil || admin.Role == nil || (*admin.Role != "admin") {
@@ -160,10 +185,10 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 		}
 
 		var err error
-		if role == "student" || st.PendingRole == "student" {
-			err = db.ChangeRoleToStudentWithAudit(database, st.SelectedUserID, st.ClsNum, st.ClsLet, admin.ID)
+		if role == "student" || state.PendingRole == "student" {
+			err = db.ChangeRoleToStudentWithAudit(database, state.SelectedUserID, state.ClassNumber, state.ClassLetter, admin.ID)
 		} else {
-			err = db.ChangeRoleWithCleanup(database, st.SelectedUserID, role, admin.ID)
+			err = db.ChangeRoleWithCleanup(database, state.SelectedUserID, role, admin.ID)
 		}
 		if err != nil {
 			bot.Send(tgbotapi.NewMessage(chatID, "Ошибка при смене роли: "+err.Error()))
@@ -171,43 +196,84 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 		}
 
 		// уведомление пользователю
-		target, _ := db.GetUserByID(database, st.SelectedUserID)
+		target, _ := db.GetUserByID(database, state.SelectedUserID)
 		txt := fmt.Sprintf("Ваша роль была изменена на «%s». Нажмите /start, чтобы обновить меню.", humanRole(role))
 		bot.Send(tgbotapi.NewMessage(target.TelegramID, txt))
 
-		doneCfg := tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "✅ Роль обновлена")
-		bot.Send(doneCfg)
+		edit := tgbotapi.NewEditMessageText(chatID, state.MessageID, "✅ Роль обновлена")
+		bot.Send(edit)
 		delete(adminUsersStates, chatID)
 		return
 	}
 
-	// назад к выбору ролей
-	if data == "admusr_back" {
-		mk := rolesMarkup()
-		cfg := tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "Выберите новую роль:")
-		cfg.ReplyMarkup = &mk
-		bot.Send(cfg)
-		st.Step = 2
+	// ===== Назад
+	if data == "admusr_back_to_role" {
+		// вернуться к выбору роли
+		rows := [][]tgbotapi.InlineKeyboardButton{
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("Ученик", "admusr_set_student"),
+				tgbotapi.NewInlineKeyboardButtonData("Родитель", "admusr_set_parent"),
+				tgbotapi.NewInlineKeyboardButtonData("Учитель", "admusr_set_teacher"),
+			),
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("Администрация", "admusr_set_administration"),
+				tgbotapi.NewInlineKeyboardButtonData("Админ", "admusr_set_admin"),
+			),
+			fsmutil.BackCancelRow("admusr_back_to_list", "admusr_cancel"),
+		}
+		mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
+		edit := tgbotapi.NewEditMessageText(chatID, state.MessageID, "Выберите новую роль:")
+		edit.ReplyMarkup = &mk
+		bot.Send(edit)
+		state.Step = 2
 		return
 	}
-}
+	if data == "admusr_back_to_list" {
+		// восстановить список найденных по state.query
+		users, _ := db.FindUsersByQuery(database, state.Query, 50)
+		text := fmt.Sprintf("Найдено %d пользователей. Выберите:", len(users))
+		var rows [][]tgbotapi.InlineKeyboardButton
+		for _, u := range users {
+			labelRole := "(нет роли)"
+			if u.Role != nil {
+				labelRole = string(*u.Role)
+			}
+			labelClass := ""
+			if u.ClassNumber != nil && u.ClassLetter != nil {
+				labelClass = fmt.Sprintf(" • %d%s", int(*u.ClassNumber), *u.ClassLetter)
+			}
+			btn := tgbotapi.NewInlineKeyboardButtonData(
+				fmt.Sprintf("%s • %s%s", u.Name, labelRole, labelClass),
+				fmt.Sprintf("admusr_pick_%d", u.ID),
+			)
+			rows = append(rows, tgbotapi.NewInlineKeyboardRow(btn))
+		}
+		rows = append(rows, fsmutil.BackCancelRow("admusr_back_to_search", "admusr_cancel"))
+		mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
+		edit := tgbotapi.NewEditMessageText(chatID, state.MessageID, text)
+		edit.ReplyMarkup = &mk
+		bot.Send(edit)
+		state.Step = 2
+		return
+	}
+	// ← Назад к вводу запроса (из списка)
+	if data == "admusr_back_to_search" {
+		edit := tgbotapi.NewEditMessageText(chatID, state.MessageID,
+			"👥 Управление пользователями\nВведите имя или класс (например, 7А) для поиска:")
+		mk := tgbotapi.NewInlineKeyboardMarkup(fsmutil.BackCancelRow("admusr_back_to_menu", "admusr_cancel"))
+		edit.ReplyMarkup = &mk
+		bot.Send(edit)
+		state.Step = 1
+		return
+	}
 
-// ─── HELPERS
-
-func rolesMarkup() tgbotapi.InlineKeyboardMarkup {
-	return tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("Ученик", "admusr_set_student"),
-			tgbotapi.NewInlineKeyboardButtonData("Родитель", "admusr_set_parent"),
-		),
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("Учитель", "admusr_set_teacher"),
-			tgbotapi.NewInlineKeyboardButtonData("Администрация", "admusr_set_administration"),
-		),
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("Админ", "admusr_set_admin"),
-		),
-	)
+	// ← Назад в меню (как Отмена) — доступно с экрана ввода.
+	if data == "admusr_back_to_menu" {
+		fsmutil.DisableMarkup(bot, chatID, state.MessageID)
+		bot.Send(tgbotapi.NewEditMessageText(chatID, state.MessageID, "🚫 Отменено."))
+		delete(adminUsersStates, chatID)
+		return
+	}
 }
 
 func humanRole(role string) string {

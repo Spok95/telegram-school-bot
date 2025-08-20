@@ -131,7 +131,7 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		}
 	case "👥 Пользователи":
 		if *user.Role == "admin" {
-			go handlers.StartAdminUsersFSM(bot, database, msg)
+			go handlers.StartAdminUsersFSM(bot, msg)
 		}
 	case "/auction", "🎯 Аукцион":
 		go handlers.StartAuctionFSM(bot, database, msg)
