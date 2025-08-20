@@ -64,36 +64,35 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Вы не зарегистрированы. Пожалуйста, нажмите /start для начала."))
 		return
 	}
-	userID := msg.From.ID
-	if handlers.GetAddScoreState(userID) != nil {
+	if handlers.GetAddScoreState(chatID) != nil {
 		handlers.HandleAddScoreText(bot, database, msg)
 		return
 	}
-	if handlers.GetRemoveScoreState(userID) != nil {
+	if handlers.GetRemoveScoreState(chatID) != nil {
 		handlers.HandleRemoveText(bot, database, msg)
 		return
 	}
-	if handlers.GetSetPeriodState(userID) != nil {
+	if handlers.GetSetPeriodState(chatID) != nil {
 		handlers.HandleSetPeriodInput(bot, database, msg)
 		return
 	}
-	if handlers.GetAuctionState(userID) != nil {
+	if handlers.GetAuctionState(chatID) != nil {
 		handlers.HandleAuctionText(bot, database, msg)
 		return
 	}
-	if handlers.GetExportState(userID) != nil {
+	if handlers.GetExportState(chatID) != nil {
 		handlers.HandleExportText(bot, database, msg)
 		return
 	}
-	if handlers.GetAdminUsersState(userID) != nil {
+	if handlers.GetAdminUsersState(chatID) != nil {
 		handlers.HandleAdminUsersText(bot, database, msg)
 		return
 	}
-	if handlers.GetCatalogState(userID) != nil {
+	if handlers.GetCatalogState(chatID) != nil {
 		handlers.HandleCatalogText(bot, database, msg)
 		return
 	}
-	if auth.GetAddChildFSMState(userID) != "" {
+	if auth.GetAddChildFSMState(chatID) != "" {
 		auth.HandleAddChildText(bot, database, msg)
 		return
 	}
@@ -163,7 +162,10 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		}
 		return
 	}
-
+	if strings.HasPrefix(data, "per_") || data == "per_confirm" {
+		handlers.HandleSetPeriodCallback(bot, database, cb)
+		return
+	}
 	if strings.HasPrefix(data, "link_confirm_") || strings.HasPrefix(data, "link_reject_") {
 		handlers.HandleParentLinkApprovalCallback(cb, bot, database, chatID)
 		return
