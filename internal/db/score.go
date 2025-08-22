@@ -278,7 +278,7 @@ func GetScoresByPeriod(database *sql.DB, periodID int) ([]models.ScoreWithUser, 
 	JOIN users s ON scores.student_id = s.id
 	JOIN users a ON scores.created_by = a.id
 	JOIN categories c ON scores.category_id = c.id
-	WHERE scores.created_at BETWEEN $1 AND $2 AND scores.status = 'approved'
+	WHERE s.role = 'student' AND s.class_number IS NOT NULL AND s.class_letter IS NOT NULL AND scores.created_at BETWEEN $1 AND $2 AND scores.status = 'approved'
 	ORDER BY scores.created_at ASC;
 	`
 	rows, err := database.Query(query, startDate, endDate)
