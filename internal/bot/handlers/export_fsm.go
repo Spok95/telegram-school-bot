@@ -458,11 +458,65 @@ func generateExportReport(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 		}
 
 		var filePath string
+		var collective int64
+		var className string
+
+		// --- Вычисляем коллективный рейтинг ---
+		// Для отчёта по классу
+		if state.ReportType == "class" && len(scores) > 0 {
+			className = fmt.Sprintf("%d%s", int(state.ClassNumber), state.ClassLetter)
+			if state.PeriodID != nil {
+				if classScores, err2 := db.GetScoresByClassAndPeriod(database, state.ClassNumber, state.ClassLetter, *state.PeriodID); err2 == nil {
+					stu := map[int64]int{}
+					for _, sc := range classScores {
+						stu[sc.StudentID] += sc.Points
+					}
+					for _, tot := range stu {
+						collective += int64((tot * 30) / 100)
+					}
+				}
+			} else if state.FromDate != nil && state.ToDate != nil {
+				if classScores, err2 := db.GetScoresByClassAndDateRange(database, int(state.ClassNumber), state.ClassLetter, *state.FromDate, *state.ToDate); err2 == nil {
+					stu := map[int64]int{}
+					for _, sc := range classScores {
+						stu[sc.StudentID] += sc.Points
+					}
+					for _, tot := range stu {
+						collective += int64((tot * 30) / 100)
+					}
+				}
+			}
+		}
+		// Для отчёта по ученику — класс берём из выбранного состояния (учеников выбираем внутри класса)
+		if state.ReportType == "student" && len(scores) > 0 {
+			className = fmt.Sprintf("%d%s", int(state.ClassNumber), state.ClassLetter)
+			if state.PeriodID != nil {
+				if classScores, err2 := db.GetScoresByClassAndPeriod(database, state.ClassNumber, state.ClassLetter, *state.PeriodID); err2 == nil {
+					stu := map[int64]int{}
+					for _, sc := range classScores {
+						stu[sc.StudentID] += sc.Points
+					}
+					for _, tot := range stu {
+						collective += int64((tot * 30) / 100)
+					}
+				}
+			} else if state.FromDate != nil && state.ToDate != nil {
+				if classScores, err2 := db.GetScoresByClassAndDateRange(database, int(state.ClassNumber), state.ClassLetter, *state.FromDate, *state.ToDate); err2 == nil {
+					stu := map[int64]int{}
+					for _, sc := range classScores {
+						stu[sc.StudentID] += sc.Points
+					}
+					for _, tot := range stu {
+						collective += int64((tot * 30) / 100)
+					}
+				}
+			}
+		}
 		switch state.ReportType {
 		case "student":
-			filePath, err = generateStudentReport(scores)
+			filePath, err = generateStudentReport(scores, collective, className, periodLabel)
 		case "class":
-			filePath, err = generateClassReport(scores)
+			filePath, err = generateClassReport(scores, collective, className, periodLabel)
 		case "school":
 			filePath, err = generateSchoolReport(scores)
 		}

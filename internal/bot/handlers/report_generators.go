@@ -8,18 +8,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Spok95/telegram-school-bot/internal/export"
 	"github.com/Spok95/telegram-school-bot/internal/models"
 	"github.com/xuri/excelize/v2"
 )
 
 // 📄 По ученику
-func generateStudentReport(scores []models.ScoreWithUser) (string, error) {
+func generateStudentReport(scores []models.ScoreWithUser, collective int64, className string, periodTitle string) (string, error) {
 	f := excelize.NewFile()
 	sheet := "Report"
 	f.SetSheetName("Sheet1", sheet)
 
 	// Заголовки
-	headers := []string{"ФИО ученика", "Класс", "Категория", "Баллы", "Комментарий", "Кто добавил", "Дата добавления"}
+	headers := []string{"ФИО ученика", "Класс", "Категория", "Баллы", "Комментарий", "Кто добавил", "Дата добавления", "Коллективный рейтинг класса"}
 	for i, h := range headers {
 		cell := fmt.Sprintf("%s1", string(rune('A'+i)))
 		f.SetCellValue(sheet, cell, h)
@@ -37,19 +38,28 @@ func generateStudentReport(scores []models.ScoreWithUser) (string, error) {
 			_ = f.SetCellValue(sheet, fmt.Sprintf("E%d", row), "")
 		}
 		_ = f.SetCellValue(sheet, fmt.Sprintf("F%d", row), s.AddedByName)
-		_ = f.SetCellValue(sheet, fmt.Sprintf("G%d", row), s.CreatedAt.Format("02.01.2006 15:04"))
+		if s.CreatedAt != nil {
+			_ = f.SetCellValue(sheet, fmt.Sprintf("G%d", row), s.CreatedAt.Format("02.01.2006 15:04"))
+		} else {
+			_ = f.SetCellValue(sheet, fmt.Sprintf("G%d", row), "")
+		}
+		_ = f.SetCellValue(sheet, fmt.Sprintf("H%d", row), collective)
 	}
 
 	// Автосохранение
-	filename := fmt.Sprintf("student_report_%d.xlsx", time.Now().Unix())
+	_ = export.ApplyDefaultExcelFormatting(f, sheet)
+	studentName := ""
+	if len(scores) > 0 {
+		studentName = scores[0].StudentName
+	}
+	filename := export.BuildStudentReportFilename(studentName, className, "", periodTitle, time.Now())
 	path := filepath.Join(os.TempDir(), filename)
-
 	err := f.SaveAs(path)
 	return path, err
 }
 
 // 🏫 По классу
-func generateClassReport(scores []models.ScoreWithUser) (string, error) {
+func generateClassReport(scores []models.ScoreWithUser, collective int64, className string, periodTitle string) (string, error) {
 	type studentGroup struct {
 		Name         string
 		Total        int
@@ -94,7 +104,7 @@ func generateClassReport(scores []models.ScoreWithUser) (string, error) {
 	sheet := "ClassReport"
 	f.SetSheetName("Sheet1", sheet)
 
-	headers := []string{"ФИО ученика", "Класс", "Суммарный балл", "Вклад в коллективный рейтинг"}
+	headers := []string{"ФИО ученика", "Класс", "Суммарный балл", "Вклад в коллективный рейтинг", "Коллективный рейтинг класса"}
 	for i, h := range headers {
 		cell := fmt.Sprintf("%s1", string(rune('A'+i)))
 		f.SetCellValue(sheet, cell, h)
@@ -105,9 +115,11 @@ func generateClassReport(scores []models.ScoreWithUser) (string, error) {
 		_ = f.SetCellValue(sheet, fmt.Sprintf("B%d", row), g.Class)
 		_ = f.SetCellValue(sheet, fmt.Sprintf("C%d", row), g.Total)
 		_ = f.SetCellValue(sheet, fmt.Sprintf("D%d", row), g.Contribution)
+		_ = f.SetCellValue(sheet, fmt.Sprintf("E%d", row), collective)
 	}
 
-	filename := fmt.Sprintf("class_report_%d.xlsx", time.Now().Unix())
+	_ = export.ApplyDefaultExcelFormatting(f, sheet)
+	filename := export.BuildClassReportFilename(className, "", periodTitle, time.Now())
 	path := filepath.Join(os.TempDir(), filename)
 	err := f.SaveAs(path)
 	return path, err
@@ -127,7 +139,6 @@ func generateSchoolReport(scores []models.ScoreWithUser) (string, error) {
 		if _, exists := classMap[classKey]; !exists {
 			classMap[classKey] = &classStat{Name: classKey}
 		}
-
 		// Учитываем только баллы НЕ из категории "Аукцион"
 		if s.CategoryLabel != "Аукцион" {
 			classMap[classKey].Total += s.Points
@@ -175,6 +186,7 @@ func generateSchoolReport(scores []models.ScoreWithUser) (string, error) {
 		_ = f.SetCellValue(sheet, fmt.Sprintf("B%d", row), c.Rating)
 	}
 
+	_ = export.ApplyDefaultExcelFormatting(f, sheet)
 	filename := fmt.Sprintf("school_report_%d.xlsx", time.Now().Unix())
 	path := filepath.Join(os.TempDir(), filename)
 	err := f.SaveAs(path)
