@@ -286,6 +286,20 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		handlers.HandleCatalogCallback(bot, database, cb)
 		return
 	}
+	if strings.HasPrefix(data, "exp_users_") {
+		user, _ := db.GetUserByTelegramID(database, chatID)
+		isAdmin := *user.Role == models.Admin || *user.Role == models.Administration
+		switch data {
+		case "exp_users_open":
+			handlers.ClearExportState(chatID)
+			// показать экран параметров экспорта
+			handlers.StartExportUsers(bot, database, cb.Message, isAdmin)
+		case "exp_users_toggle", "exp_users_gen", "exp_users_cancel", "exp_users_back":
+			// обработать кнопки внутри экрана
+			handlers.HandleExportUsersCallback(bot, database, cb, isAdmin)
+		}
+		return
+	}
 
 	bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Неизвестная команда. Используйте /start"))
 }
