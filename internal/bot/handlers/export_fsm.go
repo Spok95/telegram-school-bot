@@ -53,6 +53,9 @@ func StartExportFSM(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 			tgbotapi.NewInlineKeyboardButtonData("По школе", "export_type_school"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("👥 Пользователи", "exp_users_open"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "export_cancel"),
 		),
 	}
@@ -476,4 +479,7 @@ func generateExportReport(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 
 func GetExportState(userID int64) *ExportFSMState {
 	return exportStates[userID]
+}
+func ClearExportState(userID int64) {
+	delete(exportStates, userID)
 }
