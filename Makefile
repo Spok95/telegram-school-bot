@@ -1,5 +1,16 @@
 .PHONY: up up-all build restart down nuke logs
 
+.PHONY: test bench lint
+
+test:
+	GOFLAGS=-count=1 go test -race ./...
+
+bench:
+	go test -run '^$$' -bench . ./internal/db -benchtime=3s -benchmem
+
+lint:
+	go vet ./...
+
 # Поднять без изменения БД (если образов нет — скачаются, БД остаётся)
 up:
 	docker compose up -d postgres bot

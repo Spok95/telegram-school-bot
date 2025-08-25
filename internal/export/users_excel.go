@@ -80,7 +80,7 @@ func colName(n int) string {
 	s := ""
 	for n > 0 {
 		n--
-		s = string('A'+(n%26)) + s
+		s = string(rune('A'+(n%26))) + s
 		n /= 26
 	}
 	return s

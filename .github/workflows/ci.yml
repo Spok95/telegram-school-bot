@@ -1,0 +1,35 @@
+name: CI
+on:
+  push:
+    branches: [ main, develop, feature/**, test/** ]
+  pull_request:
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      # Docker доступен на ubuntu-latest по умолчанию — testcontainers сможет поднять Postgres.
+      - name: Run tests (race)
+        env:
+          # иногда ускоряет teardown
+          TESTCONTAINERS_RYUK_DISABLED: "false"
+        run: |
+          go mod tidy
+          go test -race ./...
