@@ -120,6 +120,17 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		go handlers.StartRemoveScoreFSM(bot, database, msg)
 	case "/my_score", "📊 Мой рейтинг":
 		go handlers.HandleMyScore(bot, database, msg)
+	case "📜 История получения баллов":
+		if user.Role != nil {
+			switch *user.Role {
+			case models.Student:
+				handlers.StartStudentHistoryExcel(bot, database, msg)
+			case models.Parent:
+				handlers.StartParentHistoryExcel(bot, database, msg)
+			default:
+				bot.Send(tgbotapi.NewMessage(chatID, "Недоступно для вашей роли."))
+			}
+		}
 	case "➕ Добавить ребёнка":
 		go auth.StartAddChild(bot, database, msg)
 	case "📊 Рейтинг ребёнка":
@@ -305,6 +316,10 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 			return
 		}
 		handlers.ShowStudentRating(bot, database, chatID, int64(studentID))
+		return
+	}
+	if strings.HasPrefix(data, "hist_excel_student_") {
+		handlers.HandleHistoryExcelCallback(bot, database, cb)
 		return
 	}
 	if strings.HasPrefix(data, "admusr_") {
