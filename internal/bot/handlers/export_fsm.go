@@ -40,8 +40,13 @@ type ExportFSMState struct {
 var exportStates = make(map[int64]*ExportFSMState)
 
 // стартовое меню (новое сообщение)
-func StartExportFSM(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
+func StartExportFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
+	u, _ := db.GetUserByTelegramID(database, chatID)
+	if u == nil || !fsmutil.MustBeActiveForOps(u) {
+		bot.Send(tgbotapi.NewMessage(chatID, "🚫 Доступ временно закрыт. Обратитесь к администратору."))
+		return
+	}
 	exportStates[chatID] = &ExportFSMState{Step: ExportStepReportType}
 
 	rows := [][]tgbotapi.InlineKeyboardButton{

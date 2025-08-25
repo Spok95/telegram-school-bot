@@ -4,6 +4,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -61,4 +62,16 @@ func BackCancelRow(backData, cancelData string) []tgbotapi.InlineKeyboardButton 
 func IsCancelText(s string) bool {
 	s = strings.TrimSpace(strings.ToLower(s))
 	return s == "отмена" || s == "/cancel" || s == "cancel"
+}
+
+// MustBeActiveForOps — доступ к операциям только для активных пользователей.
+func MustBeActiveForOps(u *models.User) bool {
+	switch *u.Role {
+	case models.Teacher, models.Administration, models.Admin:
+		return u.IsActive
+	case models.Parent, models.Student:
+		return u.IsActive
+	default:
+		return true
+	}
 }

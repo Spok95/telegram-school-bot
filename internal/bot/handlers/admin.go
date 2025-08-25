@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Spok95/telegram-school-bot/internal/bot/menu"
+	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -375,6 +376,22 @@ func HandleParentLinkApprovalCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.
 		if err = tx.Commit(); err != nil {
 			return
 		}
+
+		// ⤵️ После успешного создания связи пересчитываем активность родителя:
+		// если у него теперь есть активные дети — он станет активным; если нет — останется неактивным.
+		if err := db.RefreshParentActiveFlag(database, parentID); err != nil {
+			log.Printf("не удалось обновить активность родителя: %v", err)
+		}
+
+		// (Опционально) если нужно запретить привязку к неактивному ученику на админском уровне,
+		// раскомментировать блок ниже. Сейчас мы допускаем привязку и просто корректно считаем статус родителя.
+		/*
+			var active bool
+			if err := database.QueryRow(`SELECT is_active FROM users WHERE id = $1`, studentID).Scan(&active); err == nil && !active {
+			// Можно отправить инфо-заметку админу
+				bot.Send(tgbotapi.NewMessage(chatID, "ℹ️ Внимание: привязанный ребёнок неактивен. Родитель останется неактивным до появления активных детей."))
+			}
+		*/
 
 		// Уведомления
 		var pTG, sTG int64

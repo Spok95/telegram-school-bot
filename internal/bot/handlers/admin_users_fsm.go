@@ -3,8 +3,10 @@ package handlers
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Spok95/telegram-school-bot/internal/bot/shared/fsmutil"
 	"github.com/Spok95/telegram-school-bot/internal/db"
@@ -137,11 +139,74 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 			),
 		}
 
+		// ряд управления активностью
+		u, _ := db.GetUserByID(database, uid)
+		var actBtn tgbotapi.InlineKeyboardButton
+		if u.IsActive {
+			actBtn = tgbotapi.NewInlineKeyboardButtonData("⛔️ Деактивировать", "admusr_deactivate")
+		} else {
+			actBtn = tgbotapi.NewInlineKeyboardButtonData("✅ Активировать", "admusr_activate")
+		}
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(actBtn))
+
 		rows = append(rows, fsmutil.BackCancelRow("admusr_back_to_list", "admusr_cancel"))
 		mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
-		edit := tgbotapi.NewEditMessageText(chatID, state.MessageID, "Выберите новую роль:")
+		edit := tgbotapi.NewEditMessageText(chatID, state.MessageID, "Выберите новую роль или измените активность:")
 		edit.ReplyMarkup = &mk
 		bot.Send(edit)
+		return
+	}
+
+	// ── управление активностью пользователя
+	if data == "admusr_deactivate" {
+		bot.Request(tgbotapi.NewCallback(cb.ID, "Ок"))
+
+		now := time.Now()
+		if err := db.DeactivateUser(database, state.SelectedUserID, now); err != nil {
+			log.Println("deactivate user error:", err)
+			bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось деактивировать пользователя"))
+			return
+		}
+		// пересчитываем родителей, если это ученик (по связям; если не ученик — просто не будет строк)
+		rows, err := database.Query(`SELECT parent_id FROM parents_students WHERE student_id = $1`, state.SelectedUserID)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var pid int64
+				if scanErr := rows.Scan(&pid); scanErr == nil {
+					_ = db.RefreshParentActiveFlag(database, pid)
+				}
+			}
+		}
+		// сообщим и перерисуем карточку
+		bot.Send(tgbotapi.NewMessage(chatID, "✅ Пользователь деактивирован"))
+		// триггерим заново отрисовку выбранного
+		cb.Data = fmt.Sprintf("admusr_pick_%d", state.SelectedUserID)
+		HandleAdminUsersCallback(bot, database, cb)
+		return
+	}
+	if data == "admusr_activate" {
+		bot.Request(tgbotapi.NewCallback(cb.ID, "Ок"))
+
+		if err := db.ActivateUser(database, state.SelectedUserID); err != nil {
+			log.Println("activate user error:", err)
+			bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось активировать пользователя"))
+			return
+		}
+		// пересчитываем родителей, если это ученик
+		rows, err := database.Query(`SELECT parent_id FROM parents_students WHERE student_id = $1`, state.SelectedUserID)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var pid int64
+				if scanErr := rows.Scan(&pid); scanErr == nil {
+					_ = db.RefreshParentActiveFlag(database, pid)
+				}
+			}
+		}
+		bot.Send(tgbotapi.NewMessage(chatID, "✅ Пользователь активирован"))
+		cb.Data = fmt.Sprintf("admusr_pick_%d", state.SelectedUserID)
+		HandleAdminUsersCallback(bot, database, cb)
 		return
 	}
 
@@ -199,6 +264,31 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 		target, _ := db.GetUserByID(database, state.SelectedUserID)
 		txt := fmt.Sprintf("Ваша роль была изменена на «%s». Нажмите /start, чтобы обновить меню.", humanRole(role))
 		bot.Send(tgbotapi.NewMessage(target.TelegramID, txt))
+
+		// ── РЕТРОСПЕКТИВА/АВТО-ДЕАКТИВАЦИЯ РОДИТЕЛЕЙ ─────────────────────────────
+		// Если назначили роль родителя — пересчитать его активность
+		if role == "parent" {
+			if err := db.RefreshParentActiveFlag(database, state.SelectedUserID); err != nil {
+				log.Println("refresh parent activity failed:", err)
+			}
+		}
+		// Если назначили/изменили роль ученика — пересчитать активность всех его родителей
+		if role == "student" {
+			rows, err := database.Query(`SELECT parent_id FROM parents_students WHERE student_id = $1`, state.SelectedUserID)
+			if err == nil {
+				defer rows.Close()
+				for rows.Next() {
+					var pid int64
+					if scanErr := rows.Scan(&pid); scanErr == nil {
+						if err := db.RefreshParentActiveFlag(database, pid); err != nil {
+							log.Println("refresh parent activity failed:", err)
+						}
+					}
+				}
+			} else {
+				log.Println("list parents by student failed:", err)
+			}
+		}
 
 		edit := tgbotapi.NewEditMessageText(chatID, state.MessageID, "✅ Роль обновлена")
 		bot.Send(edit)

@@ -38,6 +38,13 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 			bot.Send(msg)
 			return
 		}
+		// 🔒 Пользователь зарегистрирован, но неактивен — доступ закрыт, клавиатуру убираем
+		if !user.IsActive {
+			rm := tgbotapi.NewMessage(chatID, "🚫 Доступ к боту временно закрыт. Обратитесь к администратору.")
+			rm.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
+			bot.Send(rm)
+			return
+		}
 
 		// Пользователь уже зарегистрирован
 		db.SetUserFSMRole(chatID, string(*user.Role))
@@ -63,6 +70,14 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		}
 
 		bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Вы не зарегистрированы. Пожалуйста, нажмите /start для начала."))
+		return
+	}
+	// 🔒 Глобальная защёлка: неактивным — ни одну команду
+	if user != nil && !user.IsActive {
+		rm := tgbotapi.NewMessage(chatID, "🚫 Доступ к боту временно закрыт. Обратитесь к администратору.")
+		// на случай, если у пользователя осталась старая клавиатура — уберём
+		rm.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
+		bot.Send(rm)
 		return
 	}
 	if handlers.GetAddScoreState(chatID) != nil {
@@ -127,7 +142,7 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		}
 	case "/export", "📥 Экспорт отчёта":
 		if *user.Role == "admin" || *user.Role == "administration" {
-			go handlers.StartExportFSM(bot, msg)
+			go handlers.StartExportFSM(bot, database, msg)
 		}
 	case "👥 Пользователи":
 		if *user.Role == "admin" {
@@ -152,6 +167,21 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
 	data := cb.Data
 	chatID := cb.Message.Chat.ID
+
+	// 🔒 Глобальная защёлка для inline-кнопок: неактивным всё режем
+	// берём пользователя по Telegram ID отправителя колбэка.
+	if cb.From != nil {
+		if u, err := db.GetUserByTelegramID(database, cb.From.ID); err == nil && u != nil && !u.IsActive {
+			// Всегда отвечаем на колбэк, чтобы Telegram "разморозил" UI
+			bot.Request(tgbotapi.NewCallback(cb.ID, "Доступ закрыт"))
+			// И даём явное сообщение в чат (на случай, если кнопка была из старого меню)
+			msg := tgbotapi.NewMessage(chatID, "🚫 Доступ к боту временно закрыт. Обратитесь к администратору.")
+			// Уберём возможную «залипшую» клавиатуру
+			msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
+			bot.Send(msg)
+			return
+		}
+	}
 
 	log.Printf("CB from %d: %s (msgID=%d)\n", cb.From.ID, cb.Data, cb.Message.MessageID)
 
@@ -288,6 +318,7 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 	}
 	if strings.HasPrefix(data, "exp_users_") {
 		user, _ := db.GetUserByTelegramID(database, chatID)
+
 		isAdmin := *user.Role == models.Admin || *user.Role == models.Administration
 		switch data {
 		case "exp_users_open":

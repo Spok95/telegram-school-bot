@@ -8,12 +8,21 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Spok95/telegram-school-bot/internal/bot/shared/fsmutil"
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 // ShowPendingScores показывает администратору все заявки с status = 'pending'
 func ShowPendingScores(bot *tgbotapi.BotAPI, database *sql.DB, adminID int64) {
+	// запрет неактивным
+	admin, err := db.GetUserByID(database, adminID)
+	if err == nil {
+		if !fsmutil.MustBeActiveForOps(&admin) {
+			bot.Send(tgbotapi.NewMessage(adminID, "🚫 Доступ временно закрыт. Обратитесь к администратору."))
+			return
+		}
+	}
 	scores, err := db.GetPendingScores(database)
 	if err != nil {
 		log.Println("ошибка при получении заявок на баллы:", err)

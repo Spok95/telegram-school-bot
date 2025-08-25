@@ -278,7 +278,14 @@ func GetScoresByPeriod(database *sql.DB, periodID int) ([]models.ScoreWithUser, 
 	JOIN users s ON scores.student_id = s.id
 	JOIN users a ON scores.created_by = a.id
 	JOIN categories c ON scores.category_id = c.id
-	WHERE s.role = 'student' AND s.class_number IS NOT NULL AND s.class_letter IS NOT NULL AND scores.created_at BETWEEN $1 AND $2 AND scores.status = 'approved'
+	WHERE s.role = 'student'
+	  AND s.class_number IS NOT NULL 
+	  AND s.class_letter IS NOT NULL 
+	  AND (
+	      s.is_active = TRUE
+	      OR (s.is_active = FALSE AND $2 <= s.deactivated_at)
+	  	)
+	  AND scores.created_at BETWEEN $1 AND $2 AND scores.status = 'approved'
 	ORDER BY scores.created_at ASC;
 	`
 	rows, err := database.Query(query, startDate, endDate)
@@ -311,7 +318,12 @@ func GetScoresByStudentAndDateRange(database *sql.DB, studentID int64, from, to 
 	JOIN users u ON u.id = s.student_id
 	JOIN users ua ON ua.id = s.created_by
 	JOIN categories c ON c.id = s.category_id
-	WHERE s.student_id = $1 AND s.created_at BETWEEN $2 AND $3 AND s.status = 'approved'
+	WHERE s.student_id = $1 
+	  AND (
+	      u.is_active = TRUE
+	      OR (u.is_active = FALSE AND $3 <= u.deactivated_at)
+	  )
+	  AND s.created_at BETWEEN $2 AND $3 AND s.status = 'approved'
 	ORDER BY s.created_at
 	`
 	rows, err := database.Query(query, studentID, from, to)
@@ -344,7 +356,13 @@ func GetScoresByClassAndDateRange(database *sql.DB, classNumber int, classLetter
 	JOIN users u ON u.id = s.student_id
 	JOIN users ua ON ua.id = s.created_by
 	JOIN categories c ON c.id = s.category_id
-	WHERE u.role = 'student' AND u.class_number = $1 AND u.class_letter = $2 AND s.created_at BETWEEN $3 AND $4 AND s.status = 'approved'
+	WHERE u.role = 'student'
+	  AND u.class_number = $1 AND u.class_letter = $2
+	  AND (
+	      u.is_active = TRUE
+	      OR (u.is_active = FALSE AND $4 <= u.deactivated_at)
+	  )
+	  AND s.created_at BETWEEN $3 AND $4 AND s.status = 'approved'
 	ORDER BY u.name
 	`
 	rows, err := database.Query(query, classNumber, classLetter, from, to)
@@ -378,7 +396,12 @@ func GetScoresByDateRange(database *sql.DB, from, to time.Time) ([]models.ScoreW
 	JOIN users ua ON ua.id = s.created_by
 	JOIN categories c ON c.id = s.category_id
 	JOIN users a ON a.id = s.created_by
-	WHERE u.role = 'student' AND s.created_at BETWEEN $1 AND $2 AND s.status = 'approved'
+	WHERE u.role = 'student'
+	  AND (
+	      u.is_active = TRUE
+	      OR (u.is_active = FALSE AND $2 <= u.deactivated_at)
+	  )
+	  AND s.created_at BETWEEN $1 AND $2 AND s.status = 'approved'
 	ORDER BY s.created_at
 	`
 	rows, err := database.Query(query, from, to)
@@ -420,7 +443,13 @@ func GetScoresByStudentAndPeriod(database *sql.DB, selectedStudentID int64, peri
 	JOIN users u ON u.id = s.student_id
 	JOIN users ua ON ua.id = s.created_by
 	JOIN categories c ON c.id = s.category_id
-	WHERE s.student_id = $1 AND s.created_at BETWEEN $2 AND $3 AND s.status = 'approved'
+	WHERE s.student_id = $1
+		AND (
+	      u.is_active = TRUE
+	      OR (u.is_active = FALSE AND $3 <= u.deactivated_at)
+	      )
+		AND s.status = 'approved'
+		AND s.created_at BETWEEN $2 AND $3
 	ORDER BY s.created_at
 	`
 	rows, err := database.Query(query, selectedStudentID, startDate, endDate)
@@ -462,7 +491,13 @@ func GetScoresByClassAndPeriod(database *sql.DB, classNumber int64, classLetter 
 	JOIN users u ON u.id = s.student_id
 	JOIN users ua ON ua.id = s.created_by
 	JOIN categories c ON c.id = s.category_id
-	WHERE u.class_number = $1 AND u.class_letter = $2 AND s.created_at BETWEEN $3 AND $4 AND s.status = 'approved'
+	WHERE u.role = 'student'
+	  AND u.class_number = $1 AND u.class_letter = $2
+	  AND (
+	      u.is_active = TRUE
+	      OR (u.is_active = FALSE AND $4 <= u.deactivated_at)
+	  )
+	  AND s.created_at BETWEEN $3 AND $4 AND s.status = 'approved'
 	ORDER BY u.name
 	`
 	rows, err := database.Query(query, classNumber, classLetter, startDate, endDate)

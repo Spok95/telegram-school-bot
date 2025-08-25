@@ -76,6 +76,12 @@ func containsInt64(slice []int64, v int64) bool {
 
 func StartRemoveScoreFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
+	// запрет неактивным
+	u, _ := db.GetUserByTelegramID(database, chatID)
+	if u == nil || !fsmutil.MustBeActiveForOps(u) {
+		bot.Send(tgbotapi.NewMessage(chatID, "🚫 Доступ временно закрыт. Обратитесь к администратору."))
+		return
+	}
 	delete(removeStates, chatID)
 	removeStates[chatID] = &RemoveFSMState{
 		Step:               1,
@@ -382,7 +388,15 @@ func HandleRemoveText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 		return
 	}
 
+	var skipped []string
 	for _, sid := range state.SelectedStudentIDs {
+		u, _ := db.GetUserByID(database, sid)
+		if u.ID == 0 || !u.IsActive {
+			if u.ID != 0 && strings.TrimSpace(u.Name) != "" {
+				skipped = append(skipped, u.Name)
+			}
+			continue
+		}
 		score := models.Score{
 			StudentID:  sid,
 			CategoryID: int64(state.CategoryID),
@@ -404,7 +418,11 @@ func HandleRemoveText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 		NotifyAdminsAboutScoreRequest(bot, database, score, student.Name)
 	}
 
-	bot.Send(tgbotapi.NewMessage(chatID, "Заявки на списание баллов отправлены на подтверждение."))
+	msgText := "Заявки на списание баллов отправлены на подтверждение."
+	if len(skipped) > 0 {
+		msgText += "\n⚠️ Пропущены (неактивны): " + strings.Join(skipped, ", ")
+	}
+	bot.Send(tgbotapi.NewMessage(chatID, msgText))
 	delete(removeStates, chatID)
 }
 

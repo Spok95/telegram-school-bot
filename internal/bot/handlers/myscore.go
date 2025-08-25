@@ -13,8 +13,11 @@ import (
 func HandleMyScore(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
 	user, err := db.GetUserByTelegramID(database, chatID)
-	if err != nil || user == nil {
-		bot.Send(tgbotapi.NewMessage(chatID, "❌ Пользователь не найден."))
+	if err != nil {
+		log.Println("Пользователь найден:", err)
+	}
+	if user == nil || !user.IsActive {
+		bot.Send(tgbotapi.NewMessage(chatID, "🚫 Доступ к боту временно закрыт. Обратитесь к администратору."))
 		return
 	}
 

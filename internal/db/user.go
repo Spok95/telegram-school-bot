@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/Spok95/telegram-school-bot/internal/models"
@@ -12,13 +13,13 @@ import (
 
 func GetUserByTelegramID(database *sql.DB, telegramID int64) (*models.User, error) {
 	query := `
-SELECT id, telegram_id, name, role, class_id, class_name, class_number, class_letter, child_id, confirmed, is_active
+SELECT id, telegram_id, name, role, class_id, class_name, class_number, class_letter, child_id, confirmed, is_active, deactivated_at
 FROM users WHERE telegram_id = $1`
 
 	row := database.QueryRow(query, telegramID)
 
 	var u models.User
-	err := row.Scan(&u.ID, &u.TelegramID, &u.Name, &u.Role, &u.ClassID, &u.ClassName, &u.ClassNumber, &u.ClassLetter, &u.ChildID, &u.Confirmed, &u.IsActive)
+	err := row.Scan(&u.ID, &u.TelegramID, &u.Name, &u.Role, &u.ClassID, &u.ClassName, &u.ClassNumber, &u.ClassLetter, &u.ChildID, &u.Confirmed, &u.IsActive, &u.DeactivatedAt)
 	if err != nil {
 		log.Println("Пользователь не найден в users", err)
 		return nil, err
@@ -27,12 +28,15 @@ FROM users WHERE telegram_id = $1`
 }
 
 func GetStudentsByClass(database *sql.DB, number int64, letter string) ([]models.User, error) {
-	query := `
-SELECT id, telegram_id, name, role, class_id, class_name, class_number, class_letter, child_id, confirmed, is_active
-FROM users
-WHERE role = 'student' AND class_number = $1 AND class_letter = $2`
-
-	rows, err := database.Query(query, number, letter)
+	rows, err := database.Query(`
+        SELECT id, name
+        FROM users
+        WHERE role = 'student'
+          AND confirmed = TRUE
+          AND is_active = TRUE
+          AND class_number = $1 AND class_letter = $2
+        ORDER BY name
+    `, number, letter)
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +45,7 @@ WHERE role = 'student' AND class_number = $1 AND class_letter = $2`
 	var students []models.User
 	for rows.Next() {
 		var u models.User
-		err := rows.Scan(&u.ID, &u.TelegramID, &u.Name, &u.Role, &u.ClassID, &u.ClassName, &u.ClassNumber, &u.ClassLetter, &u.ChildID, &u.Confirmed, &u.IsActive)
+		err := rows.Scan(&u.ID, &u.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -55,7 +59,7 @@ func GetChildrenByParentID(database *sql.DB, parentID int64) ([]models.User, err
 		SELECT u.id, u.name, u.class_number, u.class_letter
 		FROM users u
 		JOIN parents_students ps ON ps.student_id = u.id
-		WHERE ps.parent_id = $1
+		WHERE ps.parent_id = $1 AND u.is_active = TRUE
 	`, parentID)
 	if err != nil {
 		return nil, err
@@ -76,10 +80,10 @@ func GetChildrenByParentID(database *sql.DB, parentID int64) ([]models.User, err
 func GetUserByID(database *sql.DB, id int64) (models.User, error) {
 	var user models.User
 	query := `
-SELECT id, telegram_id, name, role, class_id, class_name, class_number, class_letter, child_id, confirmed, is_active
-FROM users
-WHERE id = $1
-`
+		SELECT id, telegram_id, name, role, class_id, class_name, class_number, class_letter, child_id, confirmed, is_active, deactivated_at
+		FROM users
+		WHERE id = $1
+	`
 	err := database.QueryRow(query, id).Scan(
 		&user.ID,
 		&user.TelegramID,
@@ -92,6 +96,7 @@ WHERE id = $1
 		&user.ChildID,
 		&user.Confirmed,
 		&user.IsActive,
+		&user.DeactivatedAt,
 	)
 	return user, err
 }
@@ -152,7 +157,7 @@ func FindUsersByQuery(database *sql.DB, q string, limit int) ([]models.User, err
 
 	// Ищем по имени в нескольких вариантах + по классу "7А"
 	const query = `
-SELECT id, telegram_id, name, role, class_id, class_name, class_number, class_letter, child_id, confirmed, is_active
+SELECT id, telegram_id, name, role, class_id, class_name, class_number, class_letter, child_id, confirmed, is_active, deactivated_at
 FROM users
 WHERE name LIKE $1              -- TitleCase
    OR name LIKE $2              -- UPPER
@@ -180,7 +185,7 @@ LIMIT $5`
 		err = rows.Scan(
 			&u.ID, &u.TelegramID, &u.Name, &u.Role,
 			&u.ClassID, &u.ClassName, &u.ClassNumber, &u.ClassLetter,
-			&u.ChildID, &u.Confirmed, &u.IsActive,
+			&u.ChildID, &u.Confirmed, &u.IsActive, &u.DeactivatedAt,
 		)
 		if err != nil {
 			return nil, err
@@ -324,4 +329,37 @@ func ToTitleRU(s string) string {
 // Верхний регистр для кириллицы
 func toUpperRU(s string) string {
 	return strings.ToUpper(s) // в Go это работает и для кириллицы
+}
+
+// DeactivateUser ставит is_active=false и фиксирует деактивацию
+func DeactivateUser(database *sql.DB, userID int64, at time.Time) error {
+	_, err := database.Exec(`UPDATE users SET is_active=FALSE, deactivated_at=COALESCE(deactivated_at, $2) WHERE id=$1`, userID, at)
+	return err
+}
+
+// ActivateUser возвращает доступ (is_active=true), но deactivated_at не трогаем
+func ActivateUser(database *sql.DB, userID int64) error {
+	_, err := database.Exec(`UPDATE users SET is_active=TRUE WHERE id=$1`, userID)
+	return err
+}
+
+// RefreshParentActiveFlag: если нет активных детей — родитель становится неактивным
+func RefreshParentActiveFlag(database *sql.DB, parentID int64) error {
+	var n int
+	err := database.QueryRow(`
+		SELECT COUNT(*)
+		FROM parents_students ps
+		JOIN users s ON s.id = ps.student_id
+		WHERE ps.parent_id = $1 AND s.role='student' AND s.is_active = TRUE
+	`, parentID).Scan(&n)
+	if err != nil {
+		return err
+	}
+
+	if n == 0 {
+		_, err = database.Exec(`UPDATE users SET is_active=FALSE, deactivated_at=COALESCE(deactivated_at, NOW()) WHERE id=$1`, parentID)
+	} else {
+		_, err = database.Exec(`UPDATE users SET is_active=TRUE WHERE id=$1`, parentID) // при наличии активных детей оживляем
+	}
+	return err
 }
