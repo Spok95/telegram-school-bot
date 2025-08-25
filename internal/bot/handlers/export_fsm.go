@@ -473,10 +473,14 @@ func generateExportReport(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 		// Для отчёта по классу
 		if state.ReportType == "class" && len(scores) > 0 {
 			className = fmt.Sprintf("%d%s", int(state.ClassNumber), state.ClassLetter)
+			auctionID := db.GetCategoryIDByName(database, "Аукцион")
 			if state.PeriodID != nil {
 				if classScores, err2 := db.GetScoresByClassAndPeriod(database, state.ClassNumber, state.ClassLetter, *state.PeriodID); err2 == nil {
 					stu := map[int64]int{}
 					for _, sc := range classScores {
+						if sc.CategoryID == int64(auctionID) {
+							continue
+						}
 						stu[sc.StudentID] += sc.Points
 					}
 					for _, tot := range stu {
@@ -487,6 +491,9 @@ func generateExportReport(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 				if classScores, err2 := db.GetScoresByClassAndDateRange(database, int(state.ClassNumber), state.ClassLetter, *state.FromDate, *state.ToDate); err2 == nil {
 					stu := map[int64]int{}
 					for _, sc := range classScores {
+						if sc.CategoryID == int64(auctionID) {
+							continue
+						}
 						stu[sc.StudentID] += sc.Points
 					}
 					for _, tot := range stu {
@@ -498,10 +505,14 @@ func generateExportReport(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 		// Для отчёта по ученику — класс берём из выбранного состояния (учеников выбираем внутри класса)
 		if state.ReportType == "student" && len(scores) > 0 {
 			className = fmt.Sprintf("%d%s", int(state.ClassNumber), state.ClassLetter)
+			auctionID := db.GetCategoryIDByName(database, "Аукцион")
 			if state.PeriodID != nil {
 				if classScores, err2 := db.GetScoresByClassAndPeriod(database, state.ClassNumber, state.ClassLetter, *state.PeriodID); err2 == nil {
 					stu := map[int64]int{}
 					for _, sc := range classScores {
+						if sc.CategoryID == int64(auctionID) {
+							continue
+						}
 						stu[sc.StudentID] += sc.Points
 					}
 					for _, tot := range stu {
@@ -512,6 +523,9 @@ func generateExportReport(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 				if classScores, err2 := db.GetScoresByClassAndDateRange(database, int(state.ClassNumber), state.ClassLetter, *state.FromDate, *state.ToDate); err2 == nil {
 					stu := map[int64]int{}
 					for _, sc := range classScores {
+						if sc.CategoryID == int64(auctionID) {
+							continue
+						}
 						stu[sc.StudentID] += sc.Points
 					}
 					for _, tot := range stu {
