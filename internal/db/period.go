@@ -45,26 +45,6 @@ func SetActivePeriod(database *sql.DB) error {
 	return tx.Commit()
 }
 
-func ForceActivePeriod(database *sql.DB, id int64) error {
-	tx, err := database.Begin()
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
-		}
-	}()
-
-	if _, err = tx.Exec(`UPDATE periods SET is_active = FALSE`); err != nil {
-		return err
-	}
-	if _, err = tx.Exec(`UPDATE periods SET is_active = TRUE WHERE id = $1`, id); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 func CreatePeriod(database *sql.DB, p models.Period) (int64, error) {
 	if p.StartDate.After(p.EndDate) {
 		return 0, fmt.Errorf("дата окончания не может быть раньше даты начала")

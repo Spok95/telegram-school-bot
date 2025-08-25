@@ -147,9 +147,9 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 			go handlers.ShowPendingUsers(bot, database, chatID)
 			go handlers.ShowPendingParentLinks(bot, database, chatID)
 		}
-	case "/set_period", "📅 Установить период":
+	case "/periods", "📅 Периоды":
 		if *user.Role == "admin" {
-			go handlers.StartSetPeriodFSM(bot, msg)
+			go handlers.StartAdminPeriods(bot, database, msg)
 		}
 	case "/export", "📥 Экспорт отчёта":
 		if *user.Role == "admin" || *user.Role == "administration" {
@@ -167,6 +167,10 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		}
 	default:
 		role := getUserFSMRole(chatID)
+		if _, ok := handlers.PeriodsFSMActive(chatID); ok && user.Role != nil && (*user.Role == "admin") {
+			handlers.HandleAdminPeriodsText(bot, database, msg)
+			return
+		}
 		if role == "" {
 			bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Неизвестная команда. Используйте /start"))
 			return
@@ -344,6 +348,15 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 			// обработать кнопки внутри экрана
 			handlers.HandleExportUsersCallback(bot, database, cb, isAdmin)
 		}
+		return
+	}
+	// Периоды (админ): список и редактирование
+	if data == "peradm_edit_end" || data == "peradm_edit_both" || data == "peradm_save" {
+		handlers.HandleAdminPeriodsEditCallback(bot, database, cb)
+		return
+	}
+	if strings.HasPrefix(data, "peradm_") {
+		handlers.HandleAdminPeriodsCallback(bot, database, cb)
 		return
 	}
 
