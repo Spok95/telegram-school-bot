@@ -21,9 +21,10 @@ func BenchmarkAddScore(b *testing.B) {
 	adminID := mustSeedUserB(b, h.DB, "Админ", models.Admin, nil, nil)
 	stID := mustSeedUserB(b, h.DB, "Бенч", models.Student, ptrInt64(11), ptrString("А"))
 
-	now := time.Now()
+	// В проде активный определяется по CURRENT_DATE → делаем период границами текущих суток
+	today := time.Now().Truncate(24 * time.Hour)
 	if _, err := db.CreatePeriod(h.DB, models.Period{
-		Name: "bench", StartDate: now.Add(-time.Hour), EndDate: now.Add(time.Hour),
+		Name: "bench", StartDate: today, EndDate: today.Add(24 * time.Hour),
 	}); err != nil {
 		b.Fatal(err)
 	}
@@ -31,10 +32,14 @@ func BenchmarkAddScore(b *testing.B) {
 		b.Fatal(err)
 	}
 	ap, _ := db.GetActivePeriod(h.DB)
+	if ap == nil {
+		b.Fatal("active period not set")
+	}
 	pid := ap.ID
 
 	cat := db.GetCategoryIDByName(h.DB, "Социальные поступки")
 
+	b.ReportAllocs()
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
@@ -45,7 +50,7 @@ func BenchmarkAddScore(b *testing.B) {
 				Type:       "add",
 				Status:     "approved",
 				CreatedBy:  adminID,
-				CreatedAt:  *ptrTime(time.Now()),
+				CreatedAt:  time.Now(),
 				PeriodID:   &pid,
 			})
 		}

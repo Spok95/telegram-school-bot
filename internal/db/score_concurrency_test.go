@@ -103,6 +103,5 @@ func mustSeedUser(t *testing.T, dbx *sql.DB, name string, role models.Role, clas
 	return id
 }
 
-func ptrInt64(v int64) *int64        { return &v }
-func ptrString(v string) *string     { return &v }
-func ptrTime(t time.Time) *time.Time { return &t }
+func ptrInt64(v int64) *int64    { return &v }
+func ptrString(v string) *string { return &v }
