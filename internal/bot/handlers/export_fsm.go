@@ -173,7 +173,7 @@ func HandleExportCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
 
 			rows := [][]tgbotapi.InlineKeyboardButton{
-				fsmutil.BackCancelRow("export_cancel", "export_cancel"),
+				fsmutil.BackCancelRow("export_back", "export_cancel"),
 			}
 			msg := tgbotapi.NewMessage(chatID, "📆 Введите дату начала (ДД.ММ.ГГГГ):")
 			msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
@@ -276,7 +276,7 @@ func HandleExportText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 		state.FromDate = &date
 		state.Step = ExportStepCustomEndDate
 		rows := [][]tgbotapi.InlineKeyboardButton{
-			fsmutil.BackCancelRow("export_cancel", "export_cancel"),
+			fsmutil.BackCancelRow("export_back", "export_cancel"),
 		}
 		msg := tgbotapi.NewMessage(chatID, "📅 Введите дату окончания (ДД.ММ.ГГГГ):")
 		msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
@@ -320,6 +320,9 @@ func startRows() [][]tgbotapi.InlineKeyboardButton {
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("По школе", "export_type_school"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("👥 Пользователи", "exp_users_open"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "export_cancel"),

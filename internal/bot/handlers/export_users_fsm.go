@@ -60,14 +60,20 @@ func HandleExportUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbot
 	_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, ""))
 
 	switch cb.Data {
-	case cbEUCancel, cbEUBack:
-		// гасим клавиатуру и сообщаем
+	case cbEUCancel:
+		// Отмена — просто закрываем экран
 		disable := tgbotapi.NewEditMessageReplyMarkup(chatID, state.MessageID, tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{}})
 		bot.Request(disable)
 		bot.Send(tgbotapi.NewMessage(chatID, "🚫 Отменено."))
 		delete(expUsers, chatID)
 		return
-
+	case cbEUBack:
+		// Назад — закрываем экран пользователей и возвращаемся в общее меню экспорта
+		disable := tgbotapi.NewEditMessageReplyMarkup(chatID, state.MessageID, tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{}})
+		bot.Request(disable)
+		delete(expUsers, chatID)
+		StartExportFSM(bot, database, cb.Message)
+		return
 	case cbEUToggle:
 		if !isAdmin {
 			return
