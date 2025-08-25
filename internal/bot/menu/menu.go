@@ -28,6 +28,9 @@ func studentMenu() tgbotapi.ReplyKeyboardMarkup {
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("📊 Мой рейтинг"),
 		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("📜 История получения баллов"),
+		),
 	)
 }
 
@@ -83,6 +86,9 @@ func parentMenu() tgbotapi.ReplyKeyboardMarkup {
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("📊 Рейтинг ребёнка"),
 			tgbotapi.NewKeyboardButton("➕ Добавить ребёнка"),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("📜 История получения баллов"),
 		),
 	)
 }
