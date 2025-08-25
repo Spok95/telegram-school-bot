@@ -279,14 +279,25 @@ func HandleAdminPeriodsEditCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *
 }
 
 func validateEditDates(ep *EditPeriodState) error {
-	now := time.Now().Truncate(24 * time.Hour)
-	if ep.EndDate.Before(now) && !ep.IsActive {
+	// Сравниваем ТОЛЬКО по дате (без времени), в локальной таймзоне.
+	normalize := func(t time.Time) time.Time {
+		loc := time.Local
+		return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
+	}
+	today := normalize(time.Now())
+	start := normalize(ep.StartDate)
+	end := normalize(ep.EndDate)
+
+	// Прошедший период — менять нельзя вовсе.
+	if !ep.IsActive && end.Before(today) {
 		return fmt.Errorf("❌ Нельзя изменять прошедшие периоды.")
 	}
-	if ep.IsActive && ep.EndDate.Before(now) {
+	// Активный период: конец не раньше сегодняшней даты (можно = сегодня).
+	if ep.IsActive && end.Before(today) {
 		return fmt.Errorf("❌ Для активного периода дата окончания не может быть раньше сегодняшней.")
 	}
-	if ep.StartDate.After(ep.EndDate) {
+	// Базовая логика: конец не раньше начала.
+	if start.After(end) {
 		return fmt.Errorf("❌ Дата окончания не может быть раньше даты начала.")
 	}
 	return nil
