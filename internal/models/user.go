@@ -1,5 +1,7 @@
 package models
 
+import "time"
+
 type Role string
 
 const (
@@ -11,17 +13,18 @@ const (
 )
 
 type User struct {
-	ID          int64   `db:"id"`
-	TelegramID  int64   `db:"telegram_id"`
-	Name        string  `db:"name"`
-	Role        *Role   `db:"role"`
-	ClassID     *int64  `db:"class_id"`
-	ClassName   *string `db:"class_name"`
-	ClassNumber *int64  `db:"class_number"`
-	ClassLetter *string `db:"class_letter"`
-	ChildID     *int64  `db:"child_id"`
-	Confirmed   bool    `db:"confirmed"`
-	IsActive    bool    `db:"is_active"`
+	ID            int64      `db:"id"`
+	TelegramID    int64      `db:"telegram_id"`
+	Name          string     `db:"name"`
+	Role          *Role      `db:"role"`
+	ClassID       *int64     `db:"class_id"`
+	ClassName     *string    `db:"class_name"`
+	ClassNumber   *int64     `db:"class_number"`
+	ClassLetter   *string    `db:"class_letter"`
+	ChildID       *int64     `db:"child_id"`
+	Confirmed     bool       `db:"confirmed"`
+	IsActive      bool       `db:"is_active"`
+	DeactivatedAt *time.Time `db:"deactivated_at"`
 }
 
 type Class struct {

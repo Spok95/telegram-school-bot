@@ -10,8 +10,12 @@ CREATE TABLE users (
                        class_letter TEXT,
                        child_id BIGINT,
                        confirmed BOOLEAN NOT NULL DEFAULT FALSE,
-                       is_active BOOLEAN NOT NULL DEFAULT TRUE
+                       is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                       deactivated_at  TIMESTAMPTZ
 );
+
+CREATE INDEX idx_users_role_active ON users(role, is_active);
+CREATE INDEX idx_users_deactivated_at ON users(deactivated_at);
 
 CREATE TABLE classes (
                          id BIGSERIAL PRIMARY KEY,

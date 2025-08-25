@@ -69,6 +69,12 @@ func addClassLetterRows(prefix string) [][]tgbotapi.InlineKeyboardButton {
 
 func StartAddScoreFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
+	// запрет неактивным
+	u, _ := db.GetUserByTelegramID(database, chatID)
+	if u == nil || !fsmutil.MustBeActiveForOps(u) {
+		bot.Send(tgbotapi.NewMessage(chatID, "🚫 Доступ временно закрыт. Обратитесь к администратору."))
+		return
+	}
 	delete(addStates, chatID)
 	addStates[chatID] = &AddFSMState{
 		Step:               1,
@@ -137,7 +143,16 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		// Уточним активный период (не критично, AddScoreInstant сам подхватит, если есть)
 		_ = db.SetActivePeriod(database)
 
+		// Пропускаем неактивных на момент подтверждения
+		var skipped []string
 		for _, sid := range state.SelectedStudentIDs {
+			u, _ := db.GetUserByID(database, sid)
+			if u.ID == 0 || !u.IsActive {
+				if u.ID != 0 && strings.TrimSpace(u.Name) != "" {
+					skipped = append(skipped, u.Name)
+				}
+				continue
+			}
 			score := models.Score{
 				StudentID:  sid,
 				CategoryID: int64(state.CategoryID),
@@ -156,7 +171,11 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 			}
 		}
 
-		edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "✅ Баллы начислены. 30% учтены в коллективном рейтинге класса.")
+		msgText := "✅ Баллы начислены. 30% учтены в коллективном рейтинге класса."
+		if len(skipped) > 0 {
+			msgText += "\n⚠️ Пропущены (неактивны): " + strings.Join(skipped, ", ")
+		}
+		edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, msgText)
 		bot.Send(edit)
 		delete(addStates, chatID)
 		return

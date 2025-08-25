@@ -41,8 +41,13 @@ func auctionBackCancelRow() []tgbotapi.InlineKeyboardButton {
 
 // ——— start ———
 
-func StartAuctionFSM(bot *tgbotapi.BotAPI, _ *sql.DB, msg *tgbotapi.Message) {
+func StartAuctionFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
+	u, _ := db.GetUserByTelegramID(database, chatID)
+	if u == nil || !fsmutil.MustBeActiveForOps(u) {
+		bot.Send(tgbotapi.NewMessage(chatID, "🚫 Доступ временно закрыт. Обратитесь к администратору."))
+		return
+	}
 	auctionStates[chatID] = &AuctionFSMState{Step: AuctionStepMode}
 
 	text := "Выберите режим аукциона:\n🧍 Ученики — списать с отдельных учеников\n🏫 Класс — списать со всего класса"
@@ -146,6 +151,12 @@ func HandleAuctionCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 			promptStudentSelect(cq, bot, database)
 		} else if state.Mode == "class" {
 			students, _ := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
+			if len(students) == 0 { // стоп, идти дальше не к кому
+				edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "❌ В этом классе нет учеников.")
+				bot.Send(edit)
+				delete(auctionStates, chatID)
+				return
+			}
 			for _, s := range students {
 				state.SelectedStudentIDs = append(state.SelectedStudentIDs, s.ID)
 			}
@@ -210,26 +221,47 @@ func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 	defer fsmutil.ClearPending(chatID, key)
 
 	state.PointsToRemove = points
-	notEnough := []string{}
+	var notEnough []string
+	var inactive []string
+	eligible := make([]int64, 0, len(state.SelectedStudentIDs))
 	for _, studentID := range state.SelectedStudentIDs {
+		u, _ := db.GetUserByID(database, studentID)
+		if u.ID == 0 || !u.IsActive {
+			if u.ID != 0 && strings.TrimSpace(u.Name) != "" {
+				inactive = append(inactive, u.Name)
+			}
+			continue
+		}
 		total, err := db.GetApprovedScoreSum(database, studentID)
 		if err != nil {
 			log.Println("❌ Ошибка при получении баллов:", err)
 			continue
 		}
 		if total < points {
-			student, _ := db.GetUserByID(database, studentID)
-			notEnough = append(notEnough, student.Name)
+			notEnough = append(notEnough, u.Name)
+		} else {
+			eligible = append(eligible, studentID)
 		}
 	}
 
 	if len(notEnough) > 0 {
 		text := "❌ У следующих учеников недостаточно баллов:\n" + strings.Join(notEnough, "\n")
+		if len(inactive) > 0 {
+			text += "\n\n⚠️ Пропущены (неактивны): " + strings.Join(inactive, ", ")
+		}
 		bot.Send(tgbotapi.NewMessage(chatID, text))
 		delete(auctionStates, chatID)
 		return
 	}
-
+	if len(eligible) == 0 {
+		text := "❌ Некому списывать: нет ни одного активного ученика с достаточным количеством баллов."
+		if len(inactive) > 0 {
+			text += "\n⚠️ Пропущены (неактивны): " + strings.Join(inactive, ", ")
+		}
+		bot.Send(tgbotapi.NewMessage(chatID, text))
+		delete(auctionStates, chatID)
+		return
+	}
 	user, err := db.GetUserByTelegramID(database, chatID)
 	if err != nil {
 		log.Println("❌ Ошибка получения пользователя:", err)
@@ -244,7 +276,11 @@ func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 
 	comment := "Аукцион"
 	catID := db.GetCategoryIDByName(database, "Аукцион")
-	for _, studentID := range state.SelectedStudentIDs {
+	for _, studentID := range eligible {
+		u, _ := db.GetUserByID(database, studentID)
+		if u.ID == 0 || !u.IsActive {
+			continue // пропускаем неактивных
+		}
 		score := models.Score{
 			StudentID:  studentID,
 			CategoryID: int64(catID), // спец-категория для аукциона
@@ -262,7 +298,11 @@ func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 		NotifyAdminsAboutScoreRequest(bot, database, score, student.Name)
 	}
 
-	bot.Send(tgbotapi.NewMessage(chatID, "✅ Заявка на аукцион создана и ожидает подтверждения."))
+	msgOut := "✅ Заявка на аукцион создана и ожидает подтверждения."
+	if len(inactive) > 0 {
+		msgOut += "\n⚠️ Пропущены (неактивны): " + strings.Join(inactive, ", ")
+	}
+	bot.Send(tgbotapi.NewMessage(chatID, msgOut))
 	delete(auctionStates, chatID)
 }
 

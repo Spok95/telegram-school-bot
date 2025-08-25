@@ -9,6 +9,7 @@ import (
 
 	"github.com/Spok95/telegram-school-bot/internal/bot/handlers"
 	"github.com/Spok95/telegram-school-bot/internal/bot/shared/fsmutil"
+	"github.com/Spok95/telegram-school-bot/internal/db"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -173,7 +174,9 @@ func FindStudentID(database *sql.DB, data *ParentRegisterData) (int, error) {
 	var id int
 	err := database.QueryRow(`
 		SELECT id FROM users
-		WHERE name = $1 AND class_number = $2 AND class_letter = $3 AND role = 'student' AND confirmed = TRUE
+		WHERE name = $1
+		  AND class_number = $2 AND class_letter = $3
+		  AND role = 'student' AND confirmed = TRUE AND is_active = TRUE
 		`, data.StudentName, data.ClassNumber, data.ClassLetter).Scan(&id)
 	return id, err
 }
@@ -216,6 +219,12 @@ func SaveParentRequest(database *sql.DB, parentTelegramID int64, studentID int, 
 	if err != nil {
 		log.Printf("[PARENT_ERROR] failed to commit transaction: %v", err)
 		return 0, err
+	}
+
+	// Родитель мог быть неактивным — сразу пересчитаем активность:
+	// если теперь у него есть хотя бы один активный ребёнок, он станет активным.
+	if err := db.RefreshParentActiveFlag(database, parentID); err != nil {
+		log.Printf("[PARENT_ERROR] refresh parent activity failed: %v", err)
 	}
 
 	log.Printf("[PARENT_SUCCESS] linked parent (tg_id=%d) to student_id=%d", parentTelegramID, studentID)

@@ -32,7 +32,7 @@ func ListAllUsers(database *sql.DB, includeInactive bool) ([]UserRow, error) {
 		q = `
 		SELECT u.name, COALESCE(u.role, '') AS role, u.class_number, u.class_letter
 		FROM users u
-		WHERE u.confirmed = TRUE
+		WHERE u.confirmed = TRUE AND u.is_active=TRUE
 		ORDER BY LOWER(u.name)`
 	} else {
 		q = `
@@ -62,7 +62,7 @@ func ListAllUsers(database *sql.DB, includeInactive bool) ([]UserRow, error) {
 func ListTeachers(database *sql.DB, includeInactive bool) ([]string, error) {
 	q := ""
 	if !includeInactive {
-		q = "SELECT u.name FROM users u WHERE u.role='teacher' AND u.confirmed=TRUE ORDER BY LOWER(u.name)"
+		q = "SELECT u.name FROM users u WHERE u.role='teacher' AND u.confirmed=TRUE AND u.is_active=TRUE ORDER BY LOWER(u.name)"
 	} else {
 		q = "SELECT u.name FROM users u WHERE u.role='teacher' ORDER BY LOWER(u.name)"
 	}
@@ -85,7 +85,7 @@ func ListTeachers(database *sql.DB, includeInactive bool) ([]string, error) {
 func ListAdministration(database *sql.DB, includeInactive bool) ([]string, error) {
 	q := ""
 	if !includeInactive {
-		q = "SELECT u.name FROM users u WHERE u.role='administration' AND u.confirmed=TRUE ORDER BY LOWER(u.name)"
+		q = "SELECT u.name FROM users u WHERE u.role='administration' AND u.confirmed=TRUE AND u.is_active=TRUE ORDER BY LOWER(u.name)"
 	} else {
 		q = "SELECT u.name FROM users u WHERE u.role='administration' ORDER BY LOWER(u.name)"
 	}
@@ -118,7 +118,7 @@ func ListStudents(database *sql.DB, includeInactive bool) ([]StudentRow, error) 
 
 	if !includeInactive {
 		q += `
-		WHERE u.role='student' AND u.confirmed=TRUE
+		WHERE u.role='student' AND u.confirmed=TRUE AND u.is_active=TRUE
 		GROUP BY u.id
 		ORDER BY COALESCE(u.class_number,0), u.class_letter, LOWER(u.name)
 	`
@@ -161,7 +161,7 @@ func ListParents(database *sql.DB, includeInactive bool) ([]ParentRow, error) {
 	`
 	if !includeInactive {
 		q += `
-		WHERE u.role='parent' AND u.confirmed=TRUE
+		WHERE u.role='parent' AND u.confirmed=TRUE AND u.is_active=TRUE
 		GROUP BY u.id
 		ORDER BY LOWER(u.name)
 	`
