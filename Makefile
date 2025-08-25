@@ -1,5 +1,9 @@
 .PHONY: up up-all build restart down nuke logs
 
+.PHONY: test
+test:
+\tGOFLAGS=-count=1 go test -race ./...
+
 # Поднять без изменения БД (если образов нет — скачаются, БД остаётся)
 up:
 	docker compose up -d postgres bot
