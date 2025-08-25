@@ -91,6 +91,7 @@ func HandleParentFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *s
 			parentData[chatID] = &ParentRegisterData{}
 		}
 		parentData[chatID].StudentName = msg
+		parentData[chatID].StudentName = db.ToTitleRU(strings.TrimSpace(msg))
 		parentFSM[chatID] = StateParentClassNumber
 		msgOut := tgbotapi.NewMessage(chatID, "Выберите номер класса ребёнка:")
 		msgOut.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(parentClassNumberRows()...)
@@ -172,12 +173,15 @@ func HandleParentCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 
 func FindStudentID(database *sql.DB, data *ParentRegisterData) (int, error) {
 	var id int
+	// Полное равенство без учета регистра: UPPER(name) = UPPER($1)
+	// (работает корректно и для кириллицы в Postgres)
 	err := database.QueryRow(`
 		SELECT id FROM users
-		WHERE name = $1
-		  AND class_number = $2 AND class_letter = $3
+		WHERE UPPER(name) = UPPER($1)
+		  AND class_number = $2
+		  AND UPPER(class_letter) = UPPER($3)
 		  AND role = 'student' AND confirmed = TRUE AND is_active = TRUE
-		`, data.StudentName, data.ClassNumber, data.ClassLetter).Scan(&id)
+	`, data.StudentName, data.ClassNumber, data.ClassLetter).Scan(&id)
 	return id, err
 }
 
