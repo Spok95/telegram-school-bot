@@ -39,30 +39,6 @@ func removeEditMenu(bot *tgbotapi.BotAPI, chatID int64, messageID int, text stri
 	bot.Send(cfg)
 }
 
-func removeClassNumberRows() [][]tgbotapi.InlineKeyboardButton {
-	var rows [][]tgbotapi.InlineKeyboardButton
-	for i := 1; i <= 11; i++ {
-		cb := fmt.Sprintf("remove_class_num_%d", i)
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d класс", i), cb),
-		))
-	}
-	rows = append(rows, removeBackCancelRow())
-	return rows
-}
-
-func removeClassLetterRows(prefix string) [][]tgbotapi.InlineKeyboardButton {
-	letters := []string{"А", "Б", "В", "Г", "Д"}
-	var rows [][]tgbotapi.InlineKeyboardButton
-	for _, l := range letters {
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(l, prefix+l),
-		))
-	}
-	rows = append(rows, removeBackCancelRow())
-	return rows
-}
-
 func containsInt64(slice []int64, v int64) bool {
 	for _, x := range slice {
 		if x == v {
@@ -89,7 +65,7 @@ func StartRemoveScoreFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.M
 	}
 
 	out := tgbotapi.NewMessage(chatID, "Выберите номер класса:")
-	out.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(removeClassNumberRows()...)
+	out.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(ClassNumberRows()...)
 	bot.Send(out)
 }
 
@@ -117,11 +93,11 @@ func HandleRemoveCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 		switch state.Step {
 		case 2: // возвращаемся к выбору номера
 			state.Step = 1
-			removeEditMenu(bot, chatID, cq.Message.MessageID, "Выберите номер класса:", removeClassNumberRows())
+			removeEditMenu(bot, chatID, cq.Message.MessageID, "Выберите номер класса:", ClassNumberRows())
 			return
 		case 3: // назад к букве
 			state.Step = 2
-			removeEditMenu(bot, chatID, cq.Message.MessageID, "Выберите букву класса:", removeClassLetterRows("remove_class_letter_"))
+			removeEditMenu(bot, chatID, cq.Message.MessageID, "Выберите букву класса:", ClassLetterRows("remove_class_letter_"))
 			return
 		case 4: // назад к ученикам
 			state.Step = 3
@@ -194,7 +170,7 @@ func HandleRemoveCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 		num, _ := strconv.ParseInt(numStr, 10, 64)
 		state.ClassNumber = num
 		state.Step = 2
-		removeEditMenu(bot, chatID, cq.Message.MessageID, "Выберите букву класса:", removeClassLetterRows("remove_class_letter_"))
+		removeEditMenu(bot, chatID, cq.Message.MessageID, "Выберите букву класса:", ClassLetterRows("remove_class_letter_"))
 		return
 	}
 

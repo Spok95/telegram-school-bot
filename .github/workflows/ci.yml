@@ -1,35 +1,63 @@
+# .github/workflows/ci.yml
 name: CI
 on:
-  push:
-    branches: [ main, develop, feature/**, test/** ]
+  push: { branches: [ main, develop, feature/**, test/** ] }
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  go:
+  test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
-        with:
-          go-version: '1.24.x'
+        with: { go-version: '1.24.x' }
 
-      - name: Cache Go modules
+      - name: Cache Go
         uses: actions/cache@v4
         with:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
+          restore-keys: ${{ runner.os }}-go-
 
-      # Docker доступен на ubuntu-latest по умолчанию — testcontainers сможет поднять Postgres.
-      - name: Run tests (race)
+      - name: Run tests (-race, coverage)
         env:
-          # иногда ускоряет teardown
+          GOFLAGS: -count=1
           TESTCONTAINERS_RYUK_DISABLED: "false"
         run: |
           go mod tidy
-          go test -race ./...
+          go test -race -covermode=atomic -coverprofile=coverage.out ./...
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage.out
+          path: coverage.out
+
+  bench:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    schedule: [] # ручной запуск
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.24.x' }
+      - name: Run benchmarks
+        env:
+          GOFLAGS: -count=1
+        run: |
+          go test -run '^$' -bench . ./internal/db -benchtime=10s -benchmem | tee bench.txt
+      - name: Upload bench results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench.txt
+          path: bench.txt
+

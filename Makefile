@@ -2,11 +2,9 @@
 
 .PHONY: test bench lint
 
-test:
-	GOFLAGS=-count=1 go test -race ./...
+test: ; GOFLAGS=-count=1 go test -race -covermode=atomic -coverprofile=coverage.out ./...
 
-bench:
-	go test -run '^$$' -bench . ./internal/db -benchtime=3s -benchmem
+bench: ; go test -run '^$$' -bench . ./internal/db -benchtime=10s -benchmem
 
 lint:
 	go vet ./...

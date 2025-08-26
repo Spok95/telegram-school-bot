@@ -41,7 +41,7 @@ func addEditMenu(bot *tgbotapi.BotAPI, chatID int64, messageID int, text string,
 	bot.Send(cfg)
 }
 
-func addClassNumberRows() [][]tgbotapi.InlineKeyboardButton {
+func ClassNumberRows() [][]tgbotapi.InlineKeyboardButton {
 	var buttons [][]tgbotapi.InlineKeyboardButton
 	for _, num := range []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11} {
 		callback := fmt.Sprintf("add_class_num_%d", num)
@@ -53,7 +53,7 @@ func addClassNumberRows() [][]tgbotapi.InlineKeyboardButton {
 	return buttons
 }
 
-func addClassLetterRows(prefix string) [][]tgbotapi.InlineKeyboardButton {
+func ClassLetterRows(prefix string) [][]tgbotapi.InlineKeyboardButton {
 	letters := []string{"А", "Б", "В", "Г", "Д"}
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for _, l := range letters {
@@ -82,7 +82,7 @@ func StartAddScoreFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 	}
 
 	out := tgbotapi.NewMessage(chatID, "Выберите номер класса:")
-	out.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(addClassNumberRows()...)
+	out.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(ClassNumberRows()...)
 	bot.Send(out)
 }
 
@@ -186,11 +186,11 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		switch state.Step {
 		case 2: // выбирали букву → вернёмся к номеру
 			state.Step = 1
-			addEditMenu(bot, chatID, cq.Message.MessageID, "Выберите номер класса:", addClassNumberRows())
+			addEditMenu(bot, chatID, cq.Message.MessageID, "Выберите номер класса:", ClassNumberRows())
 			return
 		case 3: // выбирали учеников → вернёмся к букве
 			state.Step = 2
-			addEditMenu(bot, chatID, cq.Message.MessageID, "Выберите букву класса:", addClassLetterRows("add_class_letter_"))
+			addEditMenu(bot, chatID, cq.Message.MessageID, "Выберите букву класса:", ClassLetterRows("add_class_letter_"))
 			return
 		case 4: // выбирали категорию → назад к ученикам
 			state.Step = 3
@@ -269,7 +269,7 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		state.ClassNumber = num
 		state.Step = 2
 
-		addEditMenu(bot, chatID, cq.Message.MessageID, "Выберите букву класса:", addClassLetterRows("add_class_letter_"))
+		addEditMenu(bot, chatID, cq.Message.MessageID, "Выберите букву класса:", ClassLetterRows("add_class_letter_"))
 		return
 	}
 
