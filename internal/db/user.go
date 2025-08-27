@@ -219,91 +219,149 @@ func normalizeClassQuery(q string) string {
 	return strings.ToUpper(string(out))
 }
 
-// ChangeRoleWithCleanup: меняет роль и делает уборку (чистит класс/родительские связи) + аудит.
+// ChangeRoleWithCleanup меняет роль и делает уборку (чистит класс/родительские связи) + аудит.
 func ChangeRoleWithCleanup(database *sql.DB, targetUserID int64, newRole string, changedBy int64) error {
 	tx, err := database.Begin()
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
-		}
-	}()
+	defer func() { _ = tx.Rollback() }()
 
 	var oldRole string
-	if err = tx.QueryRow(`SELECT role FROM users WHERE id = $1`, targetUserID).Scan(&oldRole); err != nil {
+	if err = tx.QueryRow(`SELECT role FROM users WHERE id=$1`, targetUserID).Scan(&oldRole); err != nil {
 		return err
 	}
-
-	// Если уходим со student — чистим класс
-	if oldRole == "student" && newRole != "student" {
-		if _, err = tx.Exec(`UPDATE users SET class_id=NULL, class_number=NULL, class_letter=NULL WHERE id=$1`, targetUserID); err != nil {
-			return err
-		}
-	}
-	// Если уходим с parent — рвём связи с детьми
-	if oldRole == "parent" && newRole != "parent" {
-		if _, err = tx.Exec(`DELETE FROM parents_students WHERE parent_id = $1`, targetUserID); err != nil {
-			return err
-		}
-	}
-	// Если новая роль не student — гарантированно нет класса
-	if newRole != "student" {
-		if _, err = tx.Exec(`UPDATE users SET role=$1, class_id=NULL, class_number=NULL, class_letter=NULL WHERE id=$2`, newRole, targetUserID); err != nil {
-			return err
-		}
-	} else {
-		// сюда не заходим — для student используем отдельную функцию (нужны номер/буква)
+	if newRole == "student" {
 		return fmt.Errorf("use ChangeRoleToStudentWithAudit for student")
 	}
 
-	if _, err = tx.Exec(`INSERT INTO role_changes (user_id, old_role, new_role, changed_by, changed_at)
-	                     VALUES ($1, $2, $3, $4, NOW())`, targetUserID, oldRole, newRole, changedBy); err != nil {
+	now := time.Now()
+
+	// 1) Применяем новую роль и чистим школьные поля (для любого newRole ≠ student)
+	if _, err = tx.Exec(`
+		UPDATE users
+		SET role=$1, class_id=NULL, class_name=NULL, class_number=NULL, class_letter=NULL
+		WHERE id=$2
+	`, newRole, targetUserID); err != nil {
 		return err
 	}
+
+	// 2) Был STUDENT → стал НЕ-student: рвём связи «родитель–ребёнок» и заявки; пересчитываем активность родителей
+	if oldRole == "student" && newRole != "student" {
+		// Собираем всех родителей до удаления, чтобы потом пересчитать их активность
+		parentIDs := []int64{}
+		rows, err := tx.Query(`SELECT DISTINCT parent_id FROM parents_students WHERE student_id=$1`, targetUserID)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var pid int64
+			if err := rows.Scan(&pid); err != nil {
+				rows.Close()
+				return err
+			}
+			parentIDs = append(parentIDs, pid)
+		}
+		rows.Close()
+
+		if _, err = tx.Exec(`DELETE FROM parents_students WHERE student_id=$1`, targetUserID); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`DELETE FROM parent_link_requests WHERE student_id=$1`, targetUserID); err != nil {
+			return err
+		}
+		// Пересчёт активности родителей внутри транзакции
+		for _, pid := range parentIDs {
+			var n int
+			if err := tx.QueryRow(`
+				SELECT COUNT(*)
+				FROM parents_students ps
+				JOIN users s ON s.id=ps.student_id
+				WHERE ps.parent_id=$1 AND s.role='student' AND s.is_active=TRUE
+			`, pid).Scan(&n); err != nil {
+				return err
+			}
+			if n == 0 {
+				if _, err := tx.Exec(`UPDATE users SET is_active=FALSE, deactivated_at=COALESCE(deactivated_at,$2) WHERE id=$1`, pid, now); err != nil {
+					return err
+				}
+			} else {
+				if _, err := tx.Exec(`UPDATE users SET is_active=TRUE WHERE id=$1`, pid); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	// 3) Был PARENT → стал НЕ-parent: чистим связи/заявки и деактивируем
+	if oldRole == "parent" && newRole != "parent" {
+		if _, err = tx.Exec(`DELETE FROM parents_students WHERE parent_id=$1`, targetUserID); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`DELETE FROM parent_link_requests WHERE parent_id=$1`, targetUserID); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`UPDATE users SET is_active=FALSE, deactivated_at=COALESCE(deactivated_at,$2) WHERE id=$1`,
+			targetUserID, now); err != nil {
+			return err
+		}
+	}
+
+	// 4) Аудит
+	if _, err = tx.Exec(`
+		INSERT INTO role_changes (user_id, old_role, new_role, changed_by, changed_at)
+		VALUES ($1,$2,$3,$4,$5)
+	`, targetUserID, oldRole, newRole, changedBy, now); err != nil {
+		return err
+	}
+
 	return tx.Commit()
 }
 
-// ChangeRoleToStudentWithAudit: переводим в student + ставим класс и аудит.
+// ChangeRoleToStudentWithAudit переводим в student + ставим класс и аудит.
 func ChangeRoleToStudentWithAudit(database *sql.DB, targetUserID int64, classNumber int64, classLetter string, changedBy int64) error {
 	tx, err := database.Begin()
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
-		}
-	}()
+	defer func() { _ = tx.Rollback() }()
 
 	var oldRole string
 	if err = tx.QueryRow(`SELECT role FROM users WHERE id = $1`, targetUserID).Scan(&oldRole); err != nil {
 		return err
 	}
 
-	// если был parent — порвём связи
+	// Если был родителем — убрать родительские связи/заявки и деактивировать
 	if oldRole == "parent" {
-		if _, err = tx.Exec(`DELETE FROM parents_students WHERE parent_id = $1`, targetUserID); err != nil {
+		if _, err = tx.Exec(`DELETE FROM parents_students WHERE parent_id=$1`, targetUserID); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`DELETE FROM parent_link_requests WHERE parent_id=$1`, targetUserID); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`UPDATE users SET is_active=FALSE, deactivated_at=COALESCE(deactivated_at, NOW()) WHERE id=$1`, targetUserID); err != nil {
 			return err
 		}
 	}
 
-	// находим class_id
-	cid, err := ClassIDByNumberAndLetter(database, classNumber, classLetter)
-	if err != nil {
-		return fmt.Errorf("класс %d%s не найден: %w", classNumber, classLetter, err)
-	}
-
-	if _, err = tx.Exec(`UPDATE users SET role='student', class_id=$1, class_number=$2, class_letter=$3 WHERE id=$4`,
-		cid, classNumber, classLetter, targetUserID); err != nil {
+	// Назначаем роль student и класс
+	if _, err = tx.Exec(`
+		UPDATE users
+		SET role='student', class_number=$1, class_letter=$2, class_name=NULL, class_id=NULL
+		WHERE id=$3
+	`, classNumber, classLetter, targetUserID); err != nil {
 		return err
 	}
 
-	if _, err = tx.Exec(`INSERT INTO role_changes (user_id, old_role, new_role, changed_by, changed_at)
-	                     VALUES ($1, $2, 'student', $3, NOW())`, targetUserID, oldRole, changedBy); err != nil {
+	// Аудит
+	now := time.Now()
+	if _, err = tx.Exec(`
+		INSERT INTO role_changes (user_id, old_role, new_role, changed_by, changed_at)
+		VALUES ($1,$2,$3,$4,$5)
+	`, targetUserID, oldRole, "student", changedBy, now); err != nil {
 		return err
 	}
+
 	return tx.Commit()
 }
 
@@ -343,7 +401,7 @@ func ActivateUser(database *sql.DB, userID int64) error {
 	return err
 }
 
-// RefreshParentActiveFlag: если нет активных детей — родитель становится неактивным
+// RefreshParentActiveFlag если нет активных детей — родитель становится неактивным
 func RefreshParentActiveFlag(database *sql.DB, parentID int64) error {
 	var n int
 	err := database.QueryRow(`
