@@ -52,6 +52,9 @@ func main() {
 		log.Println("❌ Ошибка установки активного периода:", err)
 	}
 
+	// Авто-уведомление 1 сентября в 07:00
+	app.StartSchoolYearNotifier(bot, database)
+
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 	updates := bot.GetUpdatesChan(u)

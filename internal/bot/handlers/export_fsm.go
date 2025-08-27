@@ -23,6 +23,7 @@ const (
 	ExportStepClassNumber
 	ExportStepClassLetter
 	ExportStepStudentSelect
+	ExportStepSchoolYearSelect
 )
 
 type ExportFSMState struct {
@@ -179,6 +180,10 @@ func HandleExportCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
 			// для текстовых шагов неизбежно создаём новое сообщение
 			bot.Send(msg)
+		} else if data == "export_mode_schoolyear" {
+			state.Step = ExportStepSchoolYearSelect
+			editMenu(bot, chatID, cq.Message.MessageID, "📘 Выберите учебный год:", schoolYearRows("export_schoolyear_"))
+			return
 		}
 
 	case ExportStepFixedPeriodSelect:
@@ -243,6 +248,31 @@ func HandleExportCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			bot.Request(tgbotapi.NewCallback(cq.ID, "📥 Отчёт формируется..."))
 			go generateExportReport(bot, database, chatID, state)
 			delete(exportStates, chatID)
+		}
+	case ExportStepSchoolYearSelect:
+		if strings.HasPrefix(data, "export_schoolyear_") {
+			startYear, _ := strconv.Atoi(strings.TrimPrefix(data, "export_schoolyear_"))
+			from, to := db.SchoolYearBoundsByStartYear(startYear)
+			state.FromDate, state.ToDate = &from, &to
+
+			// Дальше поведение как в «произвольном» диапазоне:
+			switch state.ReportType {
+			case "student":
+				// выбираем ученика/учеников
+				state.Step = ExportStepStudentSelect
+				promptStudentSelectExport(bot, database, cq)
+				return
+			case "class":
+				// выбираем класс
+				state.Step = ExportStepClassNumber
+				editMenu(bot, chatID, cq.Message.MessageID, "🔢 Выберите номер класса:", classNumberRows("export_class_number_"))
+				return
+			case "school":
+				// формируем отчёт немедленно
+				go generateExportReport(bot, database, chatID, state)
+				delete(exportStates, chatID)
+				return
+			}
 		}
 	}
 }
@@ -335,6 +365,9 @@ func periodModeRows() [][]tgbotapi.InlineKeyboardButton {
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("📆 Установленный", "export_mode_fixed"),
 			tgbotapi.NewInlineKeyboardButtonData("🗓 Произвольный", "export_mode_custom"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("📘 Учебный год", "export_mode_schoolyear"),
 		),
 		fsmutil.BackCancelRow("export_back", "export_cancel"),
 	}
@@ -558,4 +591,19 @@ func GetExportState(userID int64) *ExportFSMState {
 }
 func ClearExportState(userID int64) {
 	delete(exportStates, userID)
+}
+
+func schoolYearRows(prefix string) [][]tgbotapi.InlineKeyboardButton {
+	now := time.Now()
+	cur := db.CurrentSchoolYearStartYear(now)
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for y := cur; y >= cur-5; y-- {
+		label := db.SchoolYearLabel(y)
+		cb := fmt.Sprintf("%s%d", prefix, y)
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(label, cb),
+		))
+	}
+	rows = append(rows, fsmutil.BackCancelRow("export_back", "export_cancel"))
+	return rows
 }
