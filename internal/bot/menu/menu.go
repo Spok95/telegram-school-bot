@@ -78,6 +78,12 @@ func adminMenu() tgbotapi.ReplyKeyboardMarkup {
 			tgbotapi.NewKeyboardButton("📅 Периоды"),
 			tgbotapi.NewKeyboardButton("👥 Пользователи"),
 		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("💾 Бэкап БД"),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("♻️ Восстановить БД"),
+		),
 	)
 }
 
