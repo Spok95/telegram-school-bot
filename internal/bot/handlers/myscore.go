@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/models"
@@ -37,15 +38,22 @@ func HandleMyScore(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		targetID = studentInternalID
 	}
 
-	// Получаем категории и суммы
+	// Границы текущего учебного года [from, to)
+	now := time.Now()
+	from, to := db.SchoolYearBounds(now)
+	yearLabel := db.SchoolYearLabel(db.CurrentSchoolYearStartYear(now))
+
+	// Получаем категории и суммы ТОЛЬКО за текущий учебный год
 	rows, err := database.Query(`
 		SELECT c.label, SUM(s.points) AS total
 		FROM scores s
 		JOIN categories c ON s.category_id = c.id
-		WHERE s.student_id = $1 AND s.status = 'approved'
+		WHERE s.student_id = $1 
+		  AND s.status = 'approved'
+		  AND s.created_at >= $2 AND s.created_at < $3
 		GROUP BY c.label
 		ORDER BY total DESC
-	`, targetID)
+	`, targetID, from, to)
 	if err != nil {
 		bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Ошибка при получении рейтинга."))
 		return
@@ -66,13 +74,13 @@ func HandleMyScore(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 	}
 
 	// Формируем текст ответа
-	text := fmt.Sprintf("📊 Ваш общий рейтинг: %d баллов\n\n", total)
+	text := fmt.Sprintf("🎓 Учебный год: %s\n📊 Ваш общий рейтинг: %d баллов\n\n", yearLabel, total)
 	for label, val := range summary {
 		text += fmt.Sprintf("▫️ %s: %d\n", label, val)
 	}
 
 	// Получаем все начисления/списания
-	history, err := db.GetScoreByStudent(database, targetID)
+	history, err := db.GetScoresByStudentAndDateRange(database, targetID, from, to)
 	if err != nil {
 		log.Println("ошибка при получении истории:", err)
 	} else {
@@ -147,15 +155,28 @@ func HandleParentRatingRequest(bot *tgbotapi.BotAPI, database *sql.DB, chatID in
 }
 
 func ShowStudentRating(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, studentID int64) {
-	// Получаем категории и суммы
+	// Границы текущего учебного года
+	now := time.Now()
+	from, to := db.SchoolYearBounds(now)
+	yearLabel := db.SchoolYearLabel(db.CurrentSchoolYearStartYear(now))
+
+	// ФИО ребёнка для заголовка
+	childName := ""
+	if u, err := db.GetUserByID(database, studentID); err == nil && &u.Name != nil {
+		childName = u.Name
+	}
+
+	// Суммы только за текущий учебный год
 	rows, err := database.Query(`
 		SELECT c.label, SUM(s.points) AS total
 		FROM scores s
 		JOIN categories c ON s.category_id = c.id
-		WHERE s.student_id = $1 AND s.status = 'approved'
+		WHERE s.student_id = $1 
+		  AND s.status = 'approved'
+		  AND s.created_at >= $2 AND s.created_at < $3
 		GROUP BY c.label
 		ORDER BY total DESC
-	`, studentID)
+	`, studentID, from, to)
 	if err != nil {
 		bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Ошибка при получении рейтинга."))
 		return
@@ -175,12 +196,17 @@ func ShowStudentRating(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, stu
 		total += sum
 	}
 
-	text := fmt.Sprintf("📊 Общий рейтинг: %d баллов\n\n", total)
+	header := fmt.Sprintf("🎓 Учебный год: %s\n", yearLabel)
+	if childName != "" {
+		header += fmt.Sprintf("👤 Ребёнок: %s\n", childName)
+	}
+	text := fmt.Sprintf("%s📊 Общий рейтинг: %d баллов\n\n", header, total)
+
 	for label, val := range summary {
 		text += fmt.Sprintf("▫️ %s: %d\n", label, val)
 	}
 
-	history, err := db.GetScoreByStudent(database, studentID)
+	history, err := db.GetScoresByStudentAndDateRange(database, studentID, from, to)
 	if err == nil && len(history) > 0 {
 		text += "\n\n📖 История:\n"
 		count := 0
