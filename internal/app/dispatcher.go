@@ -19,6 +19,13 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 	chatID := msg.Chat.ID
 	text := msg.Text
 	db.EnsureAdmin(chatID, database, text, bot)
+
+	// 🔁 Если активен FSM восстановления БД — делегируем туда любой апдейт (текст/документ)
+	if handlers.AdminRestoreFSMActive(chatID) {
+		handlers.HandleAdminRestoreMessage(bot, database, msg)
+		return
+	}
+
 	// Обработка команды /start без проверки регистрации
 	if text == "/start" {
 		user, err := db.GetUserByTelegramID(database, chatID)
@@ -164,6 +171,14 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 	case "🗂 Справочники":
 		if *user.Role == "admin" {
 			go handlers.StartCatalogFSM(bot, database, msg)
+		}
+	case "/backup", "💾 Бэкап БД":
+		if user.Role != nil && (*user.Role == "admin") {
+			go handlers.HandleAdminBackup(bot, database, chatID)
+		}
+	case "/restore", "♻️ Восстановить БД":
+		if user.Role != nil && (*user.Role == "admin") {
+			handlers.HandleAdminRestoreStart(bot, database, chatID)
 		}
 	default:
 		role := getUserFSMRole(chatID)
