@@ -8,5 +8,5 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /bot ./cmd/bot
 FROM gcr.io/distroless/base-debian12
 WORKDIR /app
 COPY --from=builder /bot /app/bot
-ENV TZ=Europe/Bucharest
+ENV TZ=Europe/Moscow
 ENTRYPOINT ["/app/bot"]
