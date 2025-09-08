@@ -11,24 +11,33 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-    ports:
-      - "5433:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   bot:
     build:
       context: .
       dockerfile: Dockerfile
-    image: telegram-school-bot-bot:latest
     depends_on:
       postgres:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://school:schoolpass@postgres:5432/school?sslmode=disable
       BOT_TOKEN: ${BOT_TOKEN}
-      ADMIN_ID: ${ADMIN_ID}
+      ADMIN_IDS: ${ADMIN_IDS}
       TZ: Europe/Moscow
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   db_data: {}

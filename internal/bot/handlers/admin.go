@@ -1,12 +1,12 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
-	"os"
-	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Spok95/telegram-school-bot/internal/bot/menu"
 	"github.com/Spok95/telegram-school-bot/internal/db"
@@ -17,15 +17,13 @@ import (
 var notifiedAdmins = make(map[int64]bool)
 
 func ShowPendingUsers(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
-	adminIDStr := os.Getenv("ADMIN_ID")
-	adminID, err := strconv.ParseInt(adminIDStr, 10, 64)
-	if err != nil {
-		log.Println("Ошибка при чтении ADMIN_ID из .env:", err)
-		return
+	var adminID int64
+	if db.IsAdminID(chatID) {
+		adminID = chatID
 	}
 
 	var count int
-	err = database.QueryRow(`SELECT COUNT(*) FROM users WHERE confirmed = FALSE AND role != 'admin'`).Scan(&count)
+	err := database.QueryRow(`SELECT COUNT(*) FROM users WHERE confirmed = FALSE AND role != 'admin'`).Scan(&count)
 	if err != nil {
 		log.Println("Ошибка при подсчете заявок:", err)
 		bot.Send(tgbotapi.NewMessage(chatID, "❌ Ошибка при проверке заявок."))
@@ -134,23 +132,20 @@ func HandleAdminCallback(callback *tgbotapi.CallbackQuery, database *sql.DB, bot
 		edit := tgbotapi.NewEditMessageText(chatID, messageID, newText)
 		bot.Send(edit)
 	}
-	callbackConfig := tgbotapi.CallbackConfig{
-		CallbackQueryID: callback.ID,
-		Text:            "Обработано",
-		ShowAlert:       false,
-	}
-	bot.Request(callbackConfig)
+	bot.Send(tgbotapi.NewMessage(adminID, "Обработано"))
 }
 
 func ConfirmUser(database *sql.DB, bot *tgbotapi.BotAPI, name string, adminTG int64) error {
-	tx, err := database.Begin()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	tx, err := database.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
 	var telegramID int64
-	err = tx.QueryRow(`SELECT telegram_id FROM users WHERE id = $1`, name).Scan(&telegramID)
+	err = tx.QueryRowContext(ctx, `SELECT telegram_id FROM users WHERE id = $1`, name).Scan(&telegramID)
 	if err != nil {
 		return err
 	}
@@ -164,7 +159,7 @@ func ConfirmUser(database *sql.DB, bot *tgbotapi.BotAPI, name string, adminTG in
 	}
 
 	// Подтверждаем, только если ещё не подтверждён
-	res, err := tx.Exec(`UPDATE users SET confirmed = TRUE WHERE id = $1 AND confirmed = FALSE`, name)
+	res, err := tx.ExecContext(ctx, `UPDATE users SET confirmed = TRUE WHERE id = $1 AND confirmed = FALSE`, name)
 	if err != nil {
 		return err
 	}
@@ -215,7 +210,7 @@ func RejectUser(database *sql.DB, bot *tgbotapi.BotAPI, name string, adminID int
 	return nil
 }
 
-// Уведомление админам о новой заявке на авторизацию пользователя
+// NotifyAdminsAboutNewUser уведомление админам о новой заявке на авторизацию пользователя
 func NotifyAdminsAboutNewUser(bot *tgbotapi.BotAPI, database *sql.DB, userID int64) {
 	// читаем профиль со всем, что нужно для карточки
 	var (
@@ -292,7 +287,7 @@ func NotifyAdminsAboutScoreRequest(bot *tgbotapi.BotAPI, database *sql.DB, score
 	}
 }
 
-// Показываем заявки на привязку "родитель ⇄ ребёнок"
+// ShowPendingParentLinks показывает заявки на привязку "родитель ⇄ ребёнок"
 func ShowPendingParentLinks(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
 	rows, err := database.Query(`
         SELECT r.id, p.name as parent_name, s.name as student_name, s.class_number, s.class_letter
@@ -312,8 +307,8 @@ func ShowPendingParentLinks(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64
 		has = true
 		var id int
 		var parentName, studentName, classLetter string
-		var classNumber sql.NullString // если у вас integer — используйте int
-		// подстройте типы под вашу схему
+		var classNumber sql.NullString
+		// подгоняем типы под нашу схему
 		if err := rows.Scan(&id, &parentName, &studentName, &classNumber, &classLetter); err != nil {
 			continue
 		}
@@ -335,7 +330,7 @@ func ShowPendingParentLinks(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64
 	}
 }
 
-// Обработка коллбеков по заявкам на привязку
+// HandleParentLinkApprovalCallback обработка коллбеков по заявкам на привязку
 func HandleParentLinkApprovalCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, database *sql.DB, adminID int64) {
 	data := cb.Data
 	chatID := cb.Message.Chat.ID
@@ -432,7 +427,7 @@ func HandleParentLinkApprovalCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.
 	}
 }
 
-// Уведомление админам о новой заявке на привязку
+// NotifyAdminsAboutParentLink уведомление админам о новой заявке на привязку
 func NotifyAdminsAboutParentLink(bot *tgbotapi.BotAPI, database *sql.DB, requestID int64) {
 	rows, err := database.Query(`SELECT telegram_id FROM users WHERE role = 'admin' AND confirmed = TRUE AND is_active = TRUE`)
 	if err != nil {

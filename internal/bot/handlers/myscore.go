@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -27,7 +28,9 @@ func HandleMyScore(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 	// Если родитель — ищем telegram_id ребёнка
 	if *user.Role == models.Parent {
 		var studentInternalID int64
-		err := database.QueryRow(`
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		err := database.QueryRowContext(ctx, `
 			SELECT student_id FROM parents_students WHERE parent_id = $1
 		`, user.ID).Scan(&studentInternalID)
 		if err != nil {
@@ -44,7 +47,9 @@ func HandleMyScore(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 	yearLabel := db.SchoolYearLabel(db.CurrentSchoolYearStartYear(now))
 
 	// Получаем категории и суммы ТОЛЬКО за текущий учебный год
-	rows, err := database.Query(`
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	rows, err := database.QueryContext(ctx, `
 		SELECT c.label, SUM(s.points) AS total
 		FROM scores s
 		JOIN categories c ON s.category_id = c.id
@@ -162,12 +167,14 @@ func ShowStudentRating(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, stu
 
 	// ФИО ребёнка для заголовка
 	childName := ""
-	if u, err := db.GetUserByID(database, studentID); err == nil && &u.Name != nil {
+	if u, err := db.GetUserByID(database, studentID); err == nil && u.Name != "" {
 		childName = u.Name
 	}
 
 	// Суммы только за текущий учебный год
-	rows, err := database.Query(`
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	rows, err := database.QueryContext(ctx, `
 		SELECT c.label, SUM(s.points) AS total
 		FROM scores s
 		JOIN categories c ON s.category_id = c.id

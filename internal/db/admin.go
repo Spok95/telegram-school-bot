@@ -3,8 +3,6 @@ package db
 import (
 	"database/sql"
 	"log"
-	"os"
-	"strconv"
 
 	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -13,9 +11,8 @@ import (
 var UserFSMRole = make(map[int64]string)
 
 func EnsureAdmin(chatID int64, database *sql.DB, text string, bot *tgbotapi.BotAPI) {
-	adminID, _ := strconv.ParseInt(os.Getenv("ADMIN_ID"), 10, 64)
 
-	if chatID == adminID && text == "/start" {
+	if IsAdminID(chatID) && text == "/start" {
 		SetUserFSMRole(chatID, "admin")
 
 		// Проверяем, существует ли админ в базе
@@ -41,7 +38,7 @@ func EnsureAdmin(chatID int64, database *sql.DB, text string, bot *tgbotapi.BotA
 					(SELECT id FROM users WHERE telegram_id = $1),
 					'', 'admin', $2, NOW()
 				) ON CONFLICT DO NOTHING
-			`, adminID, user.ID)
+			`, chatID, user.ID)
 			if err != nil {
 				log.Println("❌ Ошибка записи в role_changes:", err)
 			}

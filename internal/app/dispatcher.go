@@ -3,7 +3,6 @@ package app
 import (
 	"database/sql"
 	"log"
-	"os"
 	"strconv"
 	"strings"
 
@@ -14,6 +13,8 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
+
+var chatLimiter = NewChatLimiter()
 
 func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
@@ -122,9 +123,17 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 
 	switch text {
 	case "/add_score", "➕ Начислить баллы":
-		go handlers.StartAddScoreFSM(bot, database, msg)
+		unlock := chatLimiter.lock(chatID)
+		go func() {
+			defer unlock()
+			handlers.StartAddScoreFSM(bot, database, msg)
+		}()
 	case "/remove_score", "📉 Списать баллы":
-		go handlers.StartRemoveScoreFSM(bot, database, msg)
+		unlock := chatLimiter.lock(chatID)
+		go func() {
+			defer unlock()
+			handlers.StartRemoveScoreFSM(bot, database, msg)
+		}()
 	case "/my_score", "📊 Мой рейтинг":
 		go handlers.HandleMyScore(bot, database, msg)
 	case "📜 История получения баллов":
@@ -149,8 +158,7 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 			go handlers.ShowPendingScores(bot, database, chatID)
 		}
 	case "📥 Заявки на авторизацию":
-		adminID, _ := strconv.ParseInt(os.Getenv("ADMIN_ID"), 10, 64)
-		if chatID == adminID {
+		if db.IsAdminID(chatID) {
 			go handlers.ShowPendingUsers(bot, database, chatID)
 			go handlers.ShowPendingParentLinks(bot, database, chatID)
 		}
@@ -195,6 +203,7 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 }
 
 func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
+	_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, ""))
 	data := cb.Data
 	chatID := cb.Message.Chat.ID
 
@@ -202,8 +211,6 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 	// берём пользователя по Telegram ID отправителя колбэка.
 	if cb.From != nil {
 		if u, err := db.GetUserByTelegramID(database, cb.From.ID); err == nil && u != nil && !u.IsActive {
-			// Всегда отвечаем на колбэк, чтобы Telegram "разморозил" UI
-			bot.Request(tgbotapi.NewCallback(cb.ID, "Доступ закрыт"))
 			// И даём явное сообщение в чат (на случай, если кнопка была из старого меню)
 			msg := tgbotapi.NewMessage(chatID, "🚫 Доступ к боту временно закрыт. Обратитесь к администратору.")
 			// Уберём возможную «залипшую» клавиатуру
