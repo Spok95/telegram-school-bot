@@ -65,7 +65,7 @@ func StartRemoveScoreFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.M
 	}
 
 	out := tgbotapi.NewMessage(chatID, "Выберите номер класса:")
-	out.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(ClassNumberRows()...)
+	out.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(ClassNumberRows("remove")...)
 	bot.Send(out)
 }
 
@@ -93,7 +93,7 @@ func HandleRemoveCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 		switch state.Step {
 		case 2: // возвращаемся к выбору номера
 			state.Step = 1
-			removeEditMenu(bot, chatID, cq.Message.MessageID, "Выберите номер класса:", ClassNumberRows())
+			removeEditMenu(bot, chatID, cq.Message.MessageID, "Выберите номер класса:", ClassNumberRows("remove"))
 			return
 		case 3: // назад к букве
 			state.Step = 2

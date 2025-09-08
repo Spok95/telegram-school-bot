@@ -168,14 +168,20 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		}
 	case "/export", "📥 Экспорт отчёта":
 		if *user.Role == "admin" || *user.Role == "administration" {
-			go handlers.StartExportFSM(bot, database, msg)
+			unlock := chatLimiter.lock(chatID)
+			go func() {
+				defer unlock()
+				handlers.StartExportFSM(bot, database, msg)
+			}()
 		}
 	case "👥 Пользователи":
 		if *user.Role == "admin" {
 			go handlers.StartAdminUsersFSM(bot, msg)
 		}
 	case "/auction", "🎯 Аукцион":
-		go handlers.StartAuctionFSM(bot, database, msg)
+		if *user.Role == "admin" || *user.Role == "administration" {
+			go handlers.StartAuctionFSM(bot, database, msg)
+		}
 	case "🗂 Справочники":
 		if *user.Role == "admin" {
 			go handlers.StartCatalogFSM(bot, database, msg)
@@ -306,6 +312,7 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		strings.HasPrefix(data, "export_class_number_") ||
 		strings.HasPrefix(data, "export_class_letter_") ||
 		strings.HasPrefix(data, "export_select_student_") ||
+		strings.HasPrefix(data, "export_schoolyear_") ||
 		data == "export_students_done" ||
 		data == "export_back" ||
 		data == "export_cancel" {

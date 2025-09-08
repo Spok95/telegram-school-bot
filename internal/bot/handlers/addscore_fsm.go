@@ -41,10 +41,10 @@ func addEditMenu(bot *tgbotapi.BotAPI, chatID int64, messageID int, text string,
 	bot.Send(cfg)
 }
 
-func ClassNumberRows() [][]tgbotapi.InlineKeyboardButton {
+func ClassNumberRows(action string) [][]tgbotapi.InlineKeyboardButton {
 	var buttons [][]tgbotapi.InlineKeyboardButton
 	for _, num := range []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11} {
-		callback := fmt.Sprintf("add_class_num_%d", num)
+		callback := fmt.Sprintf("%s_class_num_%d", action, num)
 		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d класс", num), callback),
 		))
@@ -82,7 +82,7 @@ func StartAddScoreFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 	}
 
 	out := tgbotapi.NewMessage(chatID, "Выберите номер класса:")
-	out.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(ClassNumberRows()...)
+	out.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(ClassNumberRows("add")...)
 	bot.Send(out)
 }
 
@@ -186,7 +186,7 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		switch state.Step {
 		case 2: // выбирали букву → вернёмся к номеру
 			state.Step = 1
-			addEditMenu(bot, chatID, cq.Message.MessageID, "Выберите номер класса:", ClassNumberRows())
+			addEditMenu(bot, chatID, cq.Message.MessageID, "Выберите номер класса:", ClassNumberRows("add"))
 			return
 		case 3: // выбирали учеников → вернёмся к букве
 			state.Step = 2
