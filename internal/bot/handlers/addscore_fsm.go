@@ -34,6 +34,15 @@ func addBackCancelRow() []tgbotapi.InlineKeyboardButton {
 	return row
 }
 
+func backCancelRowFor(actionOrPrefix string) []tgbotapi.InlineKeyboardButton {
+	// если передали "remove_class_letter_", вытащим "remove"
+	action := actionOrPrefix
+	if i := strings.Index(actionOrPrefix, "_"); i > 0 {
+		action = actionOrPrefix[:i]
+	}
+	return fsmutil.BackCancelRow(action+"_back", action+"_cancel")
+}
+
 func addEditMenu(bot *tgbotapi.BotAPI, chatID int64, messageID int, text string, rows [][]tgbotapi.InlineKeyboardButton) {
 	cfg := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
@@ -49,19 +58,19 @@ func ClassNumberRows(action string) [][]tgbotapi.InlineKeyboardButton {
 			tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d класс", num), callback),
 		))
 	}
-	buttons = append(buttons, addBackCancelRow())
+	buttons = append(buttons, backCancelRowFor(action))
 	return buttons
 }
 
-func ClassLetterRows(prefix string) [][]tgbotapi.InlineKeyboardButton {
+func ClassLetterRows(action string) [][]tgbotapi.InlineKeyboardButton {
 	letters := []string{"А", "Б", "В", "Г", "Д"}
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for _, l := range letters {
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(l, prefix+l),
+			tgbotapi.NewInlineKeyboardButtonData(l, action+l),
 		))
 	}
-	rows = append(rows, addBackCancelRow())
+	rows = append(rows, backCancelRowFor(action))
 	return rows
 }
 
