@@ -24,7 +24,7 @@ func scanScoreWithUserLight(rows *sql.Rows) (models.ScoreWithUser, error) {
 	return s, err
 }
 
-// полный скан — для выборок по ученику/классу/школе
+// scanScoreWithUserFull полный скан — для выборок по ученику/классу/школе
 func scanScoreWithUserFull(rows *sql.Rows) (models.ScoreWithUser, error) {
 	var s models.ScoreWithUser
 	err := rows.Scan(
@@ -64,32 +64,6 @@ INSERT INTO scores (
 	return err
 }
 
-func GetScoreByStudent(database *sql.DB, studentID int64) ([]models.Score, error) {
-	rows, err := database.Query(`
-SELECT s.id, s.student_id, s.category_id, c.name AS category, s.points, s.type, s.comment, s.status, s.approved_by, s.approved_at, s.created_by, s.created_at
-FROM scores s 
-JOIN categories c ON s.category_id = c.id
-WHERE s.student_id = $1 AND s.status = 'approved'
-ORDER BY s.created_at DESC`, studentID)
-
-	if err != nil {
-		log.Println("Ошибка при получении истории баллов:", err)
-		return nil, err
-	}
-	defer rows.Close()
-
-	var scores []models.Score
-	for rows.Next() {
-		var s models.Score
-		err := rows.Scan(&s.ID, &s.StudentID, &s.CategoryID, &s.CategoryLabel, &s.Points, &s.Type, &s.Comment, &s.Status, &s.ApprovedBy, &s.ApprovedAt, &s.CreatedBy, &s.CreatedAt)
-		if err != nil {
-			return nil, err
-		}
-		scores = append(scores, s)
-	}
-	return scores, nil
-}
-
 // GetPendingScores возвращает все заявки, ожидающие подтверждения
 func GetPendingScores(database *sql.DB) ([]models.Score, error) {
 	rows, err := database.Query(`
@@ -102,7 +76,7 @@ func GetPendingScores(database *sql.DB) ([]models.Score, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var results []models.Score
 	for rows.Next() {
@@ -116,7 +90,7 @@ func GetPendingScores(database *sql.DB) ([]models.Score, error) {
 	return results, nil
 }
 
-// AddScoreInstant: создать начисление сразу approved и обновить коллективный рейтинг
+// AddScoreInstant создать начисление сразу approved и обновить коллективный рейтинг
 func AddScoreInstant(database *sql.DB, score models.Score, approvedBy int64, approvedAt time.Time) error {
 	if score.Type != "add" {
 		return fmt.Errorf("AddScoreInstant: поддерживается только type='add'")
@@ -138,7 +112,7 @@ func AddScoreInstant(database *sql.DB, score models.Score, approvedBy int64, app
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// 2) Вставка сразу approved с обязательным period_id
 	_, err = tx.Exec(`
@@ -176,7 +150,7 @@ func ApproveScore(database *sql.DB, scoreID int64, adminID int64, approvedAt tim
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	var studentID int64
 	var points int
@@ -292,7 +266,7 @@ func GetScoresByPeriod(database *sql.DB, periodID int) ([]models.ScoreWithUser, 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []models.ScoreWithUser
 	for rows.Next() {
@@ -305,7 +279,7 @@ func GetScoresByPeriod(database *sql.DB, periodID int) ([]models.ScoreWithUser, 
 	return result, nil
 }
 
-// Для отчёта по ученику
+// GetScoresByStudentAndDateRange Для отчёта по ученику
 func GetScoresByStudentAndDateRange(database *sql.DB, studentID int64, from, to time.Time) ([]models.ScoreWithUser, error) {
 	query := `
 	SELECT 
@@ -330,7 +304,7 @@ func GetScoresByStudentAndDateRange(database *sql.DB, studentID int64, from, to 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []models.ScoreWithUser
 	for rows.Next() {
@@ -343,7 +317,7 @@ func GetScoresByStudentAndDateRange(database *sql.DB, studentID int64, from, to 
 	return result, nil
 }
 
-// Для отчёта по классу
+// GetScoresByClassAndDateRange Для отчёта по классу
 func GetScoresByClassAndDateRange(database *sql.DB, classNumber int, classLetter string, from, to time.Time) ([]models.ScoreWithUser, error) {
 	query := `
 	SELECT 
@@ -369,7 +343,7 @@ func GetScoresByClassAndDateRange(database *sql.DB, classNumber int, classLetter
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []models.ScoreWithUser
 	for rows.Next() {
@@ -382,7 +356,7 @@ func GetScoresByClassAndDateRange(database *sql.DB, classNumber int, classLetter
 	return result, nil
 }
 
-// Для отчёта по школе
+// GetScoresByDateRange Для отчёта по школе
 func GetScoresByDateRange(database *sql.DB, from, to time.Time) ([]models.ScoreWithUser, error) {
 	query := `
 	SELECT 
@@ -408,7 +382,7 @@ func GetScoresByDateRange(database *sql.DB, from, to time.Time) ([]models.ScoreW
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []models.ScoreWithUser
 	for rows.Next() {
@@ -456,7 +430,7 @@ func GetScoresByStudentAndPeriod(database *sql.DB, selectedStudentID int64, peri
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []models.ScoreWithUser
 	for rows.Next() {
@@ -504,7 +478,7 @@ func GetScoresByClassAndPeriod(database *sql.DB, classNumber int64, classLetter 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []models.ScoreWithUser
 	for rows.Next() {

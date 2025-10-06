@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Spok95/telegram-school-bot/internal/db"
+	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -19,11 +20,13 @@ func HandleMyScore(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		log.Println("Пользователь найден:", err)
 	}
 	if user == nil || !user.IsActive {
-		bot.Send(tgbotapi.NewMessage(chatID, "🚫 Доступ к боту временно закрыт. Обратитесь к администратору."))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "🚫 Доступ к боту временно закрыт. Обратитесь к администратору.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 
-	var targetID = user.ID
+	targetID := user.ID
 
 	// Если родитель — ищем telegram_id ребёнка
 	if *user.Role == models.Parent {
@@ -34,7 +37,9 @@ func HandleMyScore(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 			SELECT student_id FROM parents_students WHERE parent_id = $1
 		`, user.ID).Scan(&studentInternalID)
 		if err != nil {
-			bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось найти привязанного ученика."))
+			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось найти привязанного ученика.")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		}
 
@@ -60,10 +65,12 @@ func HandleMyScore(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		ORDER BY total DESC
 	`, targetID, from, to)
 	if err != nil {
-		bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Ошибка при получении рейтинга."))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Ошибка при получении рейтинга.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	summary := make(map[string]int)
 	total := 0
@@ -122,7 +129,9 @@ func HandleMyScore(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		}
 	}
 
-	bot.Send(tgbotapi.NewMessage(msg.Chat.ID, text))
+	if _, err := bot.Send(tgbotapi.NewMessage(msg.Chat.ID, text)); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 }
 
 func abs(n int) int {
@@ -135,7 +144,9 @@ func abs(n int) int {
 func HandleParentRatingRequest(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, parentID int64) {
 	children, err := db.GetChildrenByParentID(database, parentID)
 	if err != nil || len(children) == 0 {
-		bot.Send(tgbotapi.NewMessage(chatID, "У вас нет привязанных детей."))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "У вас нет привязанных детей.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 
@@ -156,7 +167,9 @@ func HandleParentRatingRequest(bot *tgbotapi.BotAPI, database *sql.DB, chatID in
 	markup := tgbotapi.NewInlineKeyboardMarkup(rows...)
 	msg := tgbotapi.NewMessage(chatID, "Выберите ребёнка для просмотра рейтинга:")
 	msg.ReplyMarkup = markup
-	bot.Send(msg)
+	if _, err := bot.Send(msg); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 }
 
 func ShowStudentRating(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, studentID int64) {
@@ -185,10 +198,12 @@ func ShowStudentRating(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, stu
 		ORDER BY total DESC
 	`, studentID, from, to)
 	if err != nil {
-		bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Ошибка при получении рейтинга."))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Ошибка при получении рейтинга.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	summary := make(map[string]int)
 	total := 0
@@ -244,5 +259,7 @@ func ShowStudentRating(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, stu
 		text += "\n\n📖 История: пусто"
 	}
 
-	bot.Send(tgbotapi.NewMessage(chatID, text))
+	if _, err := bot.Send(tgbotapi.NewMessage(chatID, text)); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 }

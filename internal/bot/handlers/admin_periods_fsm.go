@@ -10,6 +10,7 @@ import (
 
 	"github.com/Spok95/telegram-school-bot/internal/bot/shared/fsmutil"
 	"github.com/Spok95/telegram-school-bot/internal/db"
+	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -35,17 +36,15 @@ var periodsStates = map[int64]*PeriodsFSMState{}
 const (
 	perAdmCancel   = "peradm_cancel"
 	perAdmBack     = "peradm_back"
-	perAdmOpen     = "peradm_open"
 	perAdmCreate   = "peradm_create"
 	perAdmEditPref = "peradm_edit_"
 
-	editStepStartOnly = 1
-	editStepAskStart  = 2
-	editStepAskEnd    = 3
-	editStepConfirm   = 4
+	editStepAskStart = 1
+	editStepAskEnd   = 2
+	editStepConfirm  = 3
 )
 
-// Старт: список периодов + «Создать / Изменить»
+// StartAdminPeriods Старт: список периодов + «Создать / Изменить»
 func StartAdminPeriods(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
 	state := &PeriodsFSMState{}
@@ -59,13 +58,15 @@ func showPeriodsList(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, st *P
 	now := time.Now()
 	for _, p := range per {
 		tag := ""
-		if p.IsActive {
+		switch {
+		case p.IsActive:
 			tag = " — активный"
-		} else if p.StartDate.After(now) {
+		case p.StartDate.After(now):
 			tag = " — будущий"
-		} else if p.EndDate.Before(now) {
+		case p.EndDate.Before(now):
 			tag = " — прошедший"
 		}
+
 		text += fmt.Sprintf("• %s (%s–%s)%s\n", p.Name, p.StartDate.Format("02.01.2006"), p.EndDate.Format("02.01.2006"), tag)
 	}
 	var rows [][]tgbotapi.InlineKeyboardButton
@@ -85,40 +86,48 @@ func showPeriodsList(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, st *P
 	st.MessageID = sent.MessageID
 }
 
-// Колбэки списка
+// HandleAdminPeriodsCallback коллбэки списка
 func HandleAdminPeriodsCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
 	chatID := cb.Message.Chat.ID
 	st := periodsStates[chatID]
 	if st == nil {
 		return
 	}
-	_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, ""))
+	if _, err := bot.Request(tgbotapi.NewCallback(cb.ID, "")); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 	data := cb.Data
 
-	if data == perAdmCancel {
+	switch data {
+	case perAdmCancel:
 		disable := tgbotapi.NewEditMessageReplyMarkup(chatID, st.MessageID, tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{}})
-		bot.Request(disable)
-		bot.Send(tgbotapi.NewMessage(chatID, "🚫 Отменено."))
+		if _, err := bot.Request(disable); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "🚫 Отменено.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		delete(periodsStates, chatID)
 		return
-	}
-	if data == perAdmBack {
+	case perAdmBack:
 		if st.Editing != nil {
 			showEditCard(bot, chatID, st.Editing)
 			return
 		}
 		disable := tgbotapi.NewEditMessageReplyMarkup(chatID, st.MessageID, tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{}})
-		bot.Request(disable)
-		bot.Send(tgbotapi.NewMessage(chatID, "↩️ Возврат в меню."))
+		if _, err := bot.Request(disable); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "↩️ Возврат в меню.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		delete(periodsStates, chatID)
 		return
-	}
-	if data == perAdmCreate {
+	case perAdmCreate:
 		delete(periodsStates, chatID)
 		StartSetPeriodFSM(bot, cb.Message) // переиспользуем создание
 		return
-	}
-	if strings.HasPrefix(data, perAdmEditPref) {
+	case perAdmEditPref:
 		idStr := strings.TrimPrefix(data, perAdmEditPref)
 		pid64, err := strconv.ParseInt(strings.TrimSpace(idStr), 10, 64)
 
@@ -127,7 +136,9 @@ func HandleAdminPeriodsCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbo
 		fmt.Println()
 
 		if err != nil || pid64 <= 0 {
-			bot.Send(tgbotapi.NewMessage(chatID, "❌ Некорректный идентификатор периода. Попробуйте обновить список."))
+			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Некорректный идентификатор периода. Попробуйте обновить список.")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		}
 		p, err := db.GetPeriodByID(database, int(pid64))
@@ -137,11 +148,15 @@ func HandleAdminPeriodsCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbo
 		fmt.Println()
 
 		if errors.Is(err, sql.ErrNoRows) || p == nil {
-			bot.Send(tgbotapi.NewMessage(chatID, "❌ Период не найден в базе. Обновите список периодов."))
+			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Период не найден в базе. Обновите список периодов.")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		}
 		if err != nil {
-			bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Ошибка БД: %v", err)))
+			if _, err := bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Ошибка БД: %v", err))); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		}
 		ep := &EditPeriodState{PeriodID: int(pid64), Name: p.Name, StartDate: p.StartDate, EndDate: p.EndDate, IsActive: p.IsActive}
@@ -172,11 +187,13 @@ func showEditCard(bot *tgbotapi.BotAPI, chatID int64, ep *EditPeriodState) {
 	rows = append(rows, tgbotapi.NewInlineKeyboardRow(fsmutil.BackCancelRow(perAdmBack, perAdmCancel)...))
 	edit := tgbotapi.NewEditMessageText(chatID, periodsStates[chatID].MessageID, txt)
 	edit.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{InlineKeyboard: rows}
-	bot.Send(edit)
+	if _, err := bot.Send(edit); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 }
 
-// Текстовые шаги редактирования
-func HandleAdminPeriodsText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+// HandleAdminPeriodsText Текстовые шаги редактирования
+func HandleAdminPeriodsText(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
 	st := periodsStates[chatID]
 	if st == nil || st.Editing == nil {
@@ -190,7 +207,9 @@ func HandleAdminPeriodsText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotap
 			mk := tgbotapi.NewInlineKeyboardMarkup(fsmutil.BackCancelRow(perAdmBack, perAdmCancel))
 			m := tgbotapi.NewMessage(chatID, "❌ Неверная дата. Введите начало в формате ДД.ММ.ГГГГ:")
 			m.ReplyMarkup = mk
-			bot.Send(m)
+			if _, err := bot.Send(m); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		}
 		ep.StartDate = d
@@ -198,14 +217,18 @@ func HandleAdminPeriodsText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotap
 		mk := tgbotapi.NewInlineKeyboardMarkup(fsmutil.BackCancelRow(perAdmBack, perAdmCancel))
 		m := tgbotapi.NewMessage(chatID, "Введите дату окончания периода (ДД.ММ.ГГГГ):")
 		m.ReplyMarkup = mk
-		bot.Send(m)
+		if _, err := bot.Send(m); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 	case editStepAskEnd:
 		d, err := parseDate(msg.Text)
 		if err != nil {
 			mk := tgbotapi.NewInlineKeyboardMarkup(fsmutil.BackCancelRow(perAdmBack, perAdmCancel))
 			m := tgbotapi.NewMessage(chatID, "❌ Неверная дата. Введите окончание (ДД.ММ.ГГГГ):")
 			m.ReplyMarkup = mk
-			bot.Send(m)
+			if _, err := bot.Send(m); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		}
 		ep.EndDate = d
@@ -213,7 +236,9 @@ func HandleAdminPeriodsText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotap
 			mk := tgbotapi.NewInlineKeyboardMarkup(fsmutil.BackCancelRow(perAdmBack, perAdmCancel))
 			m := tgbotapi.NewMessage(chatID, err.Error())
 			m.ReplyMarkup = mk
-			bot.Send(m)
+			if _, err := bot.Send(m); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		}
 		ep.Step = editStepConfirm
@@ -225,11 +250,13 @@ func HandleAdminPeriodsText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotap
 		mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
 		m := tgbotapi.NewMessage(chatID, txt)
 		m.ReplyMarkup = mk
-		bot.Send(m)
+		if _, err := bot.Send(m); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 	}
 }
 
-// Колбэки редактора
+// HandleAdminPeriodsEditCallback Колбэки редактора
 func HandleAdminPeriodsEditCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
 	chatID := cb.Message.Chat.ID
 	st := periodsStates[chatID]
@@ -237,26 +264,34 @@ func HandleAdminPeriodsEditCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *
 		return
 	}
 	ep := st.Editing
-	_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, ""))
+	if _, err := bot.Request(tgbotapi.NewCallback(cb.ID, "")); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 	switch cb.Data {
 	case "peradm_edit_end":
 		ep.Step = editStepAskEnd
 		mk := tgbotapi.NewInlineKeyboardMarkup(fsmutil.BackCancelRow(perAdmBack, perAdmCancel))
 		m := tgbotapi.NewMessage(chatID, "Введите новую дату окончания (ДД.ММ.ГГГГ):")
 		m.ReplyMarkup = mk
-		bot.Send(m)
+		if _, err := bot.Send(m); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 	case "peradm_edit_both":
 		ep.Step = editStepAskStart
 		mk := tgbotapi.NewInlineKeyboardMarkup(fsmutil.BackCancelRow(perAdmBack, perAdmCancel))
 		m := tgbotapi.NewMessage(chatID, "Введите новую дату начала (ДД.ММ.ГГГГ):")
 		m.ReplyMarkup = mk
-		bot.Send(m)
+		if _, err := bot.Send(m); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 	case "peradm_save":
 		if err := validateEditDates(ep); err != nil {
 			mk := tgbotapi.NewInlineKeyboardMarkup(fsmutil.BackCancelRow(perAdmBack, perAdmCancel))
 			m := tgbotapi.NewMessage(chatID, err.Error())
 			m.ReplyMarkup = mk
-			bot.Send(m)
+			if _, err := bot.Send(m); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		}
 		if err := db.UpdatePeriod(database, models.Period{
@@ -266,11 +301,15 @@ func HandleAdminPeriodsEditCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *
 			EndDate:   ep.EndDate,
 			IsActive:  false,
 		}); err != nil {
-			bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось сохранить изменения."))
+			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось сохранить изменения.")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		}
 		_ = db.SetActivePeriod(database) // пересчитать активный
-		bot.Send(tgbotapi.NewMessage(chatID, "✅ Период обновлён."))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "✅ Период обновлён.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		if p, _ := db.GetPeriodByID(database, ep.PeriodID); p != nil {
 			ep.StartDate, ep.EndDate, ep.IsActive = p.StartDate, p.EndDate, p.IsActive
 		}
@@ -290,20 +329,20 @@ func validateEditDates(ep *EditPeriodState) error {
 
 	// Прошедший период — менять нельзя вовсе.
 	if !ep.IsActive && end.Before(today) {
-		return fmt.Errorf("❌ Нельзя изменять прошедшие периоды.")
+		return fmt.Errorf("❌ Нельзя изменять прошедшие периоды")
 	}
 	// Активный период: конец не раньше сегодняшней даты (можно = сегодня).
 	if ep.IsActive && end.Before(today) {
-		return fmt.Errorf("❌ Для активного периода дата окончания не может быть раньше сегодняшней.")
+		return fmt.Errorf("❌ Для активного периода дата окончания не может быть раньше сегодняшней")
 	}
 	// Базовая логика: конец не раньше начала.
 	if start.After(end) {
-		return fmt.Errorf("❌ Дата окончания не может быть раньше даты начала.")
+		return fmt.Errorf("❌ Дата окончания не может быть раньше даты начала")
 	}
 	return nil
 }
 
-// helper для dispatcher
+// PeriodsFSMActive helper для dispatcher
 func PeriodsFSMActive(chatID int64) (*PeriodsFSMState, bool) {
 	st, ok := periodsStates[chatID]
 	return st, ok

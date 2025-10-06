@@ -1,5 +1,6 @@
 run:
   timeout: 3m
+  tests: true
 linters:
   enable:
     - govet
@@ -8,7 +9,8 @@ linters:
     - gofumpt
     - gocritic
     - errcheck
+    - unused
 issues:
   exclude-rules:
     - path: _test\.go
-      linters: [ errcheck ]
+      linters: [errcheck]

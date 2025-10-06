@@ -4,6 +4,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -45,7 +46,9 @@ func ClearPending(chatID int64, key string) {
 func DisableMarkup(bot *tgbotapi.BotAPI, chatID int64, messageID int) {
 	empty := tgbotapi.InlineKeyboardMarkup{InlineKeyboard: make([][]tgbotapi.InlineKeyboardButton, 0)}
 	edit := tgbotapi.NewEditMessageReplyMarkup(chatID, messageID, empty)
-	bot.Send(edit)
+	if _, err := bot.Send(edit); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 }
 
 // BackCancelRow — готовая строка с кнопками "Назад" и "Отмена".

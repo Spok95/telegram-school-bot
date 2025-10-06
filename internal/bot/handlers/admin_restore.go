@@ -19,6 +19,7 @@ import (
 
 	"github.com/Spok95/telegram-school-bot/internal/bot/handlers/migrations"
 	"github.com/Spok95/telegram-school-bot/internal/db"
+	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/pressly/goose/v3"
 )
@@ -31,13 +32,17 @@ func AdminRestoreFSMActive(chatID int64) bool { return restoreWaiting[chatID] }
 func HandleAdminRestoreStart(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
 	user, _ := db.GetUserByTelegramID(database, chatID)
 	if user == nil || user.Role == nil || *user.Role != "admin" {
-		bot.Send(tgbotapi.NewMessage(chatID, "🚫 Только для администратора"))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "🚫 Только для администратора")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 	restoreWaiting[chatID] = true
 	text := "⚠️ Восстановление перезапишет данные в существующих таблицах.\n\n" +
 		"Пришлите ZIP, полученный кнопкой «💾 Бэкап БД». Я загружу файл и восстановлю данные."
-	bot.Send(tgbotapi.NewMessage(chatID, text))
+	if _, err := bot.Send(tgbotapi.NewMessage(chatID, text)); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 }
 
 func HandleAdminRestoreMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
@@ -46,7 +51,9 @@ func HandleAdminRestoreMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbo
 		return
 	}
 	if msg.Document == nil {
-		bot.Send(tgbotapi.NewMessage(chatID, "Пришлите ZIP-файл с бэкапом."))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "Пришлите ZIP-файл с бэкапом.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 	defer func() { delete(restoreWaiting, chatID) }()
@@ -54,18 +61,26 @@ func HandleAdminRestoreMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbo
 	// качаем файл из Telegram
 	path, err := downloadTelegramFile(bot, msg.Document.FileID)
 	if err != nil {
-		bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Не удалось скачать файл: %v", err)))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Не удалось скачать файл: %v", err))); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
-	defer os.Remove(path)
+	defer func() { _ = os.Remove(path) }()
 
-	bot.Send(tgbotapi.NewMessage(chatID, "⌛ Восстанавливаю БД из бэкапа…"))
+	if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⌛ Восстанавливаю БД из бэкапа…")); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 	if err := restoreFromZip(database, path); err != nil {
 		log.Println("restore error:", err)
-		bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Ошибка восстановления: %v", err)))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Ошибка восстановления: %v", err))); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
-	bot.Send(tgbotapi.NewMessage(chatID, "✅ Готово. База восстановлена."))
+	if _, err := bot.Send(tgbotapi.NewMessage(chatID, "✅ Готово. База восстановлена.")); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 }
 
 func downloadTelegramFile(bot *tgbotapi.BotAPI, fileID string) (string, error) {
@@ -82,7 +97,7 @@ func downloadTelegramFile(bot *tgbotapi.BotAPI, fileID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
 		return "", fmt.Errorf("telegram file status: %s", resp.Status)
 	}
@@ -91,7 +106,7 @@ func downloadTelegramFile(bot *tgbotapi.BotAPI, fileID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 	if _, err := io.Copy(out, resp.Body); err != nil {
 		return "", err
 	}
@@ -103,7 +118,7 @@ func restoreFromZip(database *sql.DB, zipPath string) error {
 	if err != nil {
 		return err
 	}
-	defer zr.Close()
+	defer func() { _ = zr.Close() }()
 
 	// Если таблиц нет — создадим схему миграциями
 	if err := ensureSchema(database); err != nil {
@@ -126,10 +141,10 @@ func restoreFromZip(database *sql.DB, zipPath string) error {
 			// оборачиваем, чтобы csv.Reader не закрыл нам zip-ридер раньше времени
 			buf := &bytes.Buffer{}
 			if _, err := io.Copy(buf, rc); err != nil {
-				rc.Close()
+				_ = rc.Close()
 				return err
 			}
-			rc.Close()
+			_ = rc.Close()
 			r := io.NopCloser(bytes.NewReader(buf.Bytes()))
 			dumps = append(dumps, tableDump{
 				name: strings.TrimSuffix(filepath.Base(f.Name), ".csv"),
@@ -218,6 +233,7 @@ func restoreFromZip(database *sql.DB, zipPath string) error {
 	}
 	return nil
 }
+
 func ensureSchema(database *sql.DB) error {
 	// проверим наличие таблиц
 	var n int
@@ -310,7 +326,7 @@ func getColumnTypes(tx *sql.Tx, table string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	m := make(map[string]string)
 	for rows.Next() {
 		var name, dt string
@@ -374,7 +390,7 @@ func resetSequence(tx *sql.Tx, table string) error {
 		return err
 	}
 	var value int64 = 1
-	var isCalled bool = false
+	isCalled := false
 	if maxID.Valid {
 		if maxID.Int64 >= 1 {
 			value = maxID.Int64

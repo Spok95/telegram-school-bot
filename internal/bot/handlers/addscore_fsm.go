@@ -10,6 +10,7 @@ import (
 
 	"github.com/Spok95/telegram-school-bot/internal/bot/shared/fsmutil"
 	"github.com/Spok95/telegram-school-bot/internal/db"
+	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -47,7 +48,9 @@ func addEditMenu(bot *tgbotapi.BotAPI, chatID int64, messageID int, text string,
 	cfg := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
 	cfg.ReplyMarkup = &mk
-	bot.Send(cfg)
+	if _, err := bot.Send(cfg); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 }
 
 func ClassNumberRows(action string) [][]tgbotapi.InlineKeyboardButton {
@@ -81,7 +84,9 @@ func StartAddScoreFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 	// запрет неактивным
 	u, _ := db.GetUserByTelegramID(database, chatID)
 	if u == nil || !fsmutil.MustBeActiveForOps(u) {
-		bot.Send(tgbotapi.NewMessage(chatID, "🚫 Доступ временно закрыт. Обратитесь к администратору."))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "🚫 Доступ временно закрыт. Обратитесь к администратору.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 	delete(addStates, chatID)
@@ -92,7 +97,9 @@ func StartAddScoreFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 
 	out := tgbotapi.NewMessage(chatID, "Выберите номер класса:")
 	out.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(ClassNumberRows("add")...)
-	bot.Send(out)
+	if _, err := bot.Send(out); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 }
 
 // ==== callbacks ====
@@ -110,7 +117,9 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		delete(addStates, chatID)
 		fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
 		edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "🚫 Начисление отменено.")
-		bot.Send(edit)
+		if _, err := bot.Send(edit); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 
@@ -143,7 +152,9 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 			// Если по какой-то причине пользователя не нашли — фиксируем и выходим мягко
 			log.Printf("HandleAddScoreCallback: user is nil for telegram id=%d", chatID)
 			edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "⚠️ Не удалось определить пользователя. Попробуйте ещё раз.")
-			bot.Send(edit)
+			if _, err := bot.Send(edit); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			delete(addStates, chatID)
 			return
 		}
@@ -185,7 +196,9 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 			msgText += "\n⚠️ Пропущены (неактивны): " + strings.Join(skipped, ", ")
 		}
 		edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, msgText)
-		bot.Send(edit)
+		if _, err := bot.Send(edit); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		delete(addStates, chatID)
 		return
 	}
@@ -265,7 +278,9 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 			delete(addStates, chatID)
 			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
 			edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "🚫 Начисление отменено.")
-			bot.Send(edit)
+			if _, err := bot.Send(edit); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		}
 	}
@@ -291,7 +306,9 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 			delete(addStates, chatID)
 			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
 			edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "❌ В этом классе нет учеников.")
-			bot.Send(edit)
+			if _, err := bot.Send(edit); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		}
 		var buttons [][]tgbotapi.InlineKeyboardButton
@@ -443,7 +460,9 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		period, err := db.GetActivePeriod(database)
 		if err != nil || period == nil {
 			edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "❌ Нет активного периода. Установите активный период и попробуйте снова.")
-			bot.Send(edit)
+			if _, err := bot.Send(edit); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			delete(addStates, chatID)
 			return
 		}
@@ -478,7 +497,7 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 
 // ==== текстовый шаг ====
 
-func HandleAddScoreText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+func HandleAddScoreText(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
 	state, ok := addStates[chatID]
 	if !ok {
@@ -486,13 +505,15 @@ func HandleAddScoreText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Me
 	}
 
 	if state.Step == 6 {
-		bot.Send(tgbotapi.NewMessage(chatID, "Нажмите «✅ Да» или используйте «Назад/Отмена» ниже."))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "Нажмите «✅ Да» или используйте «Назад/Отмена» ниже.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 	delete(addStates, chatID)
 }
 
-// доступ из main.go
+// GetAddScoreState доступ из main.go
 func GetAddScoreState(chatID int64) *AddFSMState {
 	return addStates[chatID]
 }

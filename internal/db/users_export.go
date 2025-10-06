@@ -25,9 +25,8 @@ type ParentRow struct {
 	Classes    string // «7А, 11Б»
 }
 
-// IncludeInactive=false → добавляем фильтр u.confirmed=TRUE
 func ListAllUsers(database *sql.DB, includeInactive bool) ([]UserRow, error) {
-	q := ``
+	var q string
 	if !includeInactive {
 		q = `
 		SELECT u.name, COALESCE(u.role, '') AS role, u.class_number, u.class_letter
@@ -46,7 +45,7 @@ func ListAllUsers(database *sql.DB, includeInactive bool) ([]UserRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []UserRow
 	for rows.Next() {
@@ -70,7 +69,7 @@ func ListTeachers(database *sql.DB, includeInactive bool) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var res []string
 	for rows.Next() {
 		var n string
@@ -93,7 +92,7 @@ func ListAdministration(database *sql.DB, includeInactive bool) ([]string, error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var res []string
 	for rows.Next() {
 		var n string
@@ -133,7 +132,7 @@ func ListStudents(database *sql.DB, includeInactive bool) ([]StudentRow, error) 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var res []StudentRow
 	for rows.Next() {
 		var r StudentRow
@@ -176,7 +175,7 @@ func ListParents(database *sql.DB, includeInactive bool) ([]ParentRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var res []ParentRow
 	for rows.Next() {
 		var r ParentRow
