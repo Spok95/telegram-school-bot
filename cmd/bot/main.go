@@ -1,12 +1,19 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/Spok95/telegram-school-bot/internal/app"
 	"github.com/Spok95/telegram-school-bot/internal/bot/handlers/migrations"
+	"github.com/Spok95/telegram-school-bot/internal/config"
 	"github.com/Spok95/telegram-school-bot/internal/db"
+	"github.com/Spok95/telegram-school-bot/internal/logging"
+	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/joho/godotenv"
 	"github.com/pressly/goose/v3"
@@ -18,23 +25,37 @@ func main() {
 		log.Println("Не удалось загрузить .env файл, используем переменные окружения")
 	}
 
-	botToken := os.Getenv("BOT_TOKEN")
-	if botToken == "" {
-		log.Fatal("BOT_TOKEN не задан")
-	}
-
-	// Инициализация Telegram бота
-	bot, err := tgbotapi.NewBotAPI(botToken)
+	// === CONFIG ===
+	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Ошибка запуска бота: %v", err)
+		log.Fatalf("config: %v", err)
 	}
-	bot.Debug = true
-	log.Printf("Бот запущен как %s", bot.Self.UserName)
 
-	// Инициализация БД через db.Init()
+	// === LOGGING ===
+	lg, err := logging.Init(cfg.LogLevel, cfg.Env)
+	if err != nil {
+		log.Fatalf("logger: %v", err)
+	}
+	defer lg.Closer()
+	lg.Sugar.Infow("starting bot", "env", cfg.Env)
+
+	// === CONTEXT + GRACEFUL ===
+	ctx, stop := signal.NotifyContext(context.Background(),
+		syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	// === TELEGRAM ===
+	bot, err := tgbotapi.NewBotAPI(cfg.BotToken)
+	if err != nil {
+		lg.Sugar.Fatalw("bot init", "err", err)
+	}
+	bot.Debug = (cfg.Env == "dev")
+
+	// === DB ===
+	os.Setenv("DATABASE_URL", cfg.DatabaseURL) // db.MustOpen читает из ENV
 	database, err := db.MustOpen()
 	if err != nil {
-		log.Fatalf("Ошибка подключения к БД: %v", err)
+		lg.Sugar.Fatalw("db open", "err", err)
 	}
 	defer database.Close()
 
@@ -43,7 +64,7 @@ func main() {
 	if err := goose.SetDialect("postgres"); err != nil {
 		log.Fatalf("❌ Goose dialect error: %v", err)
 	}
-	if err := goose.Up(database, "."); err != nil {
+	if err := goose.Up(database, "migrations"); err != nil {
 		log.Fatalf("❌ Ошибка миграций: %v", err)
 	}
 
@@ -59,15 +80,41 @@ func main() {
 	u.Timeout = 60
 	updates := bot.GetUpdatesChan(u)
 
-	// Маршрутизация команд
-	for update := range updates {
-		if update.CallbackQuery != nil {
-			app.HandleCallback(bot, database, update.CallbackQuery)
-			continue
-		}
-		if update.Message != nil {
-			app.HandleMessage(bot, database, update.Message)
-			continue
+	// === HTTP: /healthz, /metrics ===
+	app.StartHTTP(ctx, cfg.HTTPAddr, database)
+	lg.Sugar.Infow("http started", "addr", cfg.HTTPAddr)
+
+	// === Фоновые задачи ===
+	// app.StartSchoolYearNotifier(bot, database, cfg.Location) // если функция поддерживает tz
+
+	// === MAIN LOOP ===
+	for {
+		select {
+		case <-ctx.Done():
+			lg.Sugar.Infow("shutdown requested")
+			time.Sleep(300 * time.Millisecond)
+			return
+		case upd := <-updates:
+			metrics.BotUpdates.Inc()
+
+			// callback/message как было — только завернём в recover-защиту
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						lg.Sugar.Errorw("panic in update", "panic", r)
+						metrics.HandlerErrors.Inc()
+					}
+				}()
+
+				if upd.CallbackQuery != nil {
+					app.HandleCallback(bot, database, upd.CallbackQuery)
+					return
+				}
+				if upd.Message != nil {
+					app.HandleMessage(bot, database, upd.Message)
+					return
+				}
+			}()
 		}
 	}
 }

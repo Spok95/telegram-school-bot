@@ -32,6 +32,17 @@ services:
       BOT_TOKEN: ${BOT_TOKEN}
       ADMIN_IDS: ${ADMIN_IDS}
       TZ: Europe/Moscow
+      HTTP_ADDR: ":8080"
+      LOG_LEVEL: "info"     # или "debug"
+      ENV: "prod"           # dev|prod
+      # SENTRY_DSN: ${SENTRY_DSN}  # подключим на шаге 3
+    ports:
+      - "8080:8080"         # /healthz и /metrics
+    healthcheck:
+      test: [ "CMD", "wget", "-qO-", "http://localhost:8080/healthz" ]
+      interval: 10s
+      timeout: 2s
+      retries: 6
     restart: unless-stopped
     logging:
       driver: json-file
