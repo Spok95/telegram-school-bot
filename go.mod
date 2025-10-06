@@ -3,6 +3,7 @@ module github.com/Spok95/telegram-school-bot
 go 1.24.4
 
 require (
+	github.com/getsentry/sentry-go v0.28.1
 	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
 	github.com/jackc/pgx/v5 v5.7.5
 	github.com/joho/godotenv v1.5.1

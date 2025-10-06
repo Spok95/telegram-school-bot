@@ -11,6 +11,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/bot/shared/fsmutil"
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -20,7 +21,7 @@ func ShowPendingScores(bot *tgbotapi.BotAPI, database *sql.DB, adminID int64) {
 	admin, err := db.GetUserByID(database, adminID)
 	if err == nil {
 		if !fsmutil.MustBeActiveForOps(&admin) {
-			if _, err := bot.Send(tgbotapi.NewMessage(adminID, "🚫 Доступ временно закрыт. Обратитесь к администратору.")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(adminID, "🚫 Доступ временно закрыт. Обратитесь к администратору.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -29,13 +30,13 @@ func ShowPendingScores(bot *tgbotapi.BotAPI, database *sql.DB, adminID int64) {
 	scores, err := db.GetPendingScores(database)
 	if err != nil {
 		log.Println("ошибка при получении заявок на баллы:", err)
-		if _, err := bot.Send(tgbotapi.NewMessage(adminID, "Ошибка при получении заявок на баллы.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(adminID, "Ошибка при получении заявок на баллы.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
 	}
 	if len(scores) == 0 {
-		if _, err := bot.Send(tgbotapi.NewMessage(adminID, "✅ Нет ожидающих подтверждения заявок.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(adminID, "✅ Нет ожидающих подтверждения заявок.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -63,7 +64,7 @@ func ShowPendingScores(bot *tgbotapi.BotAPI, database *sql.DB, adminID int64) {
 
 		msg := tgbotapi.NewMessage(adminID, text)
 		msg.ReplyMarkup = markup
-		if _, err := bot.Send(msg); err != nil {
+		if _, err := tg.Send(bot, msg); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 	}
@@ -125,11 +126,11 @@ func HandleScoreApprovalCallback(callback *tgbotapi.CallbackQuery, bot *tgbotapi
 	edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, messageID, resultText, tgbotapi.InlineKeyboardMarkup{
 		InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{},
 	})
-	if _, err := bot.Send(edit); err != nil {
+	if _, err := tg.Send(bot, edit); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 
-	if _, err := bot.Request(tgbotapi.NewCallback(callback.ID, "Обработано")); err != nil {
+	if _, err := tg.Request(bot, tgbotapi.NewCallback(callback.ID, "Обработано")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }

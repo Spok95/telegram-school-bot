@@ -11,6 +11,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/bot/shared/fsmutil"
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -67,7 +68,7 @@ func parentEditMenu(bot *tgbotapi.BotAPI, chatID int64, messageID int, text stri
 	cfg := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
 	cfg.ReplyMarkup = &mk
-	if _, err := bot.Send(cfg); err != nil {
+	if _, err := tg.Send(bot, cfg); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }
@@ -76,7 +77,7 @@ func StartParentRegistration(chatID int64, user *tgbotapi.User, bot *tgbotapi.Bo
 	parentFSM[chatID] = StateParentStudentName
 	parentName := strings.TrimSpace(fmt.Sprintf("%s %s", user.FirstName, user.LastName))
 	parentData[chatID] = &ParentRegisterData{ParentName: parentName}
-	if _, err := bot.Send(tgbotapi.NewMessage(chatID, "Введите ФИО ребёнка, которого вы представляете:")); err != nil {
+	if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Введите ФИО ребёнка, которого вы представляете:")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }
@@ -86,7 +87,7 @@ func HandleParentFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *s
 	if strings.EqualFold(trimmed, "отмена") || strings.EqualFold(trimmed, "/cancel") {
 		delete(parentFSM, chatID)
 		delete(parentData, chatID)
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "🚫 Регистрация отменена. Нажмите /start, чтобы начать заново.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Регистрация отменена. Нажмите /start, чтобы начать заново.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -103,7 +104,7 @@ func HandleParentFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *s
 		parentFSM[chatID] = StateParentClassNumber
 		msgOut := tgbotapi.NewMessage(chatID, "Выберите номер класса ребёнка:")
 		msgOut.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(parentClassNumberRows()...)
-		if _, err := bot.Send(msgOut); err != nil {
+		if _, err := tg.Send(bot, msgOut); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 	}
@@ -118,7 +119,7 @@ func HandleParentCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 		delete(parentFSM, chatID)
 		delete(parentData, chatID)
 		fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
-		if _, err := bot.Send(tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "🚫 Регистрация отменена. Нажмите /start, чтобы начать заново.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "🚫 Регистрация отменена. Нажмите /start, чтобы начать заново.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -127,7 +128,7 @@ func HandleParentCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 		switch state {
 		case StateParentClassNumber:
 			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
-			if _, err := bot.Send(tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "Введите ФИО ребёнка:")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "Введите ФИО ребёнка:")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			parentFSM[chatID] = StateParentStudentName
@@ -135,11 +136,11 @@ func HandleParentCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			parentFSM[chatID] = StateParentClassNumber
 			parentEditMenu(bot, chatID, cq.Message.MessageID, "Выберите номер класса ребёнка:", parentClassNumberRows())
 		case StateParentWaiting:
-			if _, err := bot.Request(tgbotapi.NewCallback(cq.ID, "Заявка уже отправлена, ожидайте подтверждения.")); err != nil {
+			if _, err := tg.Request(bot, tgbotapi.NewCallback(cq.ID, "Заявка уже отправлена, ожидайте подтверждения.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 		default:
-			if _, err := bot.Request(tgbotapi.NewCallback(cq.ID, "Действие недоступно на этом шаге.")); err != nil {
+			if _, err := tg.Request(bot, tgbotapi.NewCallback(cq.ID, "Действие недоступно на этом шаге.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 		}
@@ -166,7 +167,7 @@ func HandleParentCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 		studentID, err := FindStudentID(database, parentData[chatID])
 		if err != nil {
 			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
-			if _, err := bot.Send(tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "❌ Ученик не найден. Введите ФИО заново:")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "❌ Ученик не найден. Введите ФИО заново:")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			parentFSM[chatID] = StateParentStudentName
@@ -176,7 +177,7 @@ func HandleParentCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 		parentID, err := SaveParentRequest(database, chatID, studentID, parentData[chatID].ParentName)
 		if err != nil {
 			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
-			if _, err := bot.Send(tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "Ошибка при сохранении. Попробуйте позже.")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "Ошибка при сохранении. Попробуйте позже.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			delete(parentFSM, chatID)
@@ -184,7 +185,7 @@ func HandleParentCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			return
 		}
 		fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
-		if _, err := bot.Send(tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "Заявка на регистрацию родителя отправлена администратору. Ожидайте подтверждения.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "Заявка на регистрацию родителя отправлена администратору. Ожидайте подтверждения.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		handlers.NotifyAdminsAboutNewUser(bot, database, parentID)

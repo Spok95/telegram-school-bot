@@ -16,6 +16,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/bot/handlers/migrations"
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -23,19 +24,19 @@ import (
 func HandleAdminBackup(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
 	user, err := db.GetUserByTelegramID(database, chatID)
 	if err != nil || user == nil || user.Role == nil || *user.Role != "admin" {
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "🚫 Только для администратора")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Только для администратора")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
 	}
-	if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⌛ Делаю бэкап базы…")); err != nil {
+	if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⌛ Делаю бэкап базы…")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 
 	path, size, err := dumpDatabaseToZip(database)
 	if err != nil {
 		log.Println("backup error:", err)
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Не удалось сделать бэкап: %v", err))); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Не удалось сделать бэкап: %v", err))); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -44,7 +45,7 @@ func HandleAdminBackup(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
 
 	// ~50 МБ лимит Telegram-документов. Берём запас.
 	if size > 48*1024*1024 {
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID,
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID,
 			fmt.Sprintf("⚠️ Бэкап получился %d МБ — слишком большой для Telegram. "+
 				"Сделайте full dump: docker compose exec -T postgres pg_dump -U school -d school | gzip > backup.sql.gz", size/1024/1024))); err != nil {
 			metrics.HandlerErrors.Inc()
@@ -60,7 +61,7 @@ func HandleAdminBackup(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
 		Name:   filepath.Base(path),
 	})
 	doc.Caption = "💾 Резервная копия базы (CSV + миграции)"
-	if _, err := bot.Send(doc); err != nil {
+	if _, err := tg.Send(bot, doc); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }

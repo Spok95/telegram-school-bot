@@ -1,3 +1,6 @@
+VERSION ?= $(shell git describe --tags --always --dirty)
+COMMIT  ?= $(shell git rev-parse --short HEAD)
+
 .PHONY: run build fmt tidy lint test bench up up-all restart down nuke logs
 
 GO ?= go
@@ -6,7 +9,7 @@ run:
 	ENV=dev HTTP_ADDR=":8080" LOG_LEVEL=debug $(GO) run ./cmd/bot
 
 build:
-	$(GO) build -o ./bin/bot ./cmd/bot
+	$(GO) build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT)" -o ./bin/bot ./cmd/bot
 
 fmt:
 	gofumpt -w .

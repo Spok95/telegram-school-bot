@@ -9,6 +9,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	"github.com/Spok95/telegram-school-bot/internal/models"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -184,7 +185,7 @@ func parseDate(input string) (time.Time, error) {
 func perReplace(bot *tgbotapi.BotAPI, chatID int64, state *SetPeriodState, text string, mk tgbotapi.InlineKeyboardMarkup) {
 	// удалить предыдущее бот-сообщение (если было)
 	if state.MessageID != 0 {
-		if _, err := bot.Request(tgbotapi.NewDeleteMessage(chatID, state.MessageID)); err != nil {
+		if _, err := tg.Request(bot, tgbotapi.NewDeleteMessage(chatID, state.MessageID)); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 	}
@@ -192,13 +193,13 @@ func perReplace(bot *tgbotapi.BotAPI, chatID int64, state *SetPeriodState, text 
 	if len(mk.InlineKeyboard) > 0 {
 		msg.ReplyMarkup = mk
 	}
-	sent, _ := bot.Send(msg)
+	sent, _ := tg.Send(bot, msg)
 	state.MessageID = sent.MessageID
 }
 
 // Ответить на нажатие кнопки (убирает крутилку у пользователя)
 func perAnswer(bot *tgbotapi.BotAPI, cb *tgbotapi.CallbackQuery) {
-	if _, err := bot.Request(tgbotapi.NewCallback(cb.ID, "")); err != nil {
+	if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }
@@ -209,7 +210,7 @@ func perSend(bot *tgbotapi.BotAPI, chatID int64, st *SetPeriodState, text string
 	if len(mk.InlineKeyboard) > 0 {
 		msg.ReplyMarkup = mk
 	}
-	sent, _ := bot.Send(msg)
+	sent, _ := tg.Send(bot, msg)
 	st.MessageID = sent.MessageID
 }
 
@@ -220,7 +221,7 @@ func perClearMarkup(bot *tgbotapi.BotAPI, chatID int64, st *SetPeriodState) {
 	}
 	empty := tgbotapi.NewEditMessageReplyMarkup(chatID, st.MessageID,
 		tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{}})
-	if _, err := bot.Request(empty); err != nil {
+	if _, err := tg.Request(bot, empty); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }

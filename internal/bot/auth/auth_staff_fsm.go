@@ -6,6 +6,7 @@ import (
 
 	"github.com/Spok95/telegram-school-bot/internal/bot/handlers"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -23,7 +24,7 @@ var (
 
 func StartStaffRegistration(chatID int64, bot *tgbotapi.BotAPI) {
 	staffFSM[chatID] = StateStaffName
-	if _, err := bot.Send(tgbotapi.NewMessage(chatID, "Введите ваше ФИО:")); err != nil {
+	if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Введите ваше ФИО:")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }
@@ -33,7 +34,7 @@ func HandleStaffFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *sq
 	if strings.EqualFold(trimmed, "отмена") || strings.EqualFold(trimmed, "/cancel") {
 		delete(staffFSM, chatID)
 		delete(staffData, chatID)
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "🚫 Регистрация отменена. Нажмите /start, чтобы начать заново.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Регистрация отменена. Нажмите /start, чтобы начать заново.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -47,14 +48,14 @@ func HandleStaffFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *sq
 
 		id, err := SaveStaffRequest(database, chatID, msg, role)
 		if err != nil {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "Ошибка при сохранении заявки. Попробуйте позже.")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Ошибка при сохранении заявки. Попробуйте позже.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			delete(staffFSM, chatID)
 			delete(staffData, chatID)
 			return
 		}
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "Заявка на регистрацию отправлена администратору. Ожидайте подтверждения.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Заявка на регистрацию отправлена администратору. Ожидайте подтверждения.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		handlers.NotifyAdminsAboutNewUser(bot, database, id)

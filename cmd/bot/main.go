@@ -14,9 +14,16 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/logging"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
+	"github.com/Spok95/telegram-school-bot/internal/observability"
+	"github.com/getsentry/sentry-go"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/joho/godotenv"
 	"github.com/pressly/goose/v3"
+)
+
+var (
+	version = "dev"
+	commit  = "none"
 )
 
 func main() {
@@ -38,6 +45,20 @@ func main() {
 	}
 	defer lg.Closer()
 	lg.Sugar.Infow("starting bot", "env", cfg.Env)
+
+	closeSentry, err := observability.InitSentry(cfg.SentryDSN, cfg.Env, version+"-"+commit)
+	if err != nil {
+		lg.Sugar.Warnw("sentry init failed", "err", err)
+	}
+	defer closeSentry()
+
+	// глобальный guard на панику в main
+	defer func() {
+		if r := recover(); r != nil {
+			sentry.CurrentHub().Recover(r)
+			lg.Sugar.Errorw("panic in main", "panic", r)
+		}
+	}()
 
 	// === CONTEXT + GRACEFUL ===
 	ctx, stop := signal.NotifyContext(context.Background(),
@@ -101,6 +122,7 @@ func main() {
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
+						sentry.CurrentHub().Recover(r)
 						lg.Sugar.Errorw("panic in update", "panic", r)
 						metrics.HandlerErrors.Inc()
 					}

@@ -10,6 +10,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	"github.com/Spok95/telegram-school-bot/internal/models"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -18,20 +19,20 @@ func StartStudentHistoryExcel(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbot
 	chatID := msg.Chat.ID
 	u, err := db.GetUserByTelegramID(database, chatID)
 	if err != nil || u == nil || u.Role == nil || *u.Role != models.Student {
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Доступно только ученикам.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Доступно только ученикам.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
 	}
 	if !u.IsActive {
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "🚫 Доступ к боту временно закрыт.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Доступ к боту временно закрыт.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
 	}
 	act, err := db.GetActivePeriod(database)
 	if err != nil || act == nil {
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Активный период не найден.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Активный период не найден.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -44,14 +45,14 @@ func StartParentHistoryExcel(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbota
 	chatID := msg.Chat.ID
 	u, err := db.GetUserByTelegramID(database, chatID)
 	if err != nil || u == nil || u.Role == nil || *u.Role != models.Parent {
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Доступно только родителям.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Доступно только родителям.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
 	}
 	children, err := db.GetChildrenByParentID(database, u.ID)
 	if err != nil || len(children) == 0 {
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "У вас нет привязанных активных детей.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "У вас нет привязанных активных детей.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -62,7 +63,7 @@ func StartParentHistoryExcel(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbota
 			go generateAndSendStudentHistoryExcel(bot, database, chatID, c.ID, int(*c.ClassNumber), *c.ClassLetter, act.ID, act.Name)
 			return
 		}
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Активный период не найден.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Активный период не найден.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -77,7 +78,7 @@ func StartParentHistoryExcel(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbota
 	markup := tgbotapi.NewInlineKeyboardMarkup(rows...)
 	msgOut := tgbotapi.NewMessage(chatID, "Выберите ребёнка для отчёта за текущий период:")
 	msgOut.ReplyMarkup = markup
-	if _, err := bot.Send(msgOut); err != nil {
+	if _, err := tg.Send(bot, msgOut); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }
@@ -86,7 +87,7 @@ func StartParentHistoryExcel(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbota
 func HandleHistoryExcelCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
 	chatID := cb.Message.Chat.ID
 	data := cb.Data
-	if _, err := bot.Request(tgbotapi.NewCallback(cb.ID, "")); err != nil {
+	if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 
@@ -94,14 +95,14 @@ func HandleHistoryExcelCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbo
 		idStr := strings.TrimPrefix(data, "hist_excel_student_")
 		stuID, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "Ошибка: не удалось определить ребёнка.")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Ошибка: не удалось определить ребёнка.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
 		}
 		u, err := db.GetUserByID(database, stuID)
 		if err != nil || u.ID == 0 || u.ClassNumber == nil || u.ClassLetter == nil {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось определить класс ученика.")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Не удалось определить класс ученика.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -110,7 +111,7 @@ func HandleHistoryExcelCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbo
 			go generateAndSendStudentHistoryExcel(bot, database, chatID, stuID, int(*u.ClassNumber), *u.ClassLetter, act.ID, act.Name)
 			return
 		}
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Активный период не найден.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Активный период не найден.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 	}
@@ -121,7 +122,7 @@ func generateAndSendStudentHistoryExcel(bot *tgbotapi.BotAPI, database *sql.DB, 
 	scores, err := db.GetScoresByStudentAndPeriod(database, studentID, int(periodID))
 	if err != nil {
 		log.Println("history export: get scores:", err)
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось получить историю за период.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Не удалось получить историю за период.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -132,14 +133,14 @@ func generateAndSendStudentHistoryExcel(bot *tgbotapi.BotAPI, database *sql.DB, 
 	filePath, err := generateStudentReport(scores, collective, className, periodName)
 	if err != nil {
 		log.Println("history export: generate file:", err)
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось сформировать Excel-файл.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Не удалось сформировать Excel-файл.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
 	}
 	doc := tgbotapi.NewDocument(chatID, tgbotapi.FilePath(filePath))
 	doc.Caption = fmt.Sprintf("📊 История по ученику за период: %s", periodName)
-	if _, err := bot.Send(doc); err != nil {
+	if _, err := tg.Send(bot, doc); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }

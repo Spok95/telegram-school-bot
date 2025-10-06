@@ -19,6 +19,9 @@ services:
     build:
       context: .
       dockerfile: ./Dockerfile
+      args: # ← НОВОЕ
+        VERSION: ${GIT_VERSION:-dev}
+        COMMIT: ${GIT_COMMIT:-none}
     depends_on:
       postgres:
         condition: service_healthy
@@ -30,7 +33,7 @@ services:
       HTTP_ADDR: ":8080"
       LOG_LEVEL: "info"     # или "debug"
       ENV: "prod"           # dev|prod
-      # SENTRY_DSN: ${SENTRY_DSN}  # подключим на шаге 3
+      SENTRY_DSN: ${SENTRY_DSN}
     ports:
       - "8080:8080"         # /healthz и /metrics
     restart: unless-stopped
