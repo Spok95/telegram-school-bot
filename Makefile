@@ -1,34 +1,43 @@
-.PHONY: up up-all build restart down nuke logs
+.PHONY: run build fmt tidy lint test bench up up-all restart down nuke logs
 
-.PHONY: test bench lint
+GO ?= go
 
-test: ; GOFLAGS=-count=1 go test -race -covermode=atomic -coverprofile=coverage.out ./...
+run:
+	ENV=dev HTTP_ADDR=":8080" LOG_LEVEL=debug $(GO) run ./cmd/bot
 
-bench: ; go test -run '^$$' -bench . ./internal/db -benchtime=10s -benchmem
+build:
+	$(GO) build -o ./bin/bot ./cmd/bot
+
+fmt:
+	gofumpt -w .
+	$(GO) fmt ./...
+
+tidy:
+	$(GO) mod tidy
 
 lint:
-	go vet ./...
+	golangci-lint run
 
-# Поднять без изменения БД (если образов нет — скачаются, БД остаётся)
+test:
+	GOFLAGS=-count=1 $(GO) test -race -covermode=atomic -coverprofile=coverage.out ./...
+
+bench:
+	$(GO) test -run '^$$' -bench . ./internal/db -benchtime=10s -benchmem
+
+# Поднять без изменения БД
 up:
 	docker compose up -d postgres bot
 
-# Поднять c пересборкой образов, БД остаётся
-up-all: build
-	docker compose up -d postgres bot
+# Полный пересбор образов (если понадобится)
+up-all:
+	docker compose up -d --build postgres bot
 
-build:
-	docker compose build
-
-# Перезапустить только приложение (БД не трогаем)
 restart:
 	docker compose restart bot
 
-# Остановить контейнеры, НО ТОМ С ДАННЫМИ НЕ УДАЛЯТЬ
 down:
 	docker compose down --remove-orphans
 
-# <<< ОПАСНО >>> Полный сброс: удалить контейнеры + ТОМ С БД
 nuke:
 	docker compose down -v --remove-orphans
 
