@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/Spok95/telegram-school-bot/internal/bot/handlers"
+	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -15,12 +16,16 @@ const (
 	StateStaffWait StaffFSMState = "staff_wait"
 )
 
-var staffFSM = make(map[int64]StaffFSMState)
-var staffData = make(map[int64]string)
+var (
+	staffFSM  = make(map[int64]StaffFSMState)
+	staffData = make(map[int64]string)
+)
 
-func StartStaffRegistration(chatID int64, msg string, bot *tgbotapi.BotAPI, database *sql.DB) {
+func StartStaffRegistration(chatID int64, bot *tgbotapi.BotAPI) {
 	staffFSM[chatID] = StateStaffName
-	bot.Send(tgbotapi.NewMessage(chatID, "Введите ваше ФИО:"))
+	if _, err := bot.Send(tgbotapi.NewMessage(chatID, "Введите ваше ФИО:")); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 }
 
 func HandleStaffFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *sql.DB, role string) {
@@ -28,25 +33,30 @@ func HandleStaffFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *sq
 	if strings.EqualFold(trimmed, "отмена") || strings.EqualFold(trimmed, "/cancel") {
 		delete(staffFSM, chatID)
 		delete(staffData, chatID)
-		bot.Send(tgbotapi.NewMessage(chatID, "🚫 Регистрация отменена. Нажмите /start, чтобы начать заново."))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "🚫 Регистрация отменена. Нажмите /start, чтобы начать заново.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 
 	state := staffFSM[chatID]
 
-	switch state {
-	case StateStaffName:
+	if state == StateStaffName {
 		staffData[chatID] = msg
 		staffFSM[chatID] = StateStaffWait
 
 		id, err := SaveStaffRequest(database, chatID, msg, role)
 		if err != nil {
-			bot.Send(tgbotapi.NewMessage(chatID, "Ошибка при сохранении заявки. Попробуйте позже."))
+			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "Ошибка при сохранении заявки. Попробуйте позже.")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			delete(staffFSM, chatID)
 			delete(staffData, chatID)
 			return
 		}
-		bot.Send(tgbotapi.NewMessage(chatID, "Заявка на регистрацию отправлена администратору. Ожидайте подтверждения."))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "Заявка на регистрацию отправлена администратору. Ожидайте подтверждения.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		handlers.NotifyAdminsAboutNewUser(bot, database, id)
 
 		delete(staffFSM, chatID)

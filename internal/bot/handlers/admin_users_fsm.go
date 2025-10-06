@@ -10,6 +10,7 @@ import (
 
 	"github.com/Spok95/telegram-school-bot/internal/bot/shared/fsmutil"
 	"github.com/Spok95/telegram-school-bot/internal/db"
+	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -57,7 +58,9 @@ func HandleAdminUsersText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.
 			mk := tgbotapi.NewInlineKeyboardMarkup(
 				fsmutil.BackCancelRow("admusr_back_to_menu", "admusr_cancel"))
 			edit.ReplyMarkup = &mk
-			bot.Send(edit)
+			if _, err := bot.Send(edit); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		}
 		text := fmt.Sprintf("Найдено %d пользователей. Выберите:", len(users))
@@ -78,13 +81,17 @@ func HandleAdminUsersText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.
 		mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
 		edit := tgbotapi.NewEditMessageText(chatID, state.MessageID, text)
 		edit.ReplyMarkup = &mk
-		bot.Send(edit)
+		if _, err := bot.Send(edit); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		state.Step = 2
 	case 3:
 		num, let, ok := parseClass(msg.Text)
 		if !ok {
 			edit := tgbotapi.NewEditMessageText(chatID, state.MessageID, "Неверный формат. Пример: 7А, 10Б, 11Г.\nВведите класс.")
-			bot.Send(edit)
+			if _, err := bot.Send(edit); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		}
 		state.ClassNumber, state.ClassLetter = num, let
@@ -99,7 +106,9 @@ func HandleAdminUsersText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.
 		mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
 		edit := tgbotapi.NewEditMessageText(chatID, state.MessageID, question)
 		edit.ReplyMarkup = &mk
-		bot.Send(edit)
+		if _, err := bot.Send(edit); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		state.Step = 4
 		return
 	}
@@ -118,7 +127,9 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 	// Отмена
 	if data == "admusr_cancel" {
 		fsmutil.DisableMarkup(bot, chatID, state.MessageID)
-		bot.Send(tgbotapi.NewEditMessageText(chatID, state.MessageID, "🚫 Отменено."))
+		if _, err := bot.Send(tgbotapi.NewEditMessageText(chatID, state.MessageID, "🚫 Отменено.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		delete(adminUsersStates, chatID)
 		return
 	}
@@ -126,7 +137,9 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 	// выбор пользователя из списка
 	if strings.HasPrefix(data, "admusr_pick_") {
 		var uid int64
-		fmt.Sscanf(data, "admusr_pick_%d", &uid)
+		if _, err := fmt.Sscanf(data, "admusr_pick_%d", &uid); err != nil {
+			return
+		}
 		state.SelectedUserID = uid
 
 		rows := [][]tgbotapi.InlineKeyboardButton{
@@ -153,24 +166,30 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 		mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
 		edit := tgbotapi.NewEditMessageText(chatID, state.MessageID, "Выберите новую роль или измените активность:")
 		edit.ReplyMarkup = &mk
-		bot.Send(edit)
+		if _, err := bot.Send(edit); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 
 	// ── управление активностью пользователя
 	if data == "admusr_deactivate" {
-		bot.Request(tgbotapi.NewCallback(cb.ID, "Ок"))
+		if _, err := bot.Request(tgbotapi.NewCallback(cb.ID, "Ок")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 
 		now := time.Now()
 		if err := db.DeactivateUser(database, state.SelectedUserID, now); err != nil {
 			log.Println("deactivate user error:", err)
-			bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось деактивировать пользователя"))
+			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось деактивировать пользователя")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		}
 		// пересчитываем родителей, если это ученик (по связям; если не ученик — просто не будет строк)
 		rows, err := database.Query(`SELECT parent_id FROM parents_students WHERE student_id = $1`, state.SelectedUserID)
 		if err == nil {
-			defer rows.Close()
+			defer func() { _ = rows.Close() }()
 			for rows.Next() {
 				var pid int64
 				if scanErr := rows.Scan(&pid); scanErr == nil {
@@ -179,24 +198,30 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 			}
 		}
 		// сообщим и перерисуем карточку
-		bot.Send(tgbotapi.NewMessage(chatID, "✅ Пользователь деактивирован"))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "✅ Пользователь деактивирован")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		// триггерим заново отрисовку выбранного
 		cb.Data = fmt.Sprintf("admusr_pick_%d", state.SelectedUserID)
 		HandleAdminUsersCallback(bot, database, cb)
 		return
 	}
 	if data == "admusr_activate" {
-		bot.Request(tgbotapi.NewCallback(cb.ID, "Ок"))
+		if _, err := bot.Request(tgbotapi.NewCallback(cb.ID, "Ок")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 
 		if err := db.ActivateUser(database, state.SelectedUserID); err != nil {
 			log.Println("activate user error:", err)
-			bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось активировать пользователя"))
+			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось активировать пользователя")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		}
 		// пересчитываем родителей, если это ученик
 		rows, err := database.Query(`SELECT parent_id FROM parents_students WHERE student_id = $1`, state.SelectedUserID)
 		if err == nil {
-			defer rows.Close()
+			defer func() { _ = rows.Close() }()
 			for rows.Next() {
 				var pid int64
 				if scanErr := rows.Scan(&pid); scanErr == nil {
@@ -204,7 +229,9 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 				}
 			}
 		}
-		bot.Send(tgbotapi.NewMessage(chatID, "✅ Пользователь активирован"))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "✅ Пользователь активирован")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		cb.Data = fmt.Sprintf("admusr_pick_%d", state.SelectedUserID)
 		HandleAdminUsersCallback(bot, database, cb)
 		return
@@ -219,7 +246,9 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 			mk := tgbotapi.NewInlineKeyboardMarkup(fsmutil.BackCancelRow("admusr_back_to_role", "admusr_cancel"))
 			edit := tgbotapi.NewEditMessageText(chatID, state.MessageID, "Введите класс в формате 7А:")
 			edit.ReplyMarkup = &mk
-			bot.Send(edit)
+			if _, err := bot.Send(edit); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			state.Step = 3
 			return
 		}
@@ -233,7 +262,9 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 		mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
 		edit := tgbotapi.NewEditMessageText(chatID, state.MessageID, fmt.Sprintf("Сменить роль на «%s»?", humanRole(role)))
 		edit.ReplyMarkup = &mk
-		bot.Send(edit)
+		if _, err := bot.Send(edit); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		state.Step = 4
 		return
 	}
@@ -245,7 +276,9 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 		}
 		admin, _ := db.GetUserByTelegramID(database, chatID)
 		if admin == nil || admin.Role == nil || (*admin.Role != "admin") {
-			bot.Send(tgbotapi.NewMessage(chatID, "Нет прав."))
+			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "Нет прав.")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		}
 
@@ -256,14 +289,18 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 			err = db.ChangeRoleWithCleanup(database, state.SelectedUserID, role, admin.ID)
 		}
 		if err != nil {
-			bot.Send(tgbotapi.NewMessage(chatID, "Ошибка при смене роли: "+err.Error()))
+			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "Ошибка при смене роли: "+err.Error())); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		}
 
 		// уведомление пользователю
 		target, _ := db.GetUserByID(database, state.SelectedUserID)
 		txt := fmt.Sprintf("Ваша роль была изменена на «%s». Нажмите /start, чтобы обновить меню.", humanRole(role))
-		bot.Send(tgbotapi.NewMessage(target.TelegramID, txt))
+		if _, err := bot.Send(tgbotapi.NewMessage(target.TelegramID, txt)); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 
 		// ── РЕТРОСПЕКТИВА/АВТО-ДЕАКТИВАЦИЯ РОДИТЕЛЕЙ ─────────────────────────────
 		// Если назначили роль родителя — пересчитать его активность
@@ -276,7 +313,7 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 		if role == "student" {
 			rows, err := database.Query(`SELECT parent_id FROM parents_students WHERE student_id = $1`, state.SelectedUserID)
 			if err == nil {
-				defer rows.Close()
+				defer func() { _ = rows.Close() }()
 				for rows.Next() {
 					var pid int64
 					if scanErr := rows.Scan(&pid); scanErr == nil {
@@ -291,7 +328,9 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 		}
 
 		edit := tgbotapi.NewEditMessageText(chatID, state.MessageID, "✅ Роль обновлена")
-		bot.Send(edit)
+		if _, err := bot.Send(edit); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		delete(adminUsersStates, chatID)
 		return
 	}
@@ -314,7 +353,9 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 		mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
 		edit := tgbotapi.NewEditMessageText(chatID, state.MessageID, "Выберите новую роль:")
 		edit.ReplyMarkup = &mk
-		bot.Send(edit)
+		if _, err := bot.Send(edit); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		state.Step = 2
 		return
 	}
@@ -342,7 +383,9 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 		mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
 		edit := tgbotapi.NewEditMessageText(chatID, state.MessageID, text)
 		edit.ReplyMarkup = &mk
-		bot.Send(edit)
+		if _, err := bot.Send(edit); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		state.Step = 2
 		return
 	}
@@ -352,7 +395,9 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 			"👥 Управление пользователями\nВведите имя или класс (например, 7А) для поиска:")
 		mk := tgbotapi.NewInlineKeyboardMarkup(fsmutil.BackCancelRow("admusr_back_to_menu", "admusr_cancel"))
 		edit.ReplyMarkup = &mk
-		bot.Send(edit)
+		if _, err := bot.Send(edit); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		state.Step = 1
 		return
 	}
@@ -360,7 +405,9 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 	// ← Назад в меню (как Отмена) — доступно с экрана ввода.
 	if data == "admusr_back_to_menu" {
 		fsmutil.DisableMarkup(bot, chatID, state.MessageID)
-		bot.Send(tgbotapi.NewEditMessageText(chatID, state.MessageID, "🚫 Отменено."))
+		if _, err := bot.Send(tgbotapi.NewEditMessageText(chatID, state.MessageID, "🚫 Отменено.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		delete(adminUsersStates, chatID)
 		return
 	}

@@ -12,7 +12,7 @@ func StartRegistration(chatID int64, role string, bot *tgbotapi.BotAPI, database
 	case string(models.Student):
 		StartStudentRegistration(chatID, role, bot, database)
 	case string(models.Teacher), string(models.Administration):
-		StartStaffRegistration(chatID, role, bot, database)
+		StartStaffRegistration(chatID, bot)
 	}
 }
 

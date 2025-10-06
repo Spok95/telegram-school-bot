@@ -17,13 +17,17 @@ import (
 func generateStudentReport(scores []models.ScoreWithUser, collective int64, className string, periodTitle string) (string, error) {
 	f := excelize.NewFile()
 	sheet := "Report"
-	f.SetSheetName("Sheet1", sheet)
+	if err := f.SetSheetName("Sheet1", sheet); err != nil {
+		return "", err
+	}
 
 	// Заголовки
 	headers := []string{"ФИО ученика", "Класс", "Категория", "Баллы", "Комментарий", "Кто добавил", "Дата добавления", "Коллективный рейтинг класса"}
 	for i, h := range headers {
 		cell := fmt.Sprintf("%s1", string(rune('A'+i)))
-		f.SetCellValue(sheet, cell, h)
+		if err := f.SetCellValue(sheet, cell, h); err != nil {
+			return "", err
+		}
 	}
 	// Данные
 	for i, s := range scores {
@@ -47,12 +51,15 @@ func generateStudentReport(scores []models.ScoreWithUser, collective int64, clas
 	}
 
 	// Автосохранение
-	_ = export.ApplyDefaultExcelFormatting(f, sheet)
+	if err := export.ApplyDefaultExcelFormatting(f, sheet); err != nil {
+		return "", err
+	}
 	studentName := ""
 	if len(scores) > 0 {
 		studentName = scores[0].StudentName
 	}
-	filename := export.BuildStudentReportFilename(studentName, className, "", periodTitle, time.Now())
+	ts := time.Now().Format("20060102-1504")
+	filename := export.BuildStudentReportFilename(studentName, className, periodTitle, ts)
 	path := filepath.Join(os.TempDir(), filename)
 	err := f.SaveAs(path)
 	return path, err
@@ -102,12 +109,16 @@ func generateClassReport(scores []models.ScoreWithUser, collective int64, classN
 
 	f := excelize.NewFile()
 	sheet := "ClassReport"
-	f.SetSheetName("Sheet1", sheet)
+	if err := f.SetSheetName("Sheet1", sheet); err != nil {
+		return "", err
+	}
 
 	headers := []string{"ФИО ученика", "Класс", "Суммарный балл", "Вклад в коллективный рейтинг", "Коллективный рейтинг класса"}
 	for i, h := range headers {
 		cell := fmt.Sprintf("%s1", string(rune('A'+i)))
-		f.SetCellValue(sheet, cell, h)
+		if err := f.SetCellValue(sheet, cell, h); err != nil {
+			return "", err
+		}
 	}
 	for i, g := range groups {
 		row := i + 2
@@ -118,8 +129,11 @@ func generateClassReport(scores []models.ScoreWithUser, collective int64, classN
 		_ = f.SetCellValue(sheet, fmt.Sprintf("E%d", row), collective)
 	}
 
-	_ = export.ApplyDefaultExcelFormatting(f, sheet)
-	filename := export.BuildClassReportFilename(className, "", periodTitle, time.Now())
+	if err := export.ApplyDefaultExcelFormatting(f, sheet); err != nil {
+		return "", err
+	}
+	ts := time.Now().Format("20060102-1504")
+	filename := export.BuildClassReportFilename(className, periodTitle, ts)
 	path := filepath.Join(os.TempDir(), filename)
 	err := f.SaveAs(path)
 	return path, err
@@ -158,8 +172,12 @@ func generateSchoolReport(scores []models.ScoreWithUser) (string, error) {
 	sort.Slice(classes, func(i, j int) bool {
 		var numI, numJ int
 		var letI, letJ string
-		fmt.Sscanf(classes[i].Name, "%d%s", &numI, &letI)
-		fmt.Sscanf(classes[j].Name, "%d%s", &numJ, &letJ)
+		if _, err := fmt.Sscanf(classes[i].Name, "%d%s", &numI, &letI); err != nil {
+			return false
+		}
+		if _, err := fmt.Sscanf(classes[j].Name, "%d%s", &numJ, &letJ); err != nil {
+			return false
+		}
 
 		if numI != numJ {
 			return numI < numJ
@@ -173,12 +191,16 @@ func generateSchoolReport(scores []models.ScoreWithUser) (string, error) {
 	// Формируем Excel-отчёт
 	f := excelize.NewFile()
 	sheet := "SchoolReport"
-	f.SetSheetName("Sheet1", sheet)
+	if err := f.SetSheetName("Sheet1", sheet); err != nil {
+		return "", err
+	}
 
 	headers := []string{"Класс", "Коллективный рейтинг"}
 	for i, h := range headers {
 		cell := fmt.Sprintf("%s1", string(rune('A'+i)))
-		f.SetCellValue(sheet, cell, h)
+		if err := f.SetCellValue(sheet, cell, h); err != nil {
+			return "", err
+		}
 	}
 	for i, c := range classes {
 		row := i + 2
@@ -186,7 +208,9 @@ func generateSchoolReport(scores []models.ScoreWithUser) (string, error) {
 		_ = f.SetCellValue(sheet, fmt.Sprintf("B%d", row), c.Rating)
 	}
 
-	_ = export.ApplyDefaultExcelFormatting(f, sheet)
+	if err := export.ApplyDefaultExcelFormatting(f, sheet); err != nil {
+		return "", err
+	}
 	filename := fmt.Sprintf("school_report_%d.xlsx", time.Now().Unix())
 	path := filepath.Join(os.TempDir(), filename)
 	err := f.SaveAs(path)

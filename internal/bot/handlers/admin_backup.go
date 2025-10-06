@@ -15,6 +15,7 @@ import (
 
 	"github.com/Spok95/telegram-school-bot/internal/bot/handlers/migrations"
 	"github.com/Spok95/telegram-school-bot/internal/db"
+	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -22,36 +23,46 @@ import (
 func HandleAdminBackup(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
 	user, err := db.GetUserByTelegramID(database, chatID)
 	if err != nil || user == nil || user.Role == nil || *user.Role != "admin" {
-		bot.Send(tgbotapi.NewMessage(chatID, "🚫 Только для администратора"))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "🚫 Только для администратора")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
-	bot.Send(tgbotapi.NewMessage(chatID, "⌛ Делаю бэкап базы…"))
+	if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⌛ Делаю бэкап базы…")); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 
 	path, size, err := dumpDatabaseToZip(database)
 	if err != nil {
 		log.Println("backup error:", err)
-		bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Не удалось сделать бэкап: %v", err)))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Не удалось сделать бэкап: %v", err))); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
-	defer os.Remove(path)
+	defer func() { _ = os.Remove(path) }()
 
 	// ~50 МБ лимит Telegram-документов. Берём запас.
 	if size > 48*1024*1024 {
-		bot.Send(tgbotapi.NewMessage(chatID,
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID,
 			fmt.Sprintf("⚠️ Бэкап получился %d МБ — слишком большой для Telegram. "+
-				"Сделайте full dump: docker compose exec -T postgres pg_dump -U school -d school | gzip > backup.sql.gz", size/1024/1024)))
+				"Сделайте full dump: docker compose exec -T postgres pg_dump -U school -d school | gzip > backup.sql.gz", size/1024/1024))); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 
 	f, _ := os.Open(path)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	// В текущей версии go-telegram-bot-api у FileReader нет поля Size
 	doc := tgbotapi.NewDocument(chatID, tgbotapi.FileReader{
 		Reader: f,
 		Name:   filepath.Base(path),
 	})
 	doc.Caption = "💾 Резервная копия базы (CSV + миграции)"
-	bot.Send(doc)
+	if _, err := bot.Send(doc); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 }
 
 // dumpDatabaseToZip: выгрузка всех таблиц public-схемы в CSV + вложение миграций и metadata.json
@@ -64,7 +75,7 @@ func dumpDatabaseToZip(database *sql.DB) (string, int64, error) {
 	if err != nil {
 		return "", 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tables []string
 	for rows.Next() {
@@ -111,7 +122,7 @@ func dumpDatabaseToZip(database *sql.DB) (string, int64, error) {
 
 	filename := fmt.Sprintf("backup_%s.zip", time.Now().Format("20060102_150405"))
 	path := filepath.Join(os.TempDir(), filename)
-	if err := os.WriteFile(path, buf.Bytes(), 0644); err != nil {
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
 		return "", 0, err
 	}
 	return path, int64(buf.Len()), nil
@@ -127,7 +138,7 @@ func writeTableCSV(database *sql.DB, zw *zip.Writer, table string) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	cols, err := rows.Columns()
 	if err != nil {

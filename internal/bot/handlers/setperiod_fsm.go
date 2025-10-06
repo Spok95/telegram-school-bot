@@ -7,6 +7,7 @@ import (
 
 	"github.com/Spok95/telegram-school-bot/internal/bot/shared/fsmutil"
 	"github.com/Spok95/telegram-school-bot/internal/db"
+	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -46,7 +47,7 @@ func StartSetPeriodFSM(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 	perReplace(bot, chatID, state, "Введите название нового периода (например: 1 триместр 2025):", mk)
 }
 
-func HandleSetPeriodInput(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+func HandleSetPeriodInput(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
 	state, ok := periodStates[chatID]
 	if !ok {
@@ -183,7 +184,9 @@ func parseDate(input string) (time.Time, error) {
 func perReplace(bot *tgbotapi.BotAPI, chatID int64, state *SetPeriodState, text string, mk tgbotapi.InlineKeyboardMarkup) {
 	// удалить предыдущее бот-сообщение (если было)
 	if state.MessageID != 0 {
-		bot.Request(tgbotapi.NewDeleteMessage(chatID, state.MessageID))
+		if _, err := bot.Request(tgbotapi.NewDeleteMessage(chatID, state.MessageID)); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 	}
 	msg := tgbotapi.NewMessage(chatID, text)
 	if len(mk.InlineKeyboard) > 0 {
@@ -195,7 +198,9 @@ func perReplace(bot *tgbotapi.BotAPI, chatID int64, state *SetPeriodState, text 
 
 // Ответить на нажатие кнопки (убирает крутилку у пользователя)
 func perAnswer(bot *tgbotapi.BotAPI, cb *tgbotapi.CallbackQuery) {
-	_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, ""))
+	if _, err := bot.Request(tgbotapi.NewCallback(cb.ID, "")); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 }
 
 // Отправить новое сообщение без удаления предыдущего
@@ -215,5 +220,7 @@ func perClearMarkup(bot *tgbotapi.BotAPI, chatID int64, st *SetPeriodState) {
 	}
 	empty := tgbotapi.NewEditMessageReplyMarkup(chatID, st.MessageID,
 		tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{}})
-	_, _ = bot.Request(empty)
+	if _, err := bot.Request(empty); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 }

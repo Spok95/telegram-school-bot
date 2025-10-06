@@ -10,6 +10,7 @@ import (
 
 	"github.com/Spok95/telegram-school-bot/internal/bot/shared/fsmutil"
 	"github.com/Spok95/telegram-school-bot/internal/db"
+	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -19,18 +20,24 @@ func ShowPendingScores(bot *tgbotapi.BotAPI, database *sql.DB, adminID int64) {
 	admin, err := db.GetUserByID(database, adminID)
 	if err == nil {
 		if !fsmutil.MustBeActiveForOps(&admin) {
-			bot.Send(tgbotapi.NewMessage(adminID, "🚫 Доступ временно закрыт. Обратитесь к администратору."))
+			if _, err := bot.Send(tgbotapi.NewMessage(adminID, "🚫 Доступ временно закрыт. Обратитесь к администратору.")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		}
 	}
 	scores, err := db.GetPendingScores(database)
 	if err != nil {
 		log.Println("ошибка при получении заявок на баллы:", err)
-		bot.Send(tgbotapi.NewMessage(adminID, "Ошибка при получении заявок на баллы."))
+		if _, err := bot.Send(tgbotapi.NewMessage(adminID, "Ошибка при получении заявок на баллы.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 	if len(scores) == 0 {
-		bot.Send(tgbotapi.NewMessage(adminID, "✅ Нет ожидающих подтверждения заявок."))
+		if _, err := bot.Send(tgbotapi.NewMessage(adminID, "✅ Нет ожидающих подтверждения заявок.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 
@@ -56,7 +63,9 @@ func ShowPendingScores(bot *tgbotapi.BotAPI, database *sql.DB, adminID int64) {
 
 		msg := tgbotapi.NewMessage(adminID, text)
 		msg.ReplyMarkup = markup
-		bot.Send(msg)
+		if _, err := bot.Send(msg); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 	}
 	delete(notifiedAdmins, adminID)
 }
@@ -89,12 +98,13 @@ func HandleScoreApprovalCallback(callback *tgbotapi.CallbackQuery, bot *tgbotapi
 	var resultText string
 	// Проверяем текущий статус
 	currentStatus, err := db.GetScoreStatusByID(database, scoreID)
-	if err != nil {
+	switch {
+	case err != nil:
 		log.Println("ошибка получения статуса заявки:", err)
 		resultText = "❌ Ошибка при обработке заявки."
-	} else if currentStatus != "pending" {
+	case currentStatus != "pending":
 		resultText = "⏳ Заявка уже обработана ранее."
-	} else if action == "approve" {
+	case action == "approve":
 		err = db.ApproveScore(database, scoreID, user.ID, time.Now())
 		if err == nil {
 			resultText = fmt.Sprintf("✅ Заявка подтверждена.\nПодтвердил: @%s", user.Name)
@@ -102,7 +112,7 @@ func HandleScoreApprovalCallback(callback *tgbotapi.CallbackQuery, bot *tgbotapi
 			log.Println("ошибка подтверждения заявки:", err)
 			resultText = "❌ Ошибка при подтверждении заявки."
 		}
-	} else {
+	default:
 		err = db.RejectScore(database, scoreID, user.ID, time.Now())
 		if err == nil {
 			resultText = fmt.Sprintf("❌ Заявка отклонена.\nОтклонил: @%s", user.Name)
@@ -115,7 +125,11 @@ func HandleScoreApprovalCallback(callback *tgbotapi.CallbackQuery, bot *tgbotapi
 	edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, messageID, resultText, tgbotapi.InlineKeyboardMarkup{
 		InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{},
 	})
-	bot.Send(edit)
+	if _, err := bot.Send(edit); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 
-	bot.Request(tgbotapi.NewCallback(callback.ID, "Обработано"))
+	if _, err := bot.Request(tgbotapi.NewCallback(callback.ID, "Обработано")); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 }

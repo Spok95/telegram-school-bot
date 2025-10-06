@@ -10,6 +10,7 @@ import (
 
 	"github.com/Spok95/telegram-school-bot/internal/bot/shared/fsmutil"
 	"github.com/Spok95/telegram-school-bot/internal/db"
+	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -45,7 +46,9 @@ func StartAuctionFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Messa
 	chatID := msg.Chat.ID
 	u, _ := db.GetUserByTelegramID(database, chatID)
 	if u == nil || !fsmutil.MustBeActiveForOps(u) {
-		bot.Send(tgbotapi.NewMessage(chatID, "🚫 Доступ временно закрыт. Обратитесь к администратору."))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "🚫 Доступ временно закрыт. Обратитесь к администратору.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 	auctionStates[chatID] = &AuctionFSMState{Step: AuctionStepMode}
@@ -62,7 +65,9 @@ func StartAuctionFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Messa
 	)
 	msgOut := tgbotapi.NewMessage(chatID, text)
 	msgOut.ReplyMarkup = markup
-	bot.Send(msgOut)
+	if _, err := bot.Send(msgOut); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 }
 
 // ——— callbacks ———
@@ -81,7 +86,9 @@ func HandleAuctionCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 		delete(auctionStates, chatID)
 		fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
 		edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "🚫 Аукцион отменён.")
-		bot.Send(edit)
+		if _, err := bot.Send(edit); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 
@@ -101,7 +108,9 @@ func HandleAuctionCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 				),
 			)
 			edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, text, markup)
-			bot.Send(edit)
+			if _, err := bot.Send(edit); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		case AuctionStepClassLetter: // назад к номеру
 			state.Step = AuctionStepClassNumber
@@ -125,7 +134,9 @@ func HandleAuctionCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 			delete(auctionStates, chatID)
 			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
 			edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "🚫 Аукцион отменён.")
-			bot.Send(edit)
+			if _, err := bot.Send(edit); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		}
 	}
@@ -153,7 +164,9 @@ func HandleAuctionCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 			students, _ := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
 			if len(students) == 0 { // стоп, идти дальше не к кому
 				edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "❌ В этом классе нет учеников.")
-				bot.Send(edit)
+				if _, err := bot.Send(edit); err != nil {
+					metrics.HandlerErrors.Inc()
+				}
 				delete(auctionStates, chatID)
 				return
 			}
@@ -183,7 +196,9 @@ func HandleAuctionCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 
 	case data == "auction_students_done":
 		if len(state.SelectedStudentIDs) == 0 {
-			bot.Send(tgbotapi.NewMessage(chatID, "❌ Выберите хотя бы одного ученика."))
+			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Выберите хотя бы одного ученика.")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		}
 		state.Step = AuctionStepPoints
@@ -203,19 +218,25 @@ func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 	// текстовая отмена
 	if fsmutil.IsCancelText(msg.Text) {
 		delete(auctionStates, chatID)
-		bot.Send(tgbotapi.NewMessage(chatID, "🚫 Аукцион отменён."))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "🚫 Аукцион отменён.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 
 	points, err := strconv.Atoi(strings.TrimSpace(msg.Text))
 	if err != nil || points <= 0 {
-		bot.Send(tgbotapi.NewMessage(chatID, "❌ Введите корректное положительное число."))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Введите корректное положительное число.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 
 	key := fmt.Sprintf("auction:%d", chatID)
 	if !fsmutil.SetPending(chatID, key) {
-		bot.Send(tgbotapi.NewMessage(chatID, "⏳ Запрос уже обрабатывается…"))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⏳ Запрос уже обрабатывается…")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 	defer fsmutil.ClearPending(chatID, key)
@@ -249,7 +270,9 @@ func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 		if len(inactive) > 0 {
 			text += "\n\n⚠️ Пропущены (неактивны): " + strings.Join(inactive, ", ")
 		}
-		bot.Send(tgbotapi.NewMessage(chatID, text))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, text)); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		delete(auctionStates, chatID)
 		return
 	}
@@ -258,7 +281,9 @@ func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 		if len(inactive) > 0 {
 			text += "\n⚠️ Пропущены (неактивны): " + strings.Join(inactive, ", ")
 		}
-		bot.Send(tgbotapi.NewMessage(chatID, text))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, text)); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		delete(auctionStates, chatID)
 		return
 	}
@@ -270,7 +295,9 @@ func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 	_ = db.SetActivePeriod(database)
 	period, err := db.GetActivePeriod(database)
 	if err != nil || period == nil {
-		bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось определить активный период."))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось определить активный период.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 
@@ -294,15 +321,16 @@ func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 		}
 		_ = db.AddScore(database, score)
 
-		student, _ := db.GetUserByID(database, studentID)
-		NotifyAdminsAboutScoreRequest(bot, database, score, student.Name)
+		NotifyAdminsAboutScoreRequest(bot, database, score)
 	}
 
 	msgOut := "✅ Заявка на аукцион создана и ожидает подтверждения."
 	if len(inactive) > 0 {
 		msgOut += "\n⚠️ Пропущены (неактивны): " + strings.Join(inactive, ", ")
 	}
-	bot.Send(tgbotapi.NewMessage(chatID, msgOut))
+	if _, err := bot.Send(tgbotapi.NewMessage(chatID, msgOut)); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 	delete(auctionStates, chatID)
 }
 
@@ -317,7 +345,9 @@ func promptClassNumber(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, prefix 
 	}
 	rows = append(rows, auctionBackCancelRow())
 	edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "🔢 Выберите номер класса:", tgbotapi.NewInlineKeyboardMarkup(rows...))
-	bot.Send(edit)
+	if _, err := bot.Send(edit); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 }
 
 func promptClassLetter(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, prefix string) {
@@ -329,7 +359,9 @@ func promptClassLetter(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, prefix 
 	}
 	rows := [][]tgbotapi.InlineKeyboardButton{row, auctionBackCancelRow()}
 	edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "🔠 Выберите букву класса:", tgbotapi.NewInlineKeyboardMarkup(rows...))
-	bot.Send(edit)
+	if _, err := bot.Send(edit); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 }
 
 func promptStudentSelect(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, database *sql.DB) {
@@ -356,7 +388,9 @@ func promptStudentSelect(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, datab
 	rows = append(rows, auctionBackCancelRow())
 
 	edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "👥 Выберите учеников для аукциона:", tgbotapi.NewInlineKeyboardMarkup(rows...))
-	bot.Send(edit)
+	if _, err := bot.Send(edit); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 }
 
 func promptPointsInput(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI) {
@@ -368,7 +402,9 @@ func promptPointsInput(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI) {
 		"✏️ Введите количество баллов для списания:",
 		tgbotapi.NewInlineKeyboardMarkup(rows...),
 	)
-	bot.Send(edit)
+	if _, err := bot.Send(edit); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 }
 
 // ——— accessors ———

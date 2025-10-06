@@ -10,6 +10,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/bot/handlers"
 	"github.com/Spok95/telegram-school-bot/internal/bot/shared/fsmutil"
 	"github.com/Spok95/telegram-school-bot/internal/db"
+	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -22,8 +23,10 @@ const (
 	StateParentWaiting     ParentFSMState = "parent_waiting"
 )
 
-var parentFSM = make(map[int64]ParentFSMState)
-var parentData = make(map[int64]*ParentRegisterData)
+var (
+	parentFSM  = make(map[int64]ParentFSMState)
+	parentData = make(map[int64]*ParentRegisterData)
+)
 
 type ParentRegisterData struct {
 	StudentName string
@@ -64,14 +67,18 @@ func parentEditMenu(bot *tgbotapi.BotAPI, chatID int64, messageID int, text stri
 	cfg := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
 	cfg.ReplyMarkup = &mk
-	bot.Send(cfg)
+	if _, err := bot.Send(cfg); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 }
 
 func StartParentRegistration(chatID int64, user *tgbotapi.User, bot *tgbotapi.BotAPI, database *sql.DB) {
 	parentFSM[chatID] = StateParentStudentName
 	parentName := strings.TrimSpace(fmt.Sprintf("%s %s", user.FirstName, user.LastName))
 	parentData[chatID] = &ParentRegisterData{ParentName: parentName}
-	bot.Send(tgbotapi.NewMessage(chatID, "Введите ФИО ребёнка, которого вы представляете:"))
+	if _, err := bot.Send(tgbotapi.NewMessage(chatID, "Введите ФИО ребёнка, которого вы представляете:")); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 }
 
 func HandleParentFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *sql.DB) {
@@ -79,14 +86,15 @@ func HandleParentFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *s
 	if strings.EqualFold(trimmed, "отмена") || strings.EqualFold(trimmed, "/cancel") {
 		delete(parentFSM, chatID)
 		delete(parentData, chatID)
-		bot.Send(tgbotapi.NewMessage(chatID, "🚫 Регистрация отменена. Нажмите /start, чтобы начать заново."))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "🚫 Регистрация отменена. Нажмите /start, чтобы начать заново.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 
 	state := parentFSM[chatID]
 
-	switch state {
-	case StateParentStudentName:
+	if state == StateParentStudentName {
 		if parentData[chatID] == nil {
 			parentData[chatID] = &ParentRegisterData{}
 		}
@@ -95,7 +103,9 @@ func HandleParentFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *s
 		parentFSM[chatID] = StateParentClassNumber
 		msgOut := tgbotapi.NewMessage(chatID, "Выберите номер класса ребёнка:")
 		msgOut.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(parentClassNumberRows()...)
-		bot.Send(msgOut)
+		if _, err := bot.Send(msgOut); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 	}
 }
 
@@ -108,22 +118,30 @@ func HandleParentCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 		delete(parentFSM, chatID)
 		delete(parentData, chatID)
 		fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
-		bot.Send(tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "🚫 Регистрация отменена. Нажмите /start, чтобы начать заново."))
+		if _, err := bot.Send(tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "🚫 Регистрация отменена. Нажмите /start, чтобы начать заново.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 	if data == "parent_back" {
 		switch state {
 		case StateParentClassNumber:
 			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
-			bot.Send(tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "Введите ФИО ребёнка:"))
+			if _, err := bot.Send(tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "Введите ФИО ребёнка:")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			parentFSM[chatID] = StateParentStudentName
 		case StateParentClassLetter:
 			parentFSM[chatID] = StateParentClassNumber
 			parentEditMenu(bot, chatID, cq.Message.MessageID, "Выберите номер класса ребёнка:", parentClassNumberRows())
 		case StateParentWaiting:
-			bot.Request(tgbotapi.NewCallback(cq.ID, "Заявка уже отправлена, ожидайте подтверждения."))
+			if _, err := bot.Request(tgbotapi.NewCallback(cq.ID, "Заявка уже отправлена, ожидайте подтверждения.")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 		default:
-			bot.Request(tgbotapi.NewCallback(cq.ID, "Действие недоступно на этом шаге."))
+			if _, err := bot.Request(tgbotapi.NewCallback(cq.ID, "Действие недоступно на этом шаге.")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 		}
 		return
 	}
@@ -146,10 +164,11 @@ func HandleParentCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 		parentFSM[chatID] = StateParentWaiting
 
 		studentID, err := FindStudentID(database, parentData[chatID])
-
 		if err != nil {
 			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
-			bot.Send(tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "❌ Ученик не найден. Введите ФИО заново:"))
+			if _, err := bot.Send(tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "❌ Ученик не найден. Введите ФИО заново:")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			parentFSM[chatID] = StateParentStudentName
 			return
 		}
@@ -157,13 +176,17 @@ func HandleParentCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 		parentID, err := SaveParentRequest(database, chatID, studentID, parentData[chatID].ParentName)
 		if err != nil {
 			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
-			bot.Send(tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "Ошибка при сохранении. Попробуйте позже."))
+			if _, err := bot.Send(tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "Ошибка при сохранении. Попробуйте позже.")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			delete(parentFSM, chatID)
 			delete(parentData, chatID)
 			return
 		}
 		fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
-		bot.Send(tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "Заявка на регистрацию родителя отправлена администратору. Ожидайте подтверждения."))
+		if _, err := bot.Send(tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "Заявка на регистрацию родителя отправлена администратору. Ожидайте подтверждения.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		handlers.NotifyAdminsAboutNewUser(bot, database, parentID)
 		delete(parentFSM, chatID)
 		delete(parentData, chatID)
@@ -204,11 +227,11 @@ func SaveParentRequest(database *sql.DB, parentTelegramID int64, studentID int, 
 		`, parentTelegramID, parentName).Scan(&parentID)
 		if err != nil {
 			log.Printf("[PARENT_ERROR] upsert parent failed: %v", err)
-			tx.Rollback()
+			_ = tx.Rollback()
 			return 0, err
 		}
 	} else if err != nil {
-		tx.Rollback()
+		_ = tx.Rollback()
 		return 0, err
 	}
 
@@ -216,7 +239,7 @@ func SaveParentRequest(database *sql.DB, parentTelegramID int64, studentID int, 
 	_, err = tx.Exec(`INSERT INTO parents_students (parent_id, student_id) VALUES ($1, $2)`, parentID, studentID)
 	if err != nil {
 		log.Printf("[PARENT_ERROR] failed to insert into parents_students: %v", err)
-		tx.Rollback()
+		_ = tx.Rollback()
 		return 0, err
 	}
 	err = tx.Commit()
