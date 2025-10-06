@@ -64,7 +64,7 @@ func main() {
 	if err := goose.SetDialect("postgres"); err != nil {
 		log.Fatalf("❌ Goose dialect error: %v", err)
 	}
-	if err := goose.Up(database, "migrations"); err != nil {
+	if err := goose.Up(database, "."); err != nil {
 		log.Fatalf("❌ Ошибка миграций: %v", err)
 	}
 
