@@ -57,15 +57,15 @@ func main() {
 	if err != nil {
 		lg.Sugar.Fatalw("db open", "err", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	// Включаем встроенные миграции (из embed.FS)
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("postgres"); err != nil {
-		log.Fatalf("❌ Goose dialect error: %v", err)
+		lg.Sugar.Fatalw("❌ goose dialect", "err", err)
 	}
 	if err := goose.Up(database, "."); err != nil {
-		log.Fatalf("❌ Ошибка миграций: %v", err)
+		lg.Sugar.Fatalw("❌ Ошибка миграций: %v", "err", err)
 	}
 
 	err = db.SetActivePeriod(database)

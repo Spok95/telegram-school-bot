@@ -16,34 +16,7 @@ func GetLevelByID(database *sql.DB, levelID int) (*models.ScoreLevel, error) {
 	return &level, nil
 }
 
-// Получение всех категорий
-func GetAllCategories(database *sql.DB, role string) ([]models.Category, error) {
-	var rows *sql.Rows
-	var err error
-
-	if role == "admin" || role == "administration" {
-		rows, err = database.Query("SELECT id, name, label FROM categories ORDER BY id")
-	} else {
-		rows, err = database.Query("SELECT id, name, label FROM categories WHERE name != 'Аукцион' ORDER BY id")
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var categories []models.Category
-	for rows.Next() {
-		var c models.Category
-		if err := rows.Scan(&c.ID, &c.Name, &c.Label); err != nil {
-			return nil, err
-		}
-		categories = append(categories, c)
-	}
-	return categories, nil
-}
-
-// Категории
-// список (includeInactive=true — вернём и скрытые)
+// GetCategories список (includeInactive=true — вернём и скрытые)
 func GetCategories(database *sql.DB, includeInactive bool) ([]models.Category, error) {
 	query := "SELECT id, name, label, is_active FROM categories"
 	if !includeInactive {
@@ -55,7 +28,7 @@ func GetCategories(database *sql.DB, includeInactive bool) ([]models.Category, e
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []models.Category
 	for rows.Next() {
@@ -69,7 +42,7 @@ func GetCategories(database *sql.DB, includeInactive bool) ([]models.Category, e
 	return out, nil
 }
 
-// по id
+// GetCategoryByID по id
 func GetCategoryByID(database *sql.DB, id int64) (*models.Category, error) {
 	var c models.Category
 	err := database.QueryRow(
@@ -82,7 +55,7 @@ func GetCategoryByID(database *sql.DB, id int64) (*models.Category, error) {
 	return &c, nil
 }
 
-// создать (name, label) — label уже есть в схеме
+// CreateCategory создать (name, label) — label уже есть в схеме
 func CreateCategory(database *sql.DB, name, label string) (int64, error) {
 	var id int64
 	err := database.
@@ -96,7 +69,7 @@ func CreateCategory(database *sql.DB, name, label string) (int64, error) {
 	return id, nil
 }
 
-// переименовать (меняем name; при желании добавь и UpdateCategoryLabel)
+// RenameCategory переименовать (меняем name; при желании добавь и UpdateCategoryLabel)
 func RenameCategory(database *sql.DB, id int64, name string) error {
 	res, err := database.Exec(
 		"UPDATE categories SET name = $1 WHERE id = $2",
@@ -112,7 +85,7 @@ func RenameCategory(database *sql.DB, id int64, name string) error {
 	return nil
 }
 
-// включить/выключить (is_active)
+// SetCategoryActive включить/выключить (is_active)
 func SetCategoryActive(database *sql.DB, id int64, active bool) error {
 	res, err := database.Exec(
 		"UPDATE categories SET is_active = $1 WHERE id = $2",
@@ -128,26 +101,7 @@ func SetCategoryActive(database *sql.DB, id int64, active bool) error {
 	return nil
 }
 
-func GetLevelsByCategoryID(database *sql.DB, categoryID int) ([]models.ScoreLevel, error) {
-	rows, err := database.Query("SELECT id, value, label, category_id FROM score_levels WHERE category_id = $1", categoryID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var levels []models.ScoreLevel
-	for rows.Next() {
-		var level models.ScoreLevel
-		if err := rows.Scan(&level.ID, &level.Value, &level.Label, &level.CategoryID); err != nil {
-			return nil, err
-		}
-		levels = append(levels, level)
-	}
-	return levels, nil
-}
-
-// Уровни
-// список уровней категории (includeInactive как выше)
+// GetLevelsByCategoryIDFull список уровней категории (includeInactive как выше)
 func GetLevelsByCategoryIDFull(database *sql.DB, catID int64, includeInactive bool) ([]models.ScoreLevel, error) {
 	query := "SELECT id, value, label, category_id, is_active FROM score_levels WHERE category_id = $1"
 	if !includeInactive {
@@ -159,7 +113,7 @@ func GetLevelsByCategoryIDFull(database *sql.DB, catID int64, includeInactive bo
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []models.ScoreLevel
 	for rows.Next() {

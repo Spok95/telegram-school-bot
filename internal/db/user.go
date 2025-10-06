@@ -40,7 +40,7 @@ func GetStudentsByClass(database *sql.DB, number int64, letter string) ([]models
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var students []models.User
 	for rows.Next() {
@@ -64,7 +64,7 @@ func GetChildrenByParentID(database *sql.DB, parentID int64) ([]models.User, err
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var students []models.User
 	for rows.Next() {
@@ -112,35 +112,6 @@ func ClassIDByNumberAndLetter(database *sql.DB, number int64, letter string) (in
 	return classID, nil
 }
 
-// UpdateUserRoleWithAudit updates user's role and writes audit record to role_changes.
-func UpdateUserRoleWithAudit(database *sql.DB, targetUserID int64, newRole string, changedBy int64) error {
-	tx, err := database.Begin()
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
-		}
-	}()
-
-	var oldRole string
-	if err = tx.QueryRow(`SELECT role FROM users WHERE id = $1`, targetUserID).Scan(&oldRole); err != nil {
-		return err
-	}
-
-	if _, err = tx.Exec(`UPDATE users SET role = $1 WHERE id = $2`, newRole, targetUserID); err != nil {
-		return err
-	}
-
-	if _, err = tx.Exec(`INSERT INTO role_changes (user_id, old_role, new_role, changed_by, changed_at)
-	                     VALUES ($1, $2, $3, $4, NOW())`, targetUserID, oldRole, newRole, changedBy); err != nil {
-		return err
-	}
-
-	return tx.Commit()
-}
-
 // FindUsersByQuery returns users matching name substring or class like "7А".
 func FindUsersByQuery(database *sql.DB, q string, limit int) ([]models.User, error) {
 	if limit <= 0 {
@@ -177,7 +148,7 @@ LIMIT $5`
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var res []models.User
 	for rows.Next() {
@@ -247,7 +218,7 @@ func ChangeRoleWithCleanup(database *sql.DB, targetUserID int64, newRole string,
 	}
 
 	// 2) Был STUDENT → стал НЕ-student: рвём связи «родитель–ребёнок» и заявки; пересчитываем активность родителей
-	if oldRole == "student" && newRole != "student" {
+	if oldRole == "student" && newRole != string(models.Student) {
 		// Собираем всех родителей до удаления, чтобы потом пересчитать их активность
 		parentIDs := []int64{}
 		rows, err := tx.Query(`SELECT DISTINCT parent_id FROM parents_students WHERE student_id=$1`, targetUserID)
@@ -257,12 +228,12 @@ func ChangeRoleWithCleanup(database *sql.DB, targetUserID int64, newRole string,
 		for rows.Next() {
 			var pid int64
 			if err := rows.Scan(&pid); err != nil {
-				rows.Close()
+				_ = rows.Close()
 				return err
 			}
 			parentIDs = append(parentIDs, pid)
 		}
-		rows.Close()
+		_ = rows.Close()
 
 		if _, err = tx.Exec(`DELETE FROM parents_students WHERE student_id=$1`, targetUserID); err != nil {
 			return err
@@ -434,7 +405,7 @@ func GetAdminTelegramIDs(database *sql.DB) ([]int64, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var ids []int64
 	for rows.Next() {
 		var id int64

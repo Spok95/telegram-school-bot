@@ -77,7 +77,7 @@ func ListPeriods(database *sql.DB) ([]models.Period, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []models.Period
 	for rows.Next() {

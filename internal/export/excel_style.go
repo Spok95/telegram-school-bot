@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/xuri/excelize/v2"
 )
@@ -71,8 +70,8 @@ func ApplyDefaultExcelFormatting(f *excelize.File, sheet string) error {
 	return nil
 }
 
-// Build human-readable filenames.
-func BuildStudentReportFilename(studentName, className, schoolName string, periodTitle string, t time.Time) string {
+// BuildStudentReportFilename Build human-readable filenames.
+func BuildStudentReportFilename(studentName, className, schoolName string, periodTitle string) string {
 	base := fmt.Sprintf("Отчёт по ученику — %s — %s — %s — %s.xlsx",
 		cleanName(studentName),
 		cleanName(className),
@@ -82,7 +81,7 @@ func BuildStudentReportFilename(studentName, className, schoolName string, perio
 	return sanitizeFileName(base)
 }
 
-func BuildClassReportFilename(className, schoolName string, periodTitle string, t time.Time) string {
+func BuildClassReportFilename(className, schoolName string, periodTitle string) string {
 	base := fmt.Sprintf("Отчёт по классу — %s — %s — %s.xlsx",
 		cleanName(className),
 		cleanName(schoolName),

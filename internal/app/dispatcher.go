@@ -10,6 +10,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/bot/handlers"
 	"github.com/Spok95/telegram-school-bot/internal/bot/menu"
 	"github.com/Spok95/telegram-school-bot/internal/db"
+	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -43,14 +44,18 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 				),
 			)
 			msg.ReplyMarkup = roles
-			bot.Send(msg)
+			if _, err := bot.Send(msg); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		}
 		// 🔒 Пользователь зарегистрирован, но неактивен — доступ закрыт, клавиатуру убираем
 		if !user.IsActive {
 			rm := tgbotapi.NewMessage(chatID, "🚫 Доступ к боту временно закрыт. Обратитесь к администратору.")
 			rm.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
-			bot.Send(rm)
+			if _, err := bot.Send(rm); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		}
 
@@ -59,7 +64,9 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		keyboard := menu.GetRoleMenu(string(*user.Role))
 		msg := tgbotapi.NewMessage(chatID, "Добро пожаловать! Выберите действие:")
 		msg.ReplyMarkup = keyboard
-		bot.Send(msg)
+		if _, err := bot.Send(msg); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 
@@ -77,7 +84,9 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 			return
 		}
 
-		bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Вы не зарегистрированы. Пожалуйста, нажмите /start для начала."))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Вы не зарегистрированы. Пожалуйста, нажмите /start для начала.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 	// 🔒 Глобальная защёлка: неактивным — ни одну команду
@@ -85,11 +94,13 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		rm := tgbotapi.NewMessage(chatID, "🚫 Доступ к боту временно закрыт. Обратитесь к администратору.")
 		// на случай, если у пользователя осталась старая клавиатура — уберём
 		rm.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
-		bot.Send(rm)
+		if _, err := bot.Send(rm); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 	if handlers.GetAddScoreState(chatID) != nil {
-		handlers.HandleAddScoreText(bot, database, msg)
+		handlers.HandleAddScoreText(bot, msg)
 		return
 	}
 	if handlers.GetRemoveScoreState(chatID) != nil {
@@ -97,7 +108,7 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		return
 	}
 	if handlers.GetSetPeriodState(chatID) != nil {
-		handlers.HandleSetPeriodInput(bot, database, msg)
+		handlers.HandleSetPeriodInput(bot, msg)
 		return
 	}
 	if handlers.GetAuctionState(chatID) != nil {
@@ -144,7 +155,9 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 			case models.Parent:
 				handlers.StartParentHistoryExcel(bot, database, msg)
 			default:
-				bot.Send(tgbotapi.NewMessage(chatID, "Недоступно для вашей роли."))
+				if _, err := bot.Send(tgbotapi.NewMessage(chatID, "Недоступно для вашей роли.")); err != nil {
+					metrics.HandlerErrors.Inc()
+				}
 			}
 		}
 	case "➕ Добавить ребёнка":
@@ -197,11 +210,13 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 	default:
 		role := getUserFSMRole(chatID)
 		if _, ok := handlers.PeriodsFSMActive(chatID); ok && user.Role != nil && (*user.Role == "admin") {
-			handlers.HandleAdminPeriodsText(bot, database, msg)
+			handlers.HandleAdminPeriodsText(bot, msg)
 			return
 		}
 		if role == "" {
-			bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Неизвестная команда. Используйте /start"))
+			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Неизвестная команда. Используйте /start")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		}
 		auth.HandleFSMMessage(chatID, text, role, bot, database)
@@ -209,7 +224,9 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 }
 
 func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
-	_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, ""))
+	if _, err := bot.Request(tgbotapi.NewCallback(cb.ID, "")); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 	data := cb.Data
 	chatID := cb.Message.Chat.ID
 
@@ -221,7 +238,9 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 			msg := tgbotapi.NewMessage(chatID, "🚫 Доступ к боту временно закрыт. Обратитесь к администратору.")
 			// Уберём возможную «залипшую» клавиатуру
 			msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
-			bot.Send(msg)
+			if _, err := bot.Send(msg); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		}
 	}
@@ -243,7 +262,7 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		return
 	}
 	if strings.HasPrefix(data, "link_confirm_") || strings.HasPrefix(data, "link_reject_") {
-		handlers.HandleParentLinkApprovalCallback(cb, bot, database, chatID)
+		handlers.HandleParentLinkApprovalCallback(cb, bot, database)
 		return
 	}
 
@@ -330,7 +349,9 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		return
 	}
 	if data == "add_another_child_yes" {
-		bot.Send(tgbotapi.NewMessage(chatID, "Введите ФИО следующего ребёнка:"))
+		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "Введите ФИО следующего ребёнка:")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		msg := &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: chatID}} // мок-сообщение для FSM
 		auth.StartAddChild(bot, database, msg)
 		return
@@ -338,14 +359,18 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 	if data == "add_another_child_no" {
 		msg := tgbotapi.NewMessage(chatID, "Вы вернулись в главное меню.")
 		msg.ReplyMarkup = menu.GetRoleMenu("parent")
-		bot.Send(msg)
+		if _, err := bot.Send(msg); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 	if strings.HasPrefix(data, "show_rating_student_") {
 		idStr := strings.TrimPrefix(data, "show_rating_student_")
 		studentID, err := strconv.Atoi(idStr)
 		if err != nil {
-			bot.Send(tgbotapi.NewMessage(chatID, "Ошибка: не удалось определить ученика."))
+			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "Ошибка: не удалось определить ученика.")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		}
 		handlers.ShowStudentRating(bot, database, chatID, int64(studentID))
@@ -389,7 +414,9 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		return
 	}
 
-	bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Неизвестная команда. Используйте /start"))
+	if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Неизвестная команда. Используйте /start")); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 }
 
 func getUserFSMRole(chatID int64) string {

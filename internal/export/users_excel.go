@@ -20,21 +20,29 @@ type UsersWorkbook struct {
 func NewUsersWorkbook(sheets []SheetSpec) (*UsersWorkbook, error) {
 	f := excelize.NewFile()
 	// удаляем стандартный Sheet1
-	f.DeleteSheet("Sheet1")
+	if err := f.DeleteSheet("Sheet1"); err != nil {
+		return nil, fmt.Errorf("delete default sheet: %w", err)
+	}
 
 	bold, _ := f.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true}})
 	// автофильтр только в первой строке
 	for i, s := range sheets {
 		name := s.Title
 		if i == 0 {
-			f.SetSheetName("Sheet1", name)
+			if err := f.SetSheetName("Sheet1", name); err != nil {
+				return nil, fmt.Errorf("rename sheet: %w", err)
+			}
 		} else {
-			f.NewSheet(name)
+			if _, err := f.NewSheet(name); err != nil {
+				return nil, fmt.Errorf("new sheet: %w", err)
+			}
 		}
 		// заголовки
 		for col, h := range s.Header {
 			cell := fmt.Sprintf("%s1", colName(col+1))
-			f.SetCellStr(name, cell, h)
+			if err := f.SetCellStr(name, cell, h); err != nil {
+				return nil, fmt.Errorf("set cell %s: %w", cell, err)
+			}
 		}
 		// стиль заголовков + автофильтр
 		end := colName(len(s.Header)) + "1"
@@ -45,18 +53,20 @@ func NewUsersWorkbook(sheets []SheetSpec) (*UsersWorkbook, error) {
 		for r, row := range s.Rows {
 			for c, val := range row {
 				cell := fmt.Sprintf("%s%d", colName(c+1), r+2)
-				f.SetCellStr(name, cell, val)
+				if err := f.SetCellStr(name, cell, val); err != nil {
+					return nil, fmt.Errorf("set cell %s: %w", cell, err)
+				}
 			}
 		}
 		// эвристическая ширина: по длине заголовка и первых строк
 		for c := 1; c <= len(s.Header); c++ {
-			max := len(s.Header[c-1])
-			for r := 0; r < min(50, len(s.Rows)); r++ {
-				if l := len(s.Rows[r][c-1]); l > max {
-					max = l
+			maxim := len(s.Header[c-1])
+			for r := 0; r < minim(50, len(s.Rows)); r++ {
+				if l := len(s.Rows[r][c-1]); l > maxim {
+					maxim = l
 				}
 			}
-			w := float64(max) * 0.9
+			w := float64(maxim) * 0.9
 			if w < 12 {
 				w = 12
 			}
@@ -85,7 +95,8 @@ func colName(n int) string {
 	}
 	return s
 }
-func min(a, b int) int {
+
+func minim(a, b int) int {
 	if a < b {
 		return a
 	}
