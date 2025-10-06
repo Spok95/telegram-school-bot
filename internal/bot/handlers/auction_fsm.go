@@ -12,6 +12,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	"github.com/Spok95/telegram-school-bot/internal/models"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -46,7 +47,7 @@ func StartAuctionFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Messa
 	chatID := msg.Chat.ID
 	u, _ := db.GetUserByTelegramID(database, chatID)
 	if u == nil || !fsmutil.MustBeActiveForOps(u) {
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "🚫 Доступ временно закрыт. Обратитесь к администратору.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Доступ временно закрыт. Обратитесь к администратору.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -65,7 +66,7 @@ func StartAuctionFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Messa
 	)
 	msgOut := tgbotapi.NewMessage(chatID, text)
 	msgOut.ReplyMarkup = markup
-	if _, err := bot.Send(msgOut); err != nil {
+	if _, err := tg.Send(bot, msgOut); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }
@@ -86,7 +87,7 @@ func HandleAuctionCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 		delete(auctionStates, chatID)
 		fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
 		edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "🚫 Аукцион отменён.")
-		if _, err := bot.Send(edit); err != nil {
+		if _, err := tg.Send(bot, edit); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -108,7 +109,7 @@ func HandleAuctionCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 				),
 			)
 			edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, text, markup)
-			if _, err := bot.Send(edit); err != nil {
+			if _, err := tg.Send(bot, edit); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -134,7 +135,7 @@ func HandleAuctionCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 			delete(auctionStates, chatID)
 			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
 			edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "🚫 Аукцион отменён.")
-			if _, err := bot.Send(edit); err != nil {
+			if _, err := tg.Send(bot, edit); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -164,7 +165,7 @@ func HandleAuctionCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 			students, _ := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
 			if len(students) == 0 { // стоп, идти дальше не к кому
 				edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "❌ В этом классе нет учеников.")
-				if _, err := bot.Send(edit); err != nil {
+				if _, err := tg.Send(bot, edit); err != nil {
 					metrics.HandlerErrors.Inc()
 				}
 				delete(auctionStates, chatID)
@@ -196,7 +197,7 @@ func HandleAuctionCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 
 	case data == "auction_students_done":
 		if len(state.SelectedStudentIDs) == 0 {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Выберите хотя бы одного ученика.")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Выберите хотя бы одного ученика.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -218,7 +219,7 @@ func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 	// текстовая отмена
 	if fsmutil.IsCancelText(msg.Text) {
 		delete(auctionStates, chatID)
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "🚫 Аукцион отменён.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Аукцион отменён.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -226,7 +227,7 @@ func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 
 	points, err := strconv.Atoi(strings.TrimSpace(msg.Text))
 	if err != nil || points <= 0 {
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Введите корректное положительное число.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Введите корректное положительное число.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -234,7 +235,7 @@ func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 
 	key := fmt.Sprintf("auction:%d", chatID)
 	if !fsmutil.SetPending(chatID, key) {
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⏳ Запрос уже обрабатывается…")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⏳ Запрос уже обрабатывается…")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -270,7 +271,7 @@ func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 		if len(inactive) > 0 {
 			text += "\n\n⚠️ Пропущены (неактивны): " + strings.Join(inactive, ", ")
 		}
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, text)); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, text)); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		delete(auctionStates, chatID)
@@ -281,7 +282,7 @@ func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 		if len(inactive) > 0 {
 			text += "\n⚠️ Пропущены (неактивны): " + strings.Join(inactive, ", ")
 		}
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, text)); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, text)); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		delete(auctionStates, chatID)
@@ -295,7 +296,7 @@ func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 	_ = db.SetActivePeriod(database)
 	period, err := db.GetActivePeriod(database)
 	if err != nil || period == nil {
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось определить активный период.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Не удалось определить активный период.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -328,7 +329,7 @@ func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 	if len(inactive) > 0 {
 		msgOut += "\n⚠️ Пропущены (неактивны): " + strings.Join(inactive, ", ")
 	}
-	if _, err := bot.Send(tgbotapi.NewMessage(chatID, msgOut)); err != nil {
+	if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, msgOut)); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 	delete(auctionStates, chatID)
@@ -345,7 +346,7 @@ func promptClassNumber(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, prefix 
 	}
 	rows = append(rows, auctionBackCancelRow())
 	edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "🔢 Выберите номер класса:", tgbotapi.NewInlineKeyboardMarkup(rows...))
-	if _, err := bot.Send(edit); err != nil {
+	if _, err := tg.Send(bot, edit); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }
@@ -359,7 +360,7 @@ func promptClassLetter(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, prefix 
 	}
 	rows := [][]tgbotapi.InlineKeyboardButton{row, auctionBackCancelRow()}
 	edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "🔠 Выберите букву класса:", tgbotapi.NewInlineKeyboardMarkup(rows...))
-	if _, err := bot.Send(edit); err != nil {
+	if _, err := tg.Send(bot, edit); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }
@@ -388,7 +389,7 @@ func promptStudentSelect(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, datab
 	rows = append(rows, auctionBackCancelRow())
 
 	edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "👥 Выберите учеников для аукциона:", tgbotapi.NewInlineKeyboardMarkup(rows...))
-	if _, err := bot.Send(edit); err != nil {
+	if _, err := tg.Send(bot, edit); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }
@@ -402,7 +403,7 @@ func promptPointsInput(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI) {
 		"✏️ Введите количество баллов для списания:",
 		tgbotapi.NewInlineKeyboardMarkup(rows...),
 	)
-	if _, err := bot.Send(edit); err != nil {
+	if _, err := tg.Send(bot, edit); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }

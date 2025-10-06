@@ -10,6 +10,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/bot/shared/fsmutil"
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -59,7 +60,7 @@ func addChildEditMenu(bot *tgbotapi.BotAPI, chatID int64, messageID int, text st
 	cfg := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
 	cfg.ReplyMarkup = &mk
-	if _, err := bot.Send(cfg); err != nil {
+	if _, err := tg.Send(bot, cfg); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }
@@ -70,7 +71,7 @@ func StartAddChild(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 	chatID := msg.Chat.ID
 	addChildFSM[chatID] = StateAddChildName
 	addChildData[chatID] = &ParentRegisterData{}
-	if _, err := bot.Send(tgbotapi.NewMessage(chatID, "Введите ФИО ребёнка, которого хотите добавить:\n(или напишите Отмена)")); err != nil {
+	if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Введите ФИО ребёнка, которого хотите добавить:\n(или напишите Отмена)")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }
@@ -83,7 +84,7 @@ func HandleAddChildText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Me
 	if strings.EqualFold(trimmed, "отмена") || strings.EqualFold(trimmed, "/cancel") {
 		delete(addChildFSM, chatID)
 		delete(addChildData, chatID)
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "🚫 Добавление ребёнка отменено.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Добавление ребёнка отменено.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -99,14 +100,14 @@ func HandleAddChildText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Me
 
 		out := tgbotapi.NewMessage(chatID, "Выберите номер класса ребёнка:")
 		out.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(addChildClassNumberRows()...)
-		if _, err := bot.Send(out); err != nil {
+		if _, err := tg.Send(bot, out); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 	case StateAddChildClassNumber:
 		// доп. защита, если пользователь ввёл цифрой
 		number, err := strconv.Atoi(msg.Text)
 		if err != nil || number < 1 || number > 11 {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Введите корректный номер класса (1–11) или используйте кнопки.")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Введите корректный номер класса (1–11) или используйте кнопки.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -116,14 +117,14 @@ func HandleAddChildText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Me
 		// создадим карточку выбора буквы
 		out := tgbotapi.NewMessage(chatID, "Выберите букву класса:")
 		out.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(addChildClassLetterRows()...)
-		if _, err := bot.Send(out); err != nil {
+		if _, err := tg.Send(bot, out); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 	case StateAddChildClassLetter:
 		// если пришёл текст буквы (но лучше кнопкой)
 		letter := strings.ToUpper(strings.TrimSpace(msg.Text))
 		if letter == "" {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Укажите букву класса или используйте кнопки.")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Укажите букву класса или используйте кнопки.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -149,7 +150,7 @@ func HandleAddChildCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi
 		delete(addChildFSM, chatID)
 		delete(addChildData, chatID)
 		fsmutil.DisableMarkup(bot, chatID, messageID)
-		if _, err := bot.Send(tgbotapi.NewEditMessageText(chatID, messageID, "🚫 Добавление ребёнка отменено.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewEditMessageText(chatID, messageID, "🚫 Добавление ребёнка отменено.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -160,7 +161,7 @@ func HandleAddChildCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi
 		case StateAddChildClassNumber:
 			// назад к ФИО — карточку гасим
 			fsmutil.DisableMarkup(bot, chatID, messageID)
-			if _, err := bot.Send(tgbotapi.NewEditMessageText(chatID, messageID, "Введите ФИО ребёнка, которого хотите добавить:\n(или напишите Отмена)")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewEditMessageText(chatID, messageID, "Введите ФИО ребёнка, которого хотите добавить:\n(или напишите Отмена)")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			addChildFSM[chatID] = StateAddChildName
@@ -168,11 +169,11 @@ func HandleAddChildCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi
 			addChildFSM[chatID] = StateAddChildClassNumber
 			addChildEditMenu(bot, chatID, messageID, "Выберите номер класса ребёнка:", addChildClassNumberRows())
 		case StateAddChildWaiting:
-			if _, err := bot.Request(tgbotapi.NewCallback(cb.ID, "Заявка уже отправлена, ожидайте подтверждения.")); err != nil {
+			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Заявка уже отправлена, ожидайте подтверждения.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 		default:
-			if _, err := bot.Request(tgbotapi.NewCallback(cb.ID, "Действие недоступно на этом шаге.")); err != nil {
+			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Действие недоступно на этом шаге.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 		}
@@ -184,7 +185,7 @@ func HandleAddChildCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi
 		numStr := strings.TrimPrefix(data, "parent_class_num_")
 		num, err := strconv.Atoi(numStr)
 		if err != nil || num < 1 || num > 11 {
-			if _, err := bot.Send(tgbotapi.NewCallback(cb.ID, "Неверный номер класса")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewCallback(cb.ID, "Неверный номер класса")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -217,7 +218,7 @@ func handleAddChildFinish(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 	})
 	if err != nil {
 		fsmutil.DisableMarkup(bot, chatID, messageID)
-		if _, err := bot.Send(tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ученик не найден. Введите ФИО заново:")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ученик не найден. Введите ФИО заново:")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		addChildFSM[chatID] = StateAddChildName
@@ -228,7 +229,7 @@ func handleAddChildFinish(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 	_, err = CreateParentLinkRequest(database, chatID, studentID)
 	if err != nil {
 		fsmutil.DisableMarkup(bot, chatID, messageID)
-		if _, err := bot.Send(tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ошибка при создании заявки. Попробуйте позже.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ошибка при создании заявки. Попробуйте позже.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		delete(addChildFSM, chatID)
@@ -240,7 +241,7 @@ func handleAddChildFinish(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 	handlers.NotifyAdminsAboutParentLink(bot, database)
 
 	fsmutil.DisableMarkup(bot, chatID, messageID)
-	if _, err := bot.Send(tgbotapi.NewEditMessageText(chatID, messageID, "📨 Заявка на добавление ребёнка отправлена администратору. Ожидайте подтверждения.")); err != nil {
+	if _, err := tg.Send(bot, tgbotapi.NewEditMessageText(chatID, messageID, "📨 Заявка на добавление ребёнка отправлена администратору. Ожидайте подтверждения.")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 	delete(addChildFSM, chatID)

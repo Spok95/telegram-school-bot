@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Spok95/telegram-school-bot/internal/db"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -40,7 +41,7 @@ func StartSchoolYearNotifier(bot *tgbotapi.BotAPI, database *sql.DB) {
 						db.SchoolYearLabel(startYear),
 					)
 					for _, chatID := range ids {
-						_, _ = bot.Send(tgbotapi.NewMessage(chatID, text))
+						_, _ = tg.Send(bot, tgbotapi.NewMessage(chatID, text))
 					}
 					lastNotifiedStartYear = startYear
 				}

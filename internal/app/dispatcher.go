@@ -12,6 +12,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	"github.com/Spok95/telegram-school-bot/internal/models"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -44,7 +45,7 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 				),
 			)
 			msg.ReplyMarkup = roles
-			if _, err := bot.Send(msg); err != nil {
+			if _, err := tg.Send(bot, msg); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -53,7 +54,7 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		if !user.IsActive {
 			rm := tgbotapi.NewMessage(chatID, "🚫 Доступ к боту временно закрыт. Обратитесь к администратору.")
 			rm.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
-			if _, err := bot.Send(rm); err != nil {
+			if _, err := tg.Send(bot, rm); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -64,7 +65,7 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		keyboard := menu.GetRoleMenu(string(*user.Role))
 		msg := tgbotapi.NewMessage(chatID, "Добро пожаловать! Выберите действие:")
 		msg.ReplyMarkup = keyboard
-		if _, err := bot.Send(msg); err != nil {
+		if _, err := tg.Send(bot, msg); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -84,7 +85,7 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 			return
 		}
 
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Вы не зарегистрированы. Пожалуйста, нажмите /start для начала.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Вы не зарегистрированы. Пожалуйста, нажмите /start для начала.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -94,7 +95,7 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		rm := tgbotapi.NewMessage(chatID, "🚫 Доступ к боту временно закрыт. Обратитесь к администратору.")
 		// на случай, если у пользователя осталась старая клавиатура — уберём
 		rm.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
-		if _, err := bot.Send(rm); err != nil {
+		if _, err := tg.Send(bot, rm); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -155,7 +156,7 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 			case models.Parent:
 				handlers.StartParentHistoryExcel(bot, database, msg)
 			default:
-				if _, err := bot.Send(tgbotapi.NewMessage(chatID, "Недоступно для вашей роли.")); err != nil {
+				if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Недоступно для вашей роли.")); err != nil {
 					metrics.HandlerErrors.Inc()
 				}
 			}
@@ -214,7 +215,7 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 			return
 		}
 		if role == "" {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Неизвестная команда. Используйте /start")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Неизвестная команда. Используйте /start")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -224,7 +225,7 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 }
 
 func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
-	if _, err := bot.Request(tgbotapi.NewCallback(cb.ID, "")); err != nil {
+	if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 	data := cb.Data
@@ -238,7 +239,7 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 			msg := tgbotapi.NewMessage(chatID, "🚫 Доступ к боту временно закрыт. Обратитесь к администратору.")
 			// Уберём возможную «залипшую» клавиатуру
 			msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
-			if _, err := bot.Send(msg); err != nil {
+			if _, err := tg.Send(bot, msg); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -349,7 +350,7 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		return
 	}
 	if data == "add_another_child_yes" {
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "Введите ФИО следующего ребёнка:")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Введите ФИО следующего ребёнка:")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		msg := &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: chatID}} // мок-сообщение для FSM
@@ -359,7 +360,7 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 	if data == "add_another_child_no" {
 		msg := tgbotapi.NewMessage(chatID, "Вы вернулись в главное меню.")
 		msg.ReplyMarkup = menu.GetRoleMenu("parent")
-		if _, err := bot.Send(msg); err != nil {
+		if _, err := tg.Send(bot, msg); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -368,7 +369,7 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		idStr := strings.TrimPrefix(data, "show_rating_student_")
 		studentID, err := strconv.Atoi(idStr)
 		if err != nil {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "Ошибка: не удалось определить ученика.")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Ошибка: не удалось определить ученика.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -414,7 +415,7 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		return
 	}
 
-	if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Неизвестная команда. Используйте /start")); err != nil {
+	if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Неизвестная команда. Используйте /start")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }

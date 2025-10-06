@@ -6,6 +6,7 @@ import (
 
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	"github.com/Spok95/telegram-school-bot/internal/models"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -19,7 +20,7 @@ func EnsureAdmin(chatID int64, database *sql.DB, text string, bot *tgbotapi.BotA
 		var exists bool
 		err := database.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE telegram_id = $1)`, chatID).Scan(&exists)
 		if err != nil {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Ошибка авторизации админа.")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Ошибка авторизации админа.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -29,7 +30,7 @@ func EnsureAdmin(chatID int64, database *sql.DB, text string, bot *tgbotapi.BotA
 			_, err := database.Exec(`INSERT INTO users (telegram_id, name, role, confirmed, is_active) VALUES ($1, $2, $3, TRUE, TRUE) ON CONFLICT DO NOTHING`,
 				chatID, "Админ", models.Admin)
 			if err != nil {
-				if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Ошибка авторизации админа.")); err != nil {
+				if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Ошибка авторизации админа.")); err != nil {
 					metrics.HandlerErrors.Inc()
 				}
 				return
@@ -51,7 +52,7 @@ func EnsureAdmin(chatID int64, database *sql.DB, text string, bot *tgbotapi.BotA
 			}
 		}
 
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "✅ Вы авторизованы как администратор")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "✅ Вы авторизованы как администратор")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 	}

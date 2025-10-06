@@ -10,6 +10,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/bot/shared/fsmutil"
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -66,7 +67,7 @@ func studentEditMenu(bot *tgbotapi.BotAPI, chatID int64, messageID int, text str
 	cfg := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
 	cfg.ReplyMarkup = &mk
-	if _, err := bot.Send(cfg); err != nil {
+	if _, err := tg.Send(bot, cfg); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }
@@ -77,7 +78,7 @@ func StartStudentRegistration(chatID int64, msg string, bot *tgbotapi.BotAPI, da
 	delete(studentData, chatID)
 
 	studentFSM[chatID] = StateStudentName
-	if _, err := bot.Send(tgbotapi.NewMessage(chatID, "Введите ваше ФИО:")); err != nil {
+	if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Введите ваше ФИО:")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }
@@ -88,7 +89,7 @@ func HandleStudentFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *
 	if strings.EqualFold(trimmed, "отмена") || strings.EqualFold(trimmed, "/cancel") {
 		delete(studentFSM, chatID)
 		delete(studentData, chatID)
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "🚫 Регистрация отменена. Нажмите /start, чтобы начать заново.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Регистрация отменена. Нажмите /start, чтобы начать заново.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -101,7 +102,7 @@ func HandleStudentFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *
 		studentFSM[chatID] = StateStudentClassNum
 		msgOut := tgbotapi.NewMessage(chatID, "Выберите номер класса:")
 		msgOut.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(studentClassNumberRows()...)
-		if _, err := bot.Send(msgOut); err != nil {
+		if _, err := tg.Send(bot, msgOut); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 	}
@@ -130,7 +131,7 @@ func HandleStudentCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, dat
 		delete(studentFSM, chatID)
 		delete(studentData, chatID)
 		fsmutil.DisableMarkup(bot, chatID, cb.Message.MessageID)
-		if _, err := bot.Send(tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "🚫 Регистрация отменена. Нажмите /start, чтобы начать заново.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "🚫 Регистрация отменена. Нажмите /start, чтобы начать заново.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -139,7 +140,7 @@ func HandleStudentCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, dat
 		switch studentFSM[chatID] {
 		case StateStudentClassNum:
 			fsmutil.DisableMarkup(bot, chatID, cb.Message.MessageID)
-			if _, err := bot.Send(tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "Введите ваше ФИО:")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "Введите ваше ФИО:")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			studentFSM[chatID] = StateStudentName
@@ -147,11 +148,11 @@ func HandleStudentCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, dat
 			studentFSM[chatID] = StateStudentClassNum
 			studentEditMenu(bot, chatID, cb.Message.MessageID, "Выберите номер класса:", studentClassNumberRows())
 		case StateStudentWaitingConfirm:
-			if _, err := bot.Request(tgbotapi.NewCallback(cb.ID, "Заявка уже отправлена, ожидайте подтверждения.")); err != nil {
+			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Заявка уже отправлена, ожидайте подтверждения.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 		default:
-			if _, err := bot.Request(tgbotapi.NewCallback(cb.ID, "Действие недоступно на этом шаге.")); err != nil {
+			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Действие недоступно на этом шаге.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 		}
@@ -162,7 +163,7 @@ func HandleStudentCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, dat
 		numStr := strings.TrimPrefix(data, "student_class_num_")
 		num, err := strconv.Atoi(numStr)
 		if err != nil || num < 1 || num > 11 {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "Некорректный номер класса.")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Некорректный номер класса.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -184,7 +185,7 @@ func HandleStudentCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, dat
 		id, err := SaveStudentRequest(database, chatID, studentData[chatID])
 		if err != nil {
 			fsmutil.DisableMarkup(bot, chatID, cb.Message.MessageID)
-			if _, err := bot.Send(tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "Ошибка при сохранении заявки. Попробуйте позже.")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "Ошибка при сохранении заявки. Попробуйте позже.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			delete(studentFSM, chatID)
@@ -192,7 +193,7 @@ func HandleStudentCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, dat
 			return
 		}
 		fsmutil.DisableMarkup(bot, chatID, cb.Message.MessageID)
-		if _, err := bot.Send(tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "Заявка на регистрацию отправлена администратору. Ожидайте подтверждения.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "Заявка на регистрацию отправлена администратору. Ожидайте подтверждения.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		handlers.NotifyAdminsAboutNewUser(bot, database, id)

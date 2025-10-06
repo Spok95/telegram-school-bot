@@ -12,6 +12,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	"github.com/Spok95/telegram-school-bot/internal/models"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -27,14 +28,14 @@ func ShowPendingUsers(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
 	err := database.QueryRow(`SELECT COUNT(*) FROM users WHERE confirmed = FALSE AND role != 'admin'`).Scan(&count)
 	if err != nil {
 		log.Println("Ошибка при подсчете заявок:", err)
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Ошибка при проверке заявок.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Ошибка при проверке заявок.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
 	}
 
 	if count == 0 {
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "✅ Нет ожидающих подтверждения заявок.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "✅ Нет ожидающих подтверждения заявок.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -44,7 +45,7 @@ func ShowPendingUsers(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
 		SELECT id, name, role, telegram_id FROM users WHERE confirmed = FALSE AND role != 'admin'
 	`)
 	if err != nil {
-		if _, err := bot.Send(tgbotapi.NewMessage(adminID, "Ошибка при получении заявок.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(adminID, "Ошибка при получении заявок.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -107,7 +108,7 @@ func ShowPendingUsers(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
 
 		message := tgbotapi.NewMessage(adminID, msg)
 		message.ReplyMarkup = markup
-		if _, err := bot.Send(message); err != nil {
+		if _, err := tg.Send(bot, message); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 	}
@@ -124,7 +125,7 @@ func HandleAdminCallback(callback *tgbotapi.CallbackQuery, database *sql.DB, bot
 
 		err := ConfirmUser(database, bot, idStr, adminID)
 		if err != nil {
-			if _, err := bot.Send(tgbotapi.NewMessage(adminID, "❌ Ошибка подтверждения заявки.")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(adminID, "❌ Ошибка подтверждения заявки.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -132,7 +133,7 @@ func HandleAdminCallback(callback *tgbotapi.CallbackQuery, database *sql.DB, bot
 
 		newText := fmt.Sprintf("✅ Заявка подтверждена.\nПодтвердил: @%s", adminUsername)
 		edit := tgbotapi.NewEditMessageText(chatID, messageID, newText)
-		if _, err := bot.Send(edit); err != nil {
+		if _, err := tg.Send(bot, edit); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 	} else if strings.HasPrefix(data, "reject_") {
@@ -140,7 +141,7 @@ func HandleAdminCallback(callback *tgbotapi.CallbackQuery, database *sql.DB, bot
 
 		err := RejectUser(database, bot, idStr)
 		if err != nil {
-			if _, err := bot.Send(tgbotapi.NewMessage(adminID, "❌ Ошибка отклонения заявки.")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(adminID, "❌ Ошибка отклонения заявки.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -148,11 +149,11 @@ func HandleAdminCallback(callback *tgbotapi.CallbackQuery, database *sql.DB, bot
 
 		newText := fmt.Sprintf("❌ Заявка отклонена.\nОтклонил: @%s", adminUsername)
 		edit := tgbotapi.NewEditMessageText(chatID, messageID, newText)
-		if _, err := bot.Send(edit); err != nil {
+		if _, err := tg.Send(bot, edit); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 	}
-	if _, err := bot.Send(tgbotapi.NewMessage(adminID, "Обработано")); err != nil {
+	if _, err := tg.Send(bot, tgbotapi.NewMessage(adminID, "Обработано")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }
@@ -211,7 +212,7 @@ func ConfirmUser(database *sql.DB, bot *tgbotapi.BotAPI, name string, adminTG in
 
 	msg := tgbotapi.NewMessage(telegramID, "✅ Ваша заявка подтверждена. Добро пожаловать!")
 	msg.ReplyMarkup = menu.GetRoleMenu(role)
-	if _, err := bot.Send(msg); err != nil {
+	if _, err := tg.Send(bot, msg); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 
@@ -230,7 +231,7 @@ func RejectUser(database *sql.DB, bot *tgbotapi.BotAPI, name string) error {
 		return err
 	}
 
-	if _, err := bot.Send(tgbotapi.NewMessage(telegramID, "❌ Ваша заявка отклонена. Попробуйте позже или обратитесь к администратору.")); err != nil {
+	if _, err := tg.Send(bot, tgbotapi.NewMessage(telegramID, "❌ Ваша заявка отклонена. Попробуйте позже или обратитесь к администратору.")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 	return nil
@@ -279,7 +280,7 @@ func NotifyAdminsAboutNewUser(bot *tgbotapi.BotAPI, database *sql.DB, userID int
 		}
 		m := tgbotapi.NewMessage(adminTG, msg)
 		m.ReplyMarkup = markup
-		if _, err := bot.Send(m); err != nil {
+		if _, err := tg.Send(bot, m); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 	}
@@ -310,7 +311,7 @@ func NotifyAdminsAboutScoreRequest(bot *tgbotapi.BotAPI, database *sql.DB, score
 		if !notifiedAdmins[tgID] {
 			notifiedAdmins[tgID] = true
 			msg := tgbotapi.NewMessage(tgID, fmt.Sprintf("📥 Появились новые заявки для подтверждения %s.", action))
-			if _, err := bot.Send(msg); err != nil {
+			if _, err := tg.Send(bot, msg); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 		}
@@ -327,7 +328,7 @@ func ShowPendingParentLinks(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64
         ORDER BY r.created_at ASC
     `)
 	if err != nil {
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Ошибка при получении заявок на привязку.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Ошибка при получении заявок на привязку.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -355,12 +356,12 @@ func ShowPendingParentLinks(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64
 		)
 		m := tgbotapi.NewMessage(chatID, msg)
 		m.ReplyMarkup = markup
-		if _, err := bot.Send(m); err != nil {
+		if _, err := tg.Send(bot, m); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 	}
 	if !has {
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "✅ Нет заявок на привязку детей.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "✅ Нет заявок на привязку детей.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 	}
@@ -383,7 +384,7 @@ func HandleParentLinkApprovalCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.
 		reqID := strings.TrimPrefix(data, "link_confirm_")
 		parentID, studentID, err := getIDs(reqID)
 		if err != nil {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Заявка не найдена.")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Заявка не найдена.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -422,7 +423,7 @@ func HandleParentLinkApprovalCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.
 			var active bool
 			if err := database.QueryRow(`SELECT is_active FROM users WHERE id = $1`, studentID).Scan(&active); err == nil && !active {
 			// Можно отправить инфо-заметку админу
-				bot.Send(tgbotapi.NewMessage(chatID, "ℹ️ Внимание: привязанный ребёнок неактивен. Родитель останется неактивным до появления активных детей."))
+				tg.Send(bot, tgbotapi.NewMessage(chatID, "ℹ️ Внимание: привязанный ребёнок неактивен. Родитель останется неактивным до появления активных детей."))
 			}
 		*/
 
@@ -431,21 +432,21 @@ func HandleParentLinkApprovalCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.
 		_ = database.QueryRow(`SELECT telegram_id FROM users WHERE id = $1`, parentID).Scan(&pTG)
 		_ = database.QueryRow(`SELECT telegram_id FROM users WHERE id = $1`, studentID).Scan(&sTG)
 		if pTG != 0 {
-			if _, err := bot.Send(tgbotapi.NewMessage(pTG, "✅ Привязка к ребёнку подтверждена администратором.")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(pTG, "✅ Привязка к ребёнку подтверждена администратором.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 		}
 		if sTG != 0 {
-			if _, err := bot.Send(tgbotapi.NewMessage(sTG, "ℹ️ Ваш родитель привязан в системе.")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(sTG, "ℹ️ Ваш родитель привязан в системе.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 		}
 
 		edit := tgbotapi.NewEditMessageText(chatID, msgID, fmt.Sprintf("✅ Заявка на привязку подтверждена.\nПодтвердил: @%s", adminUsername))
-		if _, err := bot.Send(edit); err != nil {
+		if _, err := tg.Send(bot, edit); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
-		if _, err := bot.Request(tgbotapi.NewCallback(cb.ID, "Готово")); err != nil {
+		if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Готово")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -462,17 +463,17 @@ func HandleParentLinkApprovalCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.
 			var pTG int64
 			_ = database.QueryRow(`SELECT telegram_id FROM users WHERE id = $1`, parentID).Scan(&pTG)
 			if pTG != 0 {
-				if _, err := bot.Send(tgbotapi.NewMessage(pTG, "❌ Заявка на привязку отклонена администратором.")); err != nil {
+				if _, err := tg.Send(bot, tgbotapi.NewMessage(pTG, "❌ Заявка на привязку отклонена администратором.")); err != nil {
 					metrics.HandlerErrors.Inc()
 				}
 			}
 		}
 
 		edit := tgbotapi.NewEditMessageText(chatID, msgID, fmt.Sprintf("❌ Заявка на привязку отклонена.\nОтклонил: @%s", adminUsername))
-		if _, err := bot.Send(edit); err != nil {
+		if _, err := tg.Send(bot, edit); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
-		if _, err := bot.Request(tgbotapi.NewCallback(cb.ID, "Готово")); err != nil {
+		if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Готово")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -494,7 +495,7 @@ func NotifyAdminsAboutParentLink(bot *tgbotapi.BotAPI, database *sql.DB) {
 		}
 		text := "📥 Новая заявка на привязку ребёнка. Откройте «📥 Заявки на авторизацию», чтобы обработать."
 		// Можно отправлять сразу карточки (ShowPendingParentLinks), но обычно делаем по кнопке в меню
-		if _, err := bot.Send(tgbotapi.NewMessage(tgID, text)); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(tgID, text)); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 	}

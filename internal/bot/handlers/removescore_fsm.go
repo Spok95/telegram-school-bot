@@ -11,6 +11,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	"github.com/Spok95/telegram-school-bot/internal/models"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -36,7 +37,7 @@ func removeEditMenu(bot *tgbotapi.BotAPI, chatID int64, messageID int, text stri
 	cfg := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
 	cfg.ReplyMarkup = &mk
-	if _, err := bot.Send(cfg); err != nil {
+	if _, err := tg.Send(bot, cfg); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }
@@ -57,7 +58,7 @@ func StartRemoveScoreFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.M
 	// запрет неактивным
 	u, _ := db.GetUserByTelegramID(database, chatID)
 	if u == nil || !fsmutil.MustBeActiveForOps(u) {
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "🚫 Доступ временно закрыт. Обратитесь к администратору.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Доступ временно закрыт. Обратитесь к администратору.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -70,7 +71,7 @@ func StartRemoveScoreFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.M
 
 	out := tgbotapi.NewMessage(chatID, "Выберите номер класса:")
 	out.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(ClassNumberRows("remove")...)
-	if _, err := bot.Send(out); err != nil {
+	if _, err := tg.Send(bot, out); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }
@@ -90,7 +91,7 @@ func HandleRemoveCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 		delete(removeStates, chatID)
 		fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
 		edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "🚫 Списание отменено.")
-		if _, err := bot.Send(edit); err != nil {
+		if _, err := tg.Send(bot, edit); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -166,7 +167,7 @@ func HandleRemoveCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			delete(removeStates, chatID)
 			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
 			edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "🚫 Списание отменено.")
-			if _, err := bot.Send(edit); err != nil {
+			if _, err := tg.Send(bot, edit); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -193,7 +194,7 @@ func HandleRemoveCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			delete(removeStates, chatID)
 			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
 			edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "❌ В этом классе нет учеников.")
-			if _, err := bot.Send(edit); err != nil {
+			if _, err := tg.Send(bot, edit); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -340,7 +341,7 @@ func HandleRemoveText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 	// поддержка текстовой отмены
 	if fsmutil.IsCancelText(msg.Text) {
 		delete(removeStates, chatID)
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "🚫 Списание отменено.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Списание отменено.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -352,7 +353,7 @@ func HandleRemoveText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 		rows := [][]tgbotapi.InlineKeyboardButton{removeBackCancelRow()}
 		p := tgbotapi.NewMessage(chatID, "⚠️ Комментарий обязателен. Введите причину списания:")
 		p.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
-		if _, err := bot.Send(p); err != nil {
+		if _, err := tg.Send(bot, p); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -362,7 +363,7 @@ func HandleRemoveText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 	// one‑shot
 	key := fmt.Sprintf("remove:%d", chatID)
 	if !fsmutil.SetPending(chatID, key) {
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⏳ Запрос уже обрабатывается…")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⏳ Запрос уже обрабатывается…")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -377,7 +378,7 @@ func HandleRemoveText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 	_ = db.SetActivePeriod(database)
 	period, err := db.GetActivePeriod(database)
 	if err != nil || period == nil {
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось определить активный период.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Не удалось определить активный период.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		delete(removeStates, chatID)
@@ -412,7 +413,7 @@ func HandleRemoveText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 	if len(skipped) > 0 {
 		msgText += "\n⚠️ Пропущены (неактивны): " + strings.Join(skipped, ", ")
 	}
-	if _, err := bot.Send(tgbotapi.NewMessage(chatID, msgText)); err != nil {
+	if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, msgText)); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 	delete(removeStates, chatID)

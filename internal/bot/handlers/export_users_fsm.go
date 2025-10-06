@@ -9,6 +9,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/export"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -47,7 +48,7 @@ func StartExportUsers(bot *tgbotapi.BotAPI, _ *sql.DB, msg *tgbotapi.Message, is
 	mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
 	out := tgbotapi.NewMessage(chatID, text)
 	out.ReplyMarkup = mk
-	sent, _ := bot.Send(out)
+	sent, _ := tg.Send(bot, out)
 	st.MessageID = sent.MessageID
 }
 
@@ -57,7 +58,7 @@ func HandleExportUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbot
 	if state == nil {
 		return
 	}
-	if _, err := bot.Request(tgbotapi.NewCallback(cb.ID, "")); err != nil {
+	if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 
@@ -65,10 +66,10 @@ func HandleExportUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbot
 	case cbEUCancel:
 		// Отмена — просто закрываем экран
 		disable := tgbotapi.NewEditMessageReplyMarkup(chatID, state.MessageID, tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{}})
-		if _, err := bot.Request(disable); err != nil {
+		if _, err := tg.Request(bot, disable); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "🚫 Отменено.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Отменено.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		delete(expUsers, chatID)
@@ -76,7 +77,7 @@ func HandleExportUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbot
 	case cbEUBack:
 		// Назад — закрываем экран пользователей и возвращаемся в общее меню экспорта
 		disable := tgbotapi.NewEditMessageReplyMarkup(chatID, state.MessageID, tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{}})
-		if _, err := bot.Request(disable); err != nil {
+		if _, err := tg.Request(bot, disable); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		delete(expUsers, chatID)
@@ -104,13 +105,13 @@ func HandleExportUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbot
 	case cbEUGenerate:
 		state.Step = 2
 		euClearMarkup(bot, chatID, state)
-		if _, err := bot.Send(tgbotapi.NewEditMessageText(chatID, state.MessageID, "⏳ Формируем файл…")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewEditMessageText(chatID, state.MessageID, "⏳ Формируем файл…")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 
 		key := fmt.Sprintf("exp_users:%d", chatID)
 		if !fsmutil.SetPending(chatID, key) {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⏳ Запрос уже обрабатывается…")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⏳ Запрос уже обрабатывается…")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -204,9 +205,9 @@ func HandleExportUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbot
 
 			doc := tgbotapi.NewDocument(chatID, tgbotapi.FilePath(path))
 			doc.Caption = captionInactive(includeInactive)
-			if _, err := bot.Send(doc); err != nil {
+			if _, err := tg.Send(bot, doc); err != nil {
 				log.Printf("[EXPORT_USERS] send failed: %v", err)
-				if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось отправить файл.")); err != nil {
+				if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Не удалось отправить файл.")); err != nil {
 					metrics.HandlerErrors.Inc()
 				}
 				return
@@ -232,7 +233,7 @@ func captionInactive(on bool) string {
 
 func fail(bot *tgbotapi.BotAPI, chatID int64, st *exportUsersState, err error) {
 	log.Printf("[EXPORT_USERS] %v", err)
-	if _, err := bot.Send(tgbotapi.NewEditMessageText(chatID, st.MessageID, "❌ Ошибка при формировании экспорта.")); err != nil {
+	if _, err := tg.Send(bot, tgbotapi.NewEditMessageText(chatID, st.MessageID, "❌ Ошибка при формировании экспорта.")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 	delete(expUsers, chatID)
@@ -241,13 +242,13 @@ func fail(bot *tgbotapi.BotAPI, chatID int64, st *exportUsersState, err error) {
 // Отправить новое сообщение и удалить старое → гарантированная перерисовка клавиатуры
 func euReplace(bot *tgbotapi.BotAPI, chatID int64, st *exportUsersState, text string, mk tgbotapi.InlineKeyboardMarkup) {
 	if st.MessageID != 0 {
-		if _, err := bot.Request(tgbotapi.NewDeleteMessage(chatID, st.MessageID)); err != nil {
+		if _, err := tg.Request(bot, tgbotapi.NewDeleteMessage(chatID, st.MessageID)); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 	}
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ReplyMarkup = mk
-	sent, _ := bot.Send(msg)
+	sent, _ := tg.Send(bot, msg)
 	st.MessageID = sent.MessageID
 }
 
@@ -256,7 +257,7 @@ func euClearMarkup(bot *tgbotapi.BotAPI, chatID int64, state *exportUsersState) 
 	if state.MessageID == 0 {
 		return
 	}
-	if _, err := bot.Request(tgbotapi.NewEditMessageReplyMarkup(chatID, state.MessageID,
+	if _, err := tg.Request(bot, tgbotapi.NewEditMessageReplyMarkup(chatID, state.MessageID,
 		tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{}})); err != nil {
 		metrics.HandlerErrors.Inc()
 	}

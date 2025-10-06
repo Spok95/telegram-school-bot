@@ -12,6 +12,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	"github.com/Spok95/telegram-school-bot/internal/models"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -46,7 +47,7 @@ func StartExportFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Messag
 	chatID := msg.Chat.ID
 	u, _ := db.GetUserByTelegramID(database, chatID)
 	if u == nil || !fsmutil.MustBeActiveForOps(u) {
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "🚫 Доступ временно закрыт. Обратитесь к администратору.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Доступ временно закрыт. Обратитесь к администратору.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -70,7 +71,7 @@ func StartExportFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Messag
 	}
 	msgOut := tgbotapi.NewMessage(chatID, "📊 Выберите тип отчёта:")
 	msgOut.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
-	if _, err := bot.Send(msgOut); err != nil {
+	if _, err := tg.Send(bot, msgOut); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }
@@ -88,7 +89,7 @@ func HandleExportCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 		delete(exportStates, chatID)
 		fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
 		edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "🚫 Экспорт отменён.")
-		if _, err := bot.Send(edit); err != nil {
+		if _, err := tg.Send(bot, edit); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -131,7 +132,7 @@ func HandleExportCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			cfg := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "📆 Введите дату начала (ДД.ММ.ГГГГ):")
 			mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
 			cfg.ReplyMarkup = &mk
-			if _, err := bot.Send(cfg); err != nil {
+			if _, err := tg.Send(bot, cfg); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -139,7 +140,7 @@ func HandleExportCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			delete(exportStates, chatID)
 			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
 			edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "🚫 Экспорт отменён.")
-			if _, err := bot.Send(edit); err != nil {
+			if _, err := tg.Send(bot, edit); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -164,7 +165,7 @@ func HandleExportCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			if err != nil || len(periods) == 0 {
 				delete(exportStates, chatID)
 				edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "❌ Не удалось загрузить периоды.")
-				if _, err := bot.Send(edit); err != nil {
+				if _, err := tg.Send(bot, edit); err != nil {
 					metrics.HandlerErrors.Inc()
 				}
 				return
@@ -193,7 +194,7 @@ func HandleExportCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			msg := tgbotapi.NewMessage(chatID, "📆 Введите дату начала (ДД.ММ.ГГГГ):")
 			msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
 			// для текстовых шагов неизбежно создаём новое сообщение
-			if _, err := bot.Send(msg); err != nil {
+			if _, err := tg.Send(bot, msg); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 		case "export_mode_schoolyear":
@@ -210,7 +211,7 @@ func HandleExportCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 
 			// дальше — в зависимости от типа отчёта
 			if state.ReportType == "school" {
-				if _, err := bot.Request(tgbotapi.NewCallback(cq.ID, "📥 Отчёт формируется...")); err != nil {
+				if _, err := tg.Request(bot, tgbotapi.NewCallback(cq.ID, "📥 Отчёт формируется...")); err != nil {
 					metrics.HandlerErrors.Inc()
 				}
 				generateExportReport(bot, database, chatID, state)
@@ -237,7 +238,7 @@ func HandleExportCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 				// тут нам важно оставить тот же message_id, поэтому редактируем только клавиатуру
 				promptStudentSelectExport(bot, database, cq)
 			} else if state.ReportType == "class" {
-				if _, err := bot.Request(tgbotapi.NewCallback(cq.ID, "📥 Отчёт формируется...")); err != nil {
+				if _, err := tg.Request(bot, tgbotapi.NewCallback(cq.ID, "📥 Отчёт формируется...")); err != nil {
 					metrics.HandlerErrors.Inc()
 				}
 				generateExportReport(bot, database, chatID, state)
@@ -264,12 +265,12 @@ func HandleExportCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			return
 		} else if data == "export_students_done" {
 			if len(state.SelectedStudentIDs) == 0 {
-				if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Выберите хотя бы одного ученика.")); err != nil {
+				if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Выберите хотя бы одного ученика.")); err != nil {
 					metrics.HandlerErrors.Inc()
 				}
 				return
 			}
-			if _, err := bot.Request(tgbotapi.NewCallback(cq.ID, "📥 Отчёт формируется...")); err != nil {
+			if _, err := tg.Request(bot, tgbotapi.NewCallback(cq.ID, "📥 Отчёт формируется...")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			generateExportReport(bot, database, chatID, state)
@@ -295,7 +296,7 @@ func HandleExportCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 				return
 			case "school":
 				// формируем отчёт немедленно
-				if _, err := bot.Request(tgbotapi.NewCallback(cq.ID, "📥 Отчёт формируется...")); err != nil {
+				if _, err := tg.Request(bot, tgbotapi.NewCallback(cq.ID, "📥 Отчёт формируется...")); err != nil {
 					metrics.HandlerErrors.Inc()
 				}
 				generateExportReport(bot, database, chatID, state)
@@ -316,7 +317,7 @@ func HandleExportText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 	// текстовая отмена
 	if fsmutil.IsCancelText(msg.Text) {
 		delete(exportStates, chatID)
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "🚫 Экспорт отменён.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Экспорт отменён.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -331,7 +332,7 @@ func HandleExportText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 			}
 			msg := tgbotapi.NewMessage(chatID, "❌ Неверный формат. Введите дату в формате ДД.ММ.ГГГГ.")
 			msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
-			if _, err := bot.Send(msg); err != nil {
+			if _, err := tg.Send(bot, msg); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -343,7 +344,7 @@ func HandleExportText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 		}
 		msg := tgbotapi.NewMessage(chatID, "📅 Введите дату окончания (ДД.ММ.ГГГГ):")
 		msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
-		if _, err := bot.Send(msg); err != nil {
+		if _, err := tg.Send(bot, msg); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 
@@ -355,7 +356,7 @@ func HandleExportText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 			}
 			msg := tgbotapi.NewMessage(chatID, "❌ Неверный формат. Введите дату в формате ДД.ММ.ГГГГ.")
 			msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
-			if _, err := bot.Send(msg); err != nil {
+			if _, err := tg.Send(bot, msg); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -365,7 +366,7 @@ func HandleExportText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 
 		// дальше как после выбора периода
 		if state.ReportType == "school" {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "📥 Отчёт формируется...")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "📥 Отчёт формируется...")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			generateExportReport(bot, database, chatID, state)
@@ -376,7 +377,7 @@ func HandleExportText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 		// после текстового шага нет message_id для редактирования — отправляем новое меню
 		msgOut := tgbotapi.NewMessage(chatID, "🔢 Выберите номер класса:")
 		msgOut.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(classNumberRows("export_class_number_")...)
-		if _, err := bot.Send(msgOut); err != nil {
+		if _, err := tg.Send(bot, msgOut); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 	}
@@ -440,7 +441,7 @@ func editMenu(bot *tgbotapi.BotAPI, chatID int64, messageID int, text string, ro
 	cfg := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
 	cfg.ReplyMarkup = &mk
-	if _, err := bot.Send(cfg); err != nil {
+	if _, err := tg.Send(bot, cfg); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }
@@ -452,7 +453,7 @@ func promptStudentSelectExport(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbot
 	students, err := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
 	if err != nil {
 		edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "❌ Не удалось получить список учеников.")
-		if _, err := bot.Send(edit); err != nil {
+		if _, err := tg.Send(bot, edit); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -477,7 +478,7 @@ func promptStudentSelectExport(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbot
 	rows = append(rows, fsmutil.BackCancelRow("export_back", "export_cancel"))
 
 	edit := tgbotapi.NewEditMessageReplyMarkup(chatID, cq.Message.MessageID, tgbotapi.NewInlineKeyboardMarkup(rows...))
-	if _, err := bot.Send(edit); err != nil {
+	if _, err := tg.Send(bot, edit); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }
@@ -486,14 +487,14 @@ func generateExportReport(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 	// защита от двойного запуска
 	key := fmt.Sprintf("export:%d:%s", chatID, state.ReportType)
 	if !fsmutil.SetPending(chatID, key) {
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⏳ Запрос уже обрабатывается…")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⏳ Запрос уже обрабатывается…")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
 	}
 	defer fsmutil.ClearPending(chatID, key)
 
-	if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⏳ Формирую Excel-файл...")); err != nil {
+	if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⏳ Формирую Excel-файл...")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 	go func() {
@@ -504,14 +505,14 @@ func generateExportReport(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 		switch state.PeriodMode {
 		case "fixed":
 			if state.PeriodID == nil {
-				if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Период не выбран")); err != nil {
+				if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Период не выбран")); err != nil {
 					metrics.HandlerErrors.Inc()
 				}
 				return
 			}
 			p, errP := db.GetPeriodByID(database, int(*state.PeriodID))
 			if errP != nil || p == nil {
-				if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Период не найден.")); err != nil {
+				if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Период не найден.")); err != nil {
 					metrics.HandlerErrors.Inc()
 				}
 				return
@@ -540,7 +541,7 @@ func generateExportReport(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 
 		case "custom":
 			if state.FromDate == nil || state.ToDate == nil {
-				if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Даты не заданы")); err != nil {
+				if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Даты не заданы")); err != nil {
 					metrics.HandlerErrors.Inc()
 				}
 				return
@@ -569,7 +570,7 @@ func generateExportReport(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 		}
 
 		if len(scores) == 0 {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "🔎 Данных за выбранный период не найдено.")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🔎 Данных за выбранный период не найдено.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -597,7 +598,7 @@ func generateExportReport(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 			filePath, err = generateSchoolReport(scores)
 		}
 		if err != nil {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Ошибка генерации отчёта.")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Ошибка генерации отчёта.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -605,7 +606,7 @@ func generateExportReport(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 
 		doc := tgbotapi.NewDocument(chatID, tgbotapi.FilePath(filePath))
 		doc.Caption = fmt.Sprintf("📊 Отчёт за период: %s", periodLabel)
-		if _, err := bot.Send(doc); err != nil {
+		if _, err := tg.Send(bot, doc); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 	}()

@@ -20,6 +20,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/bot/handlers/migrations"
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/pressly/goose/v3"
 )
@@ -32,7 +33,7 @@ func AdminRestoreFSMActive(chatID int64) bool { return restoreWaiting[chatID] }
 func HandleAdminRestoreStart(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
 	user, _ := db.GetUserByTelegramID(database, chatID)
 	if user == nil || user.Role == nil || *user.Role != "admin" {
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "🚫 Только для администратора")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Только для администратора")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -40,7 +41,7 @@ func HandleAdminRestoreStart(bot *tgbotapi.BotAPI, database *sql.DB, chatID int6
 	restoreWaiting[chatID] = true
 	text := "⚠️ Восстановление перезапишет данные в существующих таблицах.\n\n" +
 		"Пришлите ZIP, полученный кнопкой «💾 Бэкап БД». Я загружу файл и восстановлю данные."
-	if _, err := bot.Send(tgbotapi.NewMessage(chatID, text)); err != nil {
+	if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, text)); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }
@@ -51,7 +52,7 @@ func HandleAdminRestoreMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbo
 		return
 	}
 	if msg.Document == nil {
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "Пришлите ZIP-файл с бэкапом.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Пришлите ZIP-файл с бэкапом.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -61,24 +62,24 @@ func HandleAdminRestoreMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbo
 	// качаем файл из Telegram
 	path, err := downloadTelegramFile(bot, msg.Document.FileID)
 	if err != nil {
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Не удалось скачать файл: %v", err))); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Не удалось скачать файл: %v", err))); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
 	}
 	defer func() { _ = os.Remove(path) }()
 
-	if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⌛ Восстанавливаю БД из бэкапа…")); err != nil {
+	if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⌛ Восстанавливаю БД из бэкапа…")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 	if err := restoreFromZip(database, path); err != nil {
 		log.Println("restore error:", err)
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Ошибка восстановления: %v", err))); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Ошибка восстановления: %v", err))); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
 	}
-	if _, err := bot.Send(tgbotapi.NewMessage(chatID, "✅ Готово. База восстановлена.")); err != nil {
+	if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "✅ Готово. База восстановлена.")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }

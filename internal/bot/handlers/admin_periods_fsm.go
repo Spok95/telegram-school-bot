@@ -12,6 +12,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	"github.com/Spok95/telegram-school-bot/internal/models"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -82,7 +83,7 @@ func showPeriodsList(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, st *P
 	mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
 	msgOut := tgbotapi.NewMessage(chatID, text)
 	msgOut.ReplyMarkup = mk
-	sent, _ := bot.Send(msgOut)
+	sent, _ := tg.Send(bot, msgOut)
 	st.MessageID = sent.MessageID
 }
 
@@ -93,7 +94,7 @@ func HandleAdminPeriodsCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbo
 	if st == nil {
 		return
 	}
-	if _, err := bot.Request(tgbotapi.NewCallback(cb.ID, "")); err != nil {
+	if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 	data := cb.Data
@@ -101,10 +102,10 @@ func HandleAdminPeriodsCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbo
 	switch data {
 	case perAdmCancel:
 		disable := tgbotapi.NewEditMessageReplyMarkup(chatID, st.MessageID, tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{}})
-		if _, err := bot.Request(disable); err != nil {
+		if _, err := tg.Request(bot, disable); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "🚫 Отменено.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Отменено.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		delete(periodsStates, chatID)
@@ -115,10 +116,10 @@ func HandleAdminPeriodsCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbo
 			return
 		}
 		disable := tgbotapi.NewEditMessageReplyMarkup(chatID, st.MessageID, tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{}})
-		if _, err := bot.Request(disable); err != nil {
+		if _, err := tg.Request(bot, disable); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "↩️ Возврат в меню.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "↩️ Возврат в меню.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		delete(periodsStates, chatID)
@@ -136,7 +137,7 @@ func HandleAdminPeriodsCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbo
 		fmt.Println()
 
 		if err != nil || pid64 <= 0 {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Некорректный идентификатор периода. Попробуйте обновить список.")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Некорректный идентификатор периода. Попробуйте обновить список.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -148,13 +149,13 @@ func HandleAdminPeriodsCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbo
 		fmt.Println()
 
 		if errors.Is(err, sql.ErrNoRows) || p == nil {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Период не найден в базе. Обновите список периодов.")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Период не найден в базе. Обновите список периодов.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
 		}
 		if err != nil {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Ошибка БД: %v", err))); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Ошибка БД: %v", err))); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -187,7 +188,7 @@ func showEditCard(bot *tgbotapi.BotAPI, chatID int64, ep *EditPeriodState) {
 	rows = append(rows, tgbotapi.NewInlineKeyboardRow(fsmutil.BackCancelRow(perAdmBack, perAdmCancel)...))
 	edit := tgbotapi.NewEditMessageText(chatID, periodsStates[chatID].MessageID, txt)
 	edit.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{InlineKeyboard: rows}
-	if _, err := bot.Send(edit); err != nil {
+	if _, err := tg.Send(bot, edit); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }
@@ -207,7 +208,7 @@ func HandleAdminPeriodsText(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 			mk := tgbotapi.NewInlineKeyboardMarkup(fsmutil.BackCancelRow(perAdmBack, perAdmCancel))
 			m := tgbotapi.NewMessage(chatID, "❌ Неверная дата. Введите начало в формате ДД.ММ.ГГГГ:")
 			m.ReplyMarkup = mk
-			if _, err := bot.Send(m); err != nil {
+			if _, err := tg.Send(bot, m); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -217,7 +218,7 @@ func HandleAdminPeriodsText(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 		mk := tgbotapi.NewInlineKeyboardMarkup(fsmutil.BackCancelRow(perAdmBack, perAdmCancel))
 		m := tgbotapi.NewMessage(chatID, "Введите дату окончания периода (ДД.ММ.ГГГГ):")
 		m.ReplyMarkup = mk
-		if _, err := bot.Send(m); err != nil {
+		if _, err := tg.Send(bot, m); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 	case editStepAskEnd:
@@ -226,7 +227,7 @@ func HandleAdminPeriodsText(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 			mk := tgbotapi.NewInlineKeyboardMarkup(fsmutil.BackCancelRow(perAdmBack, perAdmCancel))
 			m := tgbotapi.NewMessage(chatID, "❌ Неверная дата. Введите окончание (ДД.ММ.ГГГГ):")
 			m.ReplyMarkup = mk
-			if _, err := bot.Send(m); err != nil {
+			if _, err := tg.Send(bot, m); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -236,7 +237,7 @@ func HandleAdminPeriodsText(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 			mk := tgbotapi.NewInlineKeyboardMarkup(fsmutil.BackCancelRow(perAdmBack, perAdmCancel))
 			m := tgbotapi.NewMessage(chatID, err.Error())
 			m.ReplyMarkup = mk
-			if _, err := bot.Send(m); err != nil {
+			if _, err := tg.Send(bot, m); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -250,7 +251,7 @@ func HandleAdminPeriodsText(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 		mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
 		m := tgbotapi.NewMessage(chatID, txt)
 		m.ReplyMarkup = mk
-		if _, err := bot.Send(m); err != nil {
+		if _, err := tg.Send(bot, m); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 	}
@@ -264,7 +265,7 @@ func HandleAdminPeriodsEditCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *
 		return
 	}
 	ep := st.Editing
-	if _, err := bot.Request(tgbotapi.NewCallback(cb.ID, "")); err != nil {
+	if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 	switch cb.Data {
@@ -273,7 +274,7 @@ func HandleAdminPeriodsEditCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *
 		mk := tgbotapi.NewInlineKeyboardMarkup(fsmutil.BackCancelRow(perAdmBack, perAdmCancel))
 		m := tgbotapi.NewMessage(chatID, "Введите новую дату окончания (ДД.ММ.ГГГГ):")
 		m.ReplyMarkup = mk
-		if _, err := bot.Send(m); err != nil {
+		if _, err := tg.Send(bot, m); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 	case "peradm_edit_both":
@@ -281,7 +282,7 @@ func HandleAdminPeriodsEditCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *
 		mk := tgbotapi.NewInlineKeyboardMarkup(fsmutil.BackCancelRow(perAdmBack, perAdmCancel))
 		m := tgbotapi.NewMessage(chatID, "Введите новую дату начала (ДД.ММ.ГГГГ):")
 		m.ReplyMarkup = mk
-		if _, err := bot.Send(m); err != nil {
+		if _, err := tg.Send(bot, m); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 	case "peradm_save":
@@ -289,7 +290,7 @@ func HandleAdminPeriodsEditCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *
 			mk := tgbotapi.NewInlineKeyboardMarkup(fsmutil.BackCancelRow(perAdmBack, perAdmCancel))
 			m := tgbotapi.NewMessage(chatID, err.Error())
 			m.ReplyMarkup = mk
-			if _, err := bot.Send(m); err != nil {
+			if _, err := tg.Send(bot, m); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -301,13 +302,13 @@ func HandleAdminPeriodsEditCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *
 			EndDate:   ep.EndDate,
 			IsActive:  false,
 		}); err != nil {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Не удалось сохранить изменения.")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Не удалось сохранить изменения.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
 		}
 		_ = db.SetActivePeriod(database) // пересчитать активный
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "✅ Период обновлён.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "✅ Период обновлён.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		if p, _ := db.GetPeriodByID(database, ep.PeriodID); p != nil {

@@ -9,6 +9,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/bot/shared/fsmutil"
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -32,7 +33,7 @@ func editTextAndMarkup(bot *tgbotapi.BotAPI, chatID int64, msgID int, text strin
 	cfg := tgbotapi.NewEditMessageText(chatID, msgID, text)
 	mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
 	cfg.ReplyMarkup = &mk
-	if _, err := bot.Send(cfg); err != nil {
+	if _, err := tg.Send(bot, cfg); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }
@@ -82,7 +83,7 @@ func showCategoriesList(bot *tgbotapi.BotAPI, chatID int64, messageID int, edit 
 	}
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
-	if _, err := bot.Send(msg); err != nil {
+	if _, err := tg.Send(bot, msg); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }
@@ -158,7 +159,7 @@ func HandleCatalogCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 		delete(catalogStates, chatID)
 		fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
 		edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "🚫 Справочники: отменено.")
-		if _, err := bot.Send(edit); err != nil {
+		if _, err := tg.Send(bot, edit); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -245,7 +246,7 @@ func HandleCatalogText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 	// текстовая отмена
 	if fsmutil.IsCancelText(msg.Text) {
 		delete(catalogStates, chatID)
-		if _, err := bot.Send(tgbotapi.NewMessage(chatID, "🚫 Справочники: отменено.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Справочники: отменено.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -255,14 +256,14 @@ func HandleCatalogText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 	case "cat_name":
 		name := strings.TrimSpace(msg.Text)
 		if name == "" {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Имя не может быть пустым. Введите ещё раз или отправьте «отмена».")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Имя не может быть пустым. Введите ещё раз или отправьте «отмена».")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
 		}
 		key := fmt.Sprintf("catalog:addcat:%d", chatID)
 		if !fsmutil.SetPending(chatID, key) {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⏳ Запрос уже обрабатывается…")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⏳ Запрос уже обрабатывается…")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -270,7 +271,7 @@ func HandleCatalogText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 		defer fsmutil.ClearPending(chatID, key)
 
 		if _, err := db.CreateCategory(database, name, name); err != nil {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Ошибка создания категории (возможно, дубликат).")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Ошибка создания категории (возможно, дубликат).")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -284,14 +285,14 @@ func HandleCatalogText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 		}
 		name := strings.TrimSpace(msg.Text)
 		if name == "" {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Имя не может быть пустым. Введите ещё раз.")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Имя не может быть пустым. Введите ещё раз.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
 		}
 		key := fmt.Sprintf("catalog:renamecat:%d", chatID)
 		if !fsmutil.SetPending(chatID, key) {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⏳ Запрос уже обрабатывается…")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⏳ Запрос уже обрабатывается…")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -305,7 +306,7 @@ func HandleCatalogText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 	case "level_value":
 		val, err := strconv.Atoi(strings.TrimSpace(msg.Text))
 		if err != nil || val <= 0 {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Неверное значение. Введите число (например, 100/200/300).")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Неверное значение. Введите число (например, 100/200/300).")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -315,7 +316,7 @@ func HandleCatalogText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 		rows := [][]tgbotapi.InlineKeyboardButton{catBackCancel()}
 		msgOut := tgbotapi.NewMessage(chatID, "✏️ Введите название уровня (label), например «Базовый/Средний/Высокий».")
 		msgOut.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
-		if _, err := bot.Send(msgOut); err != nil {
+		if _, err := tg.Send(bot, msgOut); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 
@@ -325,14 +326,14 @@ func HandleCatalogText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 		}
 		label := strings.TrimSpace(msg.Text)
 		if label == "" {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Название не может быть пустым. Введите ещё раз.")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Название не может быть пустым. Введите ещё раз.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
 		}
 		key := fmt.Sprintf("catalog:addlevel:%d", chatID)
 		if !fsmutil.SetPending(chatID, key) {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⏳ Запрос уже обрабатывается…")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⏳ Запрос уже обрабатывается…")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -340,7 +341,7 @@ func HandleCatalogText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 		defer fsmutil.ClearPending(chatID, key)
 
 		if _, err := db.CreateLevel(database, *st.CategoryID, *st.TempLevelValue, label); err != nil {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "❌ Ошибка добавления уровня (возможно, такой value уже есть в категории).")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Ошибка добавления уровня (возможно, такой value уже есть в категории).")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -354,14 +355,14 @@ func HandleCatalogText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 		}
 		label := strings.TrimSpace(msg.Text)
 		if label == "" {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Название не может быть пустым. Введите ещё раз или «отмена».")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Название не может быть пустым. Введите ещё раз или «отмена».")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
 		}
 		key := fmt.Sprintf("catalog:renamelevel:%d", chatID)
 		if !fsmutil.SetPending(chatID, key) {
-			if _, err := bot.Send(tgbotapi.NewMessage(chatID, "⏳ Запрос уже обрабатывается…")); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⏳ Запрос уже обрабатывается…")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
