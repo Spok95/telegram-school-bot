@@ -42,6 +42,39 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  pgbackup:
+    image: postgres:17-alpine
+    command: ["sh", "/start.sh"]
+    environment:
+      PYTHONWARNINGS: ignore::DeprecationWarning
+      TZ: Europe/Moscow
+      PGPASSWORD: schoolpass
+      DB_HOST: postgres
+      DB_USER: school
+      DB_NAME: school
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+      NO_PROXY: "127.0.0.1,localhost"
+      no_proxy: "127.0.0.1,localhost"
+    volumes:
+      - ./ops/pgbackup/start.sh:/start.sh:ro
+      - ./ops/pgbackup/backup.sh:/usr/local/bin/backup.sh:ro
+      - ./ops/pgbackup/restore-latest.sh:/usr/local/bin/restore-latest.sh:ro
+      - ./ops/pgbackup/cgi-bin:/seed/cgi-bin:ro
+      - ./backups:/backups
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8081/healthz >/dev/null"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 40s
+
   prometheus:
     image: prom/prometheus:v2.54.1
     volumes:
