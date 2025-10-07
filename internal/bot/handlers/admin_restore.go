@@ -17,13 +17,45 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Spok95/telegram-school-bot/internal/backupclient"
 	"github.com/Spok95/telegram-school-bot/internal/bot/handlers/migrations"
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
+	"github.com/Spok95/telegram-school-bot/internal/observability"
 	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/pressly/goose/v3"
 )
+
+// HandleAdminRestoreLatest — восстанавливает БД из последнего файла в ./backups через sidecar
+func HandleAdminRestoreLatest(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
+	user, _ := db.GetUserByTelegramID(database, chatID)
+	if user == nil || user.Role == nil || *user.Role != "admin" {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Только для администратора")); err != nil {
+			metrics.HandlerErrors.Inc()
+			observability.CaptureErr(err)
+		}
+		return
+	}
+
+	if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🛠 Восстанавливаю БД из последнего бэкапа…")); err != nil {
+		metrics.HandlerErrors.Inc()
+		observability.CaptureErr(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	path, err := backupclient.RestoreLatest(ctx)
+	if err != nil {
+		metrics.HandlerErrors.Inc()
+		observability.CaptureErr(err)
+		_, _ = tg.Send(bot, tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Не удалось восстановить: %v", err)))
+		return
+	}
+
+	_, _ = tg.Send(bot, tgbotapi.NewMessage(chatID, "✅ Готово. Восстановлено из: "+path))
+}
 
 // простейший FSM по chatID
 var restoreWaiting = map[int64]bool{}
@@ -39,10 +71,32 @@ func HandleAdminRestoreStart(bot *tgbotapi.BotAPI, database *sql.DB, chatID int6
 		return
 	}
 	restoreWaiting[chatID] = true
+
 	text := "⚠️ Восстановление перезапишет данные в существующих таблицах.\n\n" +
 		"Пришлите ZIP, полученный кнопкой «💾 Бэкап БД». Я загружу файл и восстановлю данные."
-	if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, text)); err != nil {
+
+	cancel := tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "restore_cancel")
+	m := tgbotapi.NewMessage(chatID, text)
+	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(cancel),
+	)
+
+	if _, err := tg.Send(bot, m); err != nil {
 		metrics.HandlerErrors.Inc()
+	}
+}
+
+func HandleAdminRestoreCallback(bot *tgbotapi.BotAPI, cb *tgbotapi.CallbackQuery) {
+	chatID := cb.Message.Chat.ID
+	if cb.Data == "restore_cancel" {
+		delete(restoreWaiting, chatID)
+
+		// Снимем клавиатуру у сообщения с приглашением, чтобы не висела
+		_, _ = tg.Send(bot, tgbotapi.NewEditMessageReplyMarkup(
+			chatID, cb.Message.MessageID, tgbotapi.InlineKeyboardMarkup{}),
+		)
+
+		_, _ = tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Восстановление из файла отменено."))
 	}
 }
 
@@ -415,4 +469,9 @@ func tableExists(tx *sql.Tx, table string) (bool, error) {
 		  WHERE table_schema='public' AND table_name=$1
 		)`, table).Scan(&exists)
 	return exists, err
+}
+
+// quoteIdent — экранирует идентификатор для SQL
+func quoteIdent(id string) string {
+	return `"` + strings.ReplaceAll(id, `"`, `""`) + `"`
 }

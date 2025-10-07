@@ -202,11 +202,27 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		}
 	case "/backup", "💾 Бэкап БД":
 		if user.Role != nil && (*user.Role == "admin") {
-			go handlers.HandleAdminBackup(bot, database, chatID)
+			unlock := chatLimiter.lock(chatID)
+			go func() {
+				defer unlock()
+				handlers.HandleAdminBackup(bot, database, chatID)
+			}()
 		}
-	case "/restore", "♻️ Восстановить БД":
+	case "♻️ Восстановить БД":
 		if user.Role != nil && (*user.Role == "admin") {
-			handlers.HandleAdminRestoreStart(bot, database, chatID)
+			unlock := chatLimiter.lock(chatID)
+			go func() {
+				defer unlock()
+				handlers.HandleAdminRestoreLatest(bot, database, chatID)
+			}()
+		}
+	case "📥 Восстановить из файла":
+		if user.Role != nil && (*user.Role == "admin") {
+			unlock := chatLimiter.lock(chatID)
+			go func() {
+				defer unlock()
+				handlers.HandleAdminRestoreStart(bot, database, chatID)
+			}()
 		}
 	default:
 		role := getUserFSMRole(chatID)
@@ -258,10 +274,17 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		}
 		return
 	}
+
+	if handlers.AdminRestoreFSMActive(chatID) && (data == "restore_cancel") {
+		handlers.HandleAdminRestoreCallback(bot, cb)
+		return
+	}
+
 	if strings.HasPrefix(data, "per_") || data == "per_confirm" {
 		handlers.HandleSetPeriodCallback(bot, database, cb)
 		return
 	}
+
 	if strings.HasPrefix(data, "link_confirm_") || strings.HasPrefix(data, "link_reject_") {
 		handlers.HandleParentLinkApprovalCallback(cb, bot, database)
 		return

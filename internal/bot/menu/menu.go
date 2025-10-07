@@ -80,9 +80,10 @@ func adminMenu() tgbotapi.ReplyKeyboardMarkup {
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("💾 Бэкап БД"),
+			tgbotapi.NewKeyboardButton("♻️ Восстановить БД"),
 		),
 		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("♻️ Восстановить БД"),
+			tgbotapi.NewKeyboardButton("📥 Восстановить из файла"),
 		),
 	)
 }

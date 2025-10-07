@@ -46,3 +46,6 @@ nuke:
 
 logs:
 	docker compose logs -f bot
+
+backup:
+	docker compose exec pgbackup sh -lc 'pg_dump -h $${DB_HOST:-postgres} -U $${DB_USER:-school} -d $${DB_NAME:-school} -Fc | gzip > /backups/manual-$$(date +%F-%H%M).sql.gz'
