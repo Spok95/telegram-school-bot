@@ -12,6 +12,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/bot/handlers/migrations"
 	"github.com/Spok95/telegram-school-bot/internal/config"
 	"github.com/Spok95/telegram-school-bot/internal/db"
+	"github.com/Spok95/telegram-school-bot/internal/jobs"
 	"github.com/Spok95/telegram-school-bot/internal/logging"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	"github.com/Spok95/telegram-school-bot/internal/observability"
@@ -94,8 +95,14 @@ func main() {
 		log.Println("❌ Ошибка установки активного периода:", err)
 	}
 
-	// Авто-уведомление 1 сентября в 07:00
-	app.StartSchoolYearNotifier(bot, database)
+	// === Фоновые задачи ===
+	jr := jobs.New(ctx)
+
+	// Раз в час проверяем «1 сентября после 07:00».
+	// Дедуп по lastNotifiedStartYear гарантирует один пуш в год.
+	jr.Every(time.Hour, "schoolyear_notifier", func(ctx context.Context) error {
+		return app.RunSchoolYearNotifier(bot, database)
+	})
 
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60

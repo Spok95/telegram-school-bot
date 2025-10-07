@@ -3,7 +3,6 @@ package app
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/Spok95/telegram-school-bot/internal/db"
@@ -11,41 +10,41 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-// В рамках жизни процесса — чтобы не слать дубликаты при многократных тиках
+// Дедупликация: чтобы не слать вторично в тот же учебный год
 var lastNotifiedStartYear int
 
-// StartSchoolYearNotifier — раз в день в 07:00 локального времени проверяет 1 сентября и шлёт уведомление админам.
-func StartSchoolYearNotifier(bot *tgbotapi.BotAPI, database *sql.DB) {
-	go func() {
-		loc := time.Now().Location()
-		for {
-			now := time.Now()
-			next := time.Date(now.Year(), now.Month(), now.Day(), 7, 0, 0, 0, loc)
-			if !now.Before(next) {
-				next = next.Add(24 * time.Hour)
-			}
-			time.Sleep(next.Sub(now))
+// RunSchoolYearNotifier выполняет ОДНУ проверку и, если сегодня 1 сентября
+// и уже позже 07:00 локального времени — шлёт уведомление админам.
+// Возвращает первую системную ошибку отправки/БД (для метрики job_errors).
+func RunSchoolYearNotifier(bot *tgbotapi.BotAPI, database *sql.DB) error {
+	now := time.Now()
+	// 1 сентября после 07:00 локального времени
+	if now.Month() == time.September && now.Day() == 1 && now.Hour() >= 7 {
+		startYear := db.CurrentSchoolYearStartYear(now)
+		if lastNotifiedStartYear == startYear {
+			return nil // уже уведомляли в этом году
+		}
 
-			today := time.Now()
-			if today.Month() == time.September && today.Day() == 1 {
-				startYear := db.CurrentSchoolYearStartYear(today)
-				if lastNotifiedStartYear != startYear {
-					ids, err := db.GetAdminTelegramIDs(database)
-					if err != nil {
-						log.Println("schoolyear notifier:", err)
-						continue
-					}
-					text := fmt.Sprintf(
-						"🎓 Начался новый учебный год %s.\n"+
-							"Рейтинги в интерфейсе считаются заново; отчёты за прошлые годы доступны в «Экспорт отчёта → 📘 Учебный год».",
-						db.SchoolYearLabel(startYear),
-					)
-					for _, chatID := range ids {
-						_, _ = tg.Send(bot, tgbotapi.NewMessage(chatID, text))
-					}
-					lastNotifiedStartYear = startYear
-				}
+		ids, err := db.GetAdminTelegramIDs(database)
+		if err != nil {
+			return err
+		}
+
+		text := fmt.Sprintf(
+			"🎓 Начался новый учебный год %s.\n"+
+				"Рейтинги в интерфейсе считаются заново; отчёты за прошлые годы доступны в «Экспорт отчёта → 📘 Учебный год».",
+			db.SchoolYearLabel(startYear),
+		)
+
+		var firstErr error
+		for _, chatID := range ids {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, text)); err != nil && firstErr == nil {
+				firstErr = err // tg.Send уже шлёт системные ошибки в Sentry; тут вернём для job_errors
 			}
 		}
-	}()
+
+		lastNotifiedStartYear = startYear
+		return firstErr
+	}
+	return nil
 }
