@@ -1,0 +1,28 @@
+groups:
+  - name: schoolbot.rules
+    rules:
+      # Ошибки хендлеров >1% за 5 минут (защита от деления на 0)
+      - alert: HighHandlerErrorRate
+        expr: (sum(rate(schoolbot_handler_errors_total[5m])) by () /
+          clamp_min(sum(rate(schoolbot_updates_total[5m])) by (), 1)) > 0.01
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Высокий процент ошибок хендлеров (>1% за 5м)"
+
+      # Heartbeat для джоб с частотой ~час и чаще:
+      - alert: JobNotRunningHourly
+        expr: changes(schoolbot_job_runs_total[2h]) < 1
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "Фоновые джобы с частотой ≤1ч не запускались >2ч"
+
+      # Heartbeat для суточных джоб (конкретно наш schoolyear_notifier):
+      - alert: JobNotRunningDaily
+        expr: changes(schoolbot_job_runs_total{job="schoolyear_notifier"}[26h]) < 1
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Джоба 'schoolyear_notifier' не запускалась ~сутки"
+
