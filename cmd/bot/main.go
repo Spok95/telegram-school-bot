@@ -102,7 +102,7 @@ func main() {
 	// Раз в час проверяем «1 сентября после 07:00».
 	// Дедуп по lastNotifiedStartYear гарантирует один пуш в год.
 	jr.Every(time.Hour, "schoolyear_notifier", func(ctx context.Context) error {
-		return app.RunSchoolYearNotifier(bot, database)
+		return app.RunSchoolYearNotifier(ctx, bot, database)
 	})
 
 	u := tgbotapi.NewUpdate(0)

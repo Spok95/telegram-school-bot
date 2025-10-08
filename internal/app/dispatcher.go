@@ -111,7 +111,7 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 		return
 	}
 	if handlers.GetAddScoreState(chatID) != nil {
-		handlers.HandleAddScoreText(bot, msg)
+		handlers.HandleAddScoreText(ctx, bot, msg)
 		return
 	}
 	if handlers.GetRemoveScoreState(chatID) != nil {
@@ -119,7 +119,7 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 		return
 	}
 	if handlers.GetSetPeriodState(chatID) != nil {
-		handlers.HandleSetPeriodInput(bot, msg)
+		handlers.HandleSetPeriodInput(ctx, bot, msg)
 		return
 	}
 	if handlers.GetAuctionState(chatID) != nil {
@@ -172,7 +172,7 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 			}
 		}
 	case "➕ Добавить ребёнка":
-		go auth.StartAddChild(bot, msg)
+		go auth.StartAddChild(ctx, bot, msg)
 	case "📊 Рейтинг ребёнка":
 		if *user.Role == models.Parent {
 			go handlers.HandleParentRatingRequest(ctx, bot, database, chatID, user.ID)
@@ -200,7 +200,7 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 		}
 	case "👥 Пользователи":
 		if *user.Role == "admin" {
-			go handlers.StartAdminUsersFSM(bot, msg)
+			go handlers.StartAdminUsersFSM(ctx, bot, msg)
 		}
 	case "/auction", "🎯 Аукцион":
 		if *user.Role == "admin" || *user.Role == "administration" {
@@ -237,7 +237,7 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 	default:
 		role := getUserFSMRole(chatID)
 		if _, ok := handlers.PeriodsFSMActive(chatID); ok && user.Role != nil && (*user.Role == "admin") {
-			handlers.HandleAdminPeriodsText(bot, msg)
+			handlers.HandleAdminPeriodsText(ctx, bot, msg)
 			return
 		}
 		if role == "" {
@@ -282,15 +282,15 @@ func HandleCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB,
 		role := strings.TrimPrefix(data, "reg_")
 		db.SetUserFSMRole(chatID, role)
 		if role == "parent" {
-			auth.StartParentRegistration(chatID, cb.From, bot, database)
+			auth.StartParentRegistration(ctx, chatID, cb.From, bot)
 		} else {
-			auth.StartRegistration(chatID, role, bot, database)
+			auth.StartRegistration(ctx, chatID, role, bot, database)
 		}
 		return
 	}
 
 	if handlers.AdminRestoreFSMActive(chatID) && (data == "restore_cancel") {
-		handlers.HandleAdminRestoreCallback(bot, cb)
+		handlers.HandleAdminRestoreCallback(ctx, bot, cb)
 		return
 	}
 
@@ -391,7 +391,7 @@ func HandleCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB,
 			metrics.HandlerErrors.Inc()
 		}
 		msg := &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: chatID}} // мок-сообщение для FSM
-		auth.StartAddChild(bot, msg)
+		auth.StartAddChild(ctx, bot, msg)
 		return
 	}
 	if data == "add_another_child_no" {
@@ -435,7 +435,7 @@ func HandleCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB,
 		case "exp_users_open":
 			handlers.ClearExportState(chatID)
 			// показать экран параметров экспорта
-			handlers.StartExportUsers(bot, database, cb.Message, isAdmin)
+			handlers.StartExportUsers(ctx, bot, database, cb.Message, isAdmin)
 		case "exp_users_toggle", "exp_users_gen", "exp_users_cancel", "exp_users_back":
 			// обработать кнопки внутри экрана
 			handlers.HandleExportUsersCallback(ctx, bot, database, cb, isAdmin)

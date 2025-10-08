@@ -87,7 +87,12 @@ func HandleAdminRestoreStart(ctx context.Context, bot *tgbotapi.BotAPI, database
 	}
 }
 
-func HandleAdminRestoreCallback(bot *tgbotapi.BotAPI, cb *tgbotapi.CallbackQuery) {
+func HandleAdminRestoreCallback(ctx context.Context, bot *tgbotapi.BotAPI, cb *tgbotapi.CallbackQuery) {
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
 	chatID := cb.Message.Chat.ID
 	if cb.Data == "restore_cancel" {
 		delete(restoreWaiting, chatID)

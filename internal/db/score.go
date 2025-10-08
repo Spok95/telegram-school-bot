@@ -109,7 +109,7 @@ func AddScoreInstant(ctx context.Context, database *sql.DB, score models.Score, 
 	}
 
 	// 1) Обязателен активный период
-	period, err := GetActivePeriodContext(ctx, database)
+	period, err := GetActivePeriod(ctx, database)
 	if err != nil {
 		return fmt.Errorf("получение активного периода: %w", err)
 	}
@@ -173,7 +173,7 @@ func ApproveScore(ctx context.Context, database *sql.DB, scoreID int64, adminID 
 	}
 
 	// Получаем активный период
-	activePeriod, err := GetActivePeriodContext(ctx, database)
+	activePeriod, err := GetActivePeriod(ctx, database)
 	var periodID *int64
 	if err == nil && activePeriod != nil {
 		periodID = &activePeriod.ID
@@ -195,7 +195,7 @@ func ApproveScore(ctx context.Context, database *sql.DB, scoreID int64, adminID 
 	if adjust < 0 {
 		adjust = -adjust
 	}
-	catName := GetCategoryNameByID(database, int(categoryID))
+	catName := GetCategoryNameByID(ctx, database, int(categoryID))
 
 	// Обновляем коллективный рейтинг
 	if scoreType == "add" {

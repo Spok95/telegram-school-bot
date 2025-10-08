@@ -14,38 +14,45 @@ import (
 )
 
 func TestGenerateStudentReport(t *testing.T) {
-	h, err := testdb.Start(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	h, err := testdb.Start(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer h.Close()
 
-	adminID := mustSeedUser(t, h.DB, "Админ", models.Admin, nil, nil)
-	stID := mustSeedUser(t, h.DB, "Иванов Иван", models.Student, ptrInt64(11), ptrString("А"))
+	adminID := mustSeedUser(ctx, t, h.DB, "Админ", models.Admin, nil, nil)
+	stID := mustSeedUser(ctx, t, h.DB, "Иванов Иван", models.Student, ptrInt64(11), ptrString("А"))
 
-	// В проде активный проверяется по CURRENT_DATE.
-	// Делаем период "сегодня 00:00...завтра 00:00", чтобы гарантированно считался активным.
-	today := time.Now().Truncate(24 * time.Hour)
-	if _, err := db.CreatePeriod(h.DB, models.Period{
-		Name: "Тестовый", StartDate: today, EndDate: today.Add(24 * time.Hour),
+	// В проде активный определяется по CURRENT_DATE (UTC).
+	// Делаем широкий UTC-интервал, чтобы накрыть любые TZ и лаги.
+	now := time.Now().UTC()
+	start := now.Add(-24 * time.Hour)
+	end := now.Add(24 * time.Hour)
+	if _, err := db.CreatePeriod(ctx, h.DB, models.Period{
+		Name: "Тестовый", StartDate: start, EndDate: end,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.SetActivePeriod(h.DB); err != nil {
+	if err := db.SetActivePeriod(ctx, h.DB); err != nil {
 		t.Fatal(err)
 	}
-	ap, _ := db.GetActivePeriod(h.DB)
+	ap, err := db.GetActivePeriod(ctx, h.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if ap == nil {
 		t.Fatal("active period not set")
 	}
 	pid := ap.ID
 
 	// Категории
-	regular := db.GetCategoryIDByName(h.DB, "Внеурочная активность")
-	auction := db.GetCategoryIDByName(h.DB, "Аукцион")
+	regular := db.GetCategoryIDByName(ctx, h.DB, "Внеурочная активность")
+	auction := db.GetCategoryIDByName(ctx, h.DB, "Аукцион")
 
 	// +100 обычных
-	_ = db.AddScore(h.DB, models.Score{
+	if err := db.AddScore(ctx, h.DB, models.Score{
 		StudentID:  stID,
 		CategoryID: int64(regular),
 		Points:     100,
@@ -54,9 +61,11 @@ func TestGenerateStudentReport(t *testing.T) {
 		CreatedBy:  adminID,
 		CreatedAt:  time.Now(),
 		PeriodID:   &pid,
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	// -100 аукцион (Type=remove → Points инвертируется внутри)
-	_ = db.AddScore(h.DB, models.Score{
+	if err := db.AddScore(ctx, h.DB, models.Score{
 		StudentID:  stID,
 		CategoryID: int64(auction),
 		Points:     100,
@@ -65,10 +74,12 @@ func TestGenerateStudentReport(t *testing.T) {
 		CreatedBy:  adminID,
 		CreatedAt:  time.Now(),
 		PeriodID:   &pid,
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Достаём историю
-	scores, err := db.GetScoresByStudentAndPeriod(h.DB, stID, int(ap.ID))
+	scores, err := db.GetScoresByStudentAndPeriod(ctx, h.DB, stID, int(ap.ID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,13 +89,13 @@ func TestGenerateStudentReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(file)
+	defer func() { _ = os.Remove(file) }()
 
 	f, err := excelize.OpenFile(file)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// Заголовок последней колонки
 	hdr, _ := f.GetCellValue("Report", "H1")
@@ -93,10 +104,10 @@ func TestGenerateStudentReport(t *testing.T) {
 	}
 }
 
-func mustSeedUser(t *testing.T, dbx *sql.DB, name string, role models.Role, classNum *int64, classLet *string) int64 {
+func mustSeedUser(ctx context.Context, t *testing.T, dbx *sql.DB, name string, role models.Role, classNum *int64, classLet *string) int64 {
 	t.Helper()
 	var id int64
-	err := dbx.QueryRow(`
+	err := dbx.QueryRowContext(ctx, `
 		INSERT INTO users (telegram_id, name, role, class_number, class_letter, confirmed, is_active)
 		VALUES (floor(random()*1e9)::bigint, $1, $2, $3, $4, true, true)
 		RETURNING id`, name, string(role), classNum, classLet).Scan(&id)

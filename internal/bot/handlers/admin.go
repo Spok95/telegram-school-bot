@@ -421,7 +421,7 @@ func HandleParentLinkApprovalCallback(ctx context.Context, cb *tgbotapi.Callback
 		// раскомментировать блок ниже. Сейчас мы допускаем привязку и просто корректно считаем статус родителя.
 		/*
 			var active bool
-			if err := database.QueryRow(`SELECT is_active FROM users WHERE id = $1`, studentID).Scan(&active); err == nil && !active {
+			if err := database.QueryRowContext(ctx, `SELECT is_active FROM users WHERE id = $1`, studentID).Scan(&active); err == nil && !active {
 			// Можно отправить инфо-заметку админу
 				tg.Send(bot, tgbotapi.NewMessage(chatID, "ℹ️ Внимание: привязанный ребёнок неактивен. Родитель останется неактивным до появления активных детей."))
 			}

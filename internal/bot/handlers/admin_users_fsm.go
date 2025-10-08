@@ -32,7 +32,12 @@ func GetAdminUsersState(chatID int64) *adminUsersState { return adminUsersStates
 
 // ─── ENTRY
 
-func StartAdminUsersFSM(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
+func StartAdminUsersFSM(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
 	chatID := msg.Chat.ID
 	adminUsersStates[chatID] = &adminUsersState{Step: 1}
 	edit := tgbotapi.NewMessage(chatID, "👥 Управление пользователями\nВведите имя или класс (например, 7А) для поиска:")

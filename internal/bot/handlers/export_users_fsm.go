@@ -29,7 +29,12 @@ const (
 	cbEUBack     = "exp_users_back" // = cancel -> в меню экспорта
 )
 
-func StartExportUsers(bot *tgbotapi.BotAPI, _ *sql.DB, msg *tgbotapi.Message, isAdmin bool) {
+func StartExportUsers(ctx context.Context, bot *tgbotapi.BotAPI, _ *sql.DB, msg *tgbotapi.Message, isAdmin bool) {
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
 	chatID := msg.Chat.ID
 	st := &exportUsersState{IncludeInactive: false, Step: 1}
 	expUsers[chatID] = st

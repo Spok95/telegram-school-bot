@@ -36,7 +36,12 @@ type SetPeriodState struct {
 
 var periodStates = make(map[int64]*SetPeriodState)
 
-func StartSetPeriodFSM(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
+func StartSetPeriodFSM(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
 	chatID := msg.Chat.ID
 	delete(periodStates, chatID)
 
@@ -49,7 +54,12 @@ func StartSetPeriodFSM(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 	perReplace(bot, chatID, state, "Введите название нового периода (например: 1 триместр 2025):", mk)
 }
 
-func HandleSetPeriodInput(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
+func HandleSetPeriodInput(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
 	chatID := msg.Chat.ID
 	state, ok := periodStates[chatID]
 	if !ok {

@@ -74,7 +74,12 @@ func parentEditMenu(bot *tgbotapi.BotAPI, chatID int64, messageID int, text stri
 	}
 }
 
-func StartParentRegistration(chatID int64, user *tgbotapi.User, bot *tgbotapi.BotAPI, database *sql.DB) {
+func StartParentRegistration(ctx context.Context, chatID int64, user *tgbotapi.User, bot *tgbotapi.BotAPI) {
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
 	parentFSM[chatID] = StateParentStudentName
 	parentName := strings.TrimSpace(fmt.Sprintf("%s %s", user.FirstName, user.LastName))
 	parentData[chatID] = &ParentRegisterData{ParentName: parentName}
@@ -83,7 +88,12 @@ func StartParentRegistration(chatID int64, user *tgbotapi.User, bot *tgbotapi.Bo
 	}
 }
 
-func HandleParentFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *sql.DB) {
+func HandleParentFSM(ctx context.Context, chatID int64, msg string, bot *tgbotapi.BotAPI) {
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
 	trimmed := strings.TrimSpace(msg)
 	if strings.EqualFold(trimmed, "отмена") || strings.EqualFold(trimmed, "/cancel") {
 		delete(parentFSM, chatID)

@@ -8,21 +8,26 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-func StartRegistration(chatID int64, role string, bot *tgbotapi.BotAPI, database *sql.DB) {
+func StartRegistration(ctx context.Context, chatID int64, role string, bot *tgbotapi.BotAPI, database *sql.DB) {
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
 	switch role {
 	case string(models.Student):
-		StartStudentRegistration(chatID, bot)
+		StartStudentRegistration(ctx, chatID, bot)
 	case string(models.Teacher), string(models.Administration):
-		StartStaffRegistration(chatID, bot)
+		StartStaffRegistration(ctx, chatID, bot)
 	}
 }
 
 func HandleFSMMessage(ctx context.Context, chatID int64, msg string, role string, bot *tgbotapi.BotAPI, database *sql.DB) {
 	switch role {
 	case string(models.Student):
-		HandleStudentFSM(chatID, msg, bot)
+		HandleStudentFSM(ctx, chatID, msg, bot)
 	case string(models.Parent):
-		HandleParentFSM(chatID, msg, bot, database)
+		HandleParentFSM(ctx, chatID, msg, bot)
 	case string(models.Teacher), string(models.Administration):
 		HandleStaffFSM(ctx, chatID, msg, bot, database, role)
 	}

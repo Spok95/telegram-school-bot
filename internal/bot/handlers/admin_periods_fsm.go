@@ -127,7 +127,7 @@ func HandleAdminPeriodsCallback(ctx context.Context, bot *tgbotapi.BotAPI, datab
 		return
 	case perAdmCreate:
 		delete(periodsStates, chatID)
-		StartSetPeriodFSM(bot, cb.Message) // переиспользуем создание
+		StartSetPeriodFSM(ctx, bot, cb.Message) // переиспользуем создание
 		return
 	case perAdmEditPref:
 		idStr := strings.TrimPrefix(data, perAdmEditPref)
@@ -187,7 +187,12 @@ func showEditCard(bot *tgbotapi.BotAPI, chatID int64, ep *EditPeriodState) {
 }
 
 // HandleAdminPeriodsText Текстовые шаги редактирования
-func HandleAdminPeriodsText(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
+func HandleAdminPeriodsText(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
 	chatID := msg.Chat.ID
 	st := periodsStates[chatID]
 	if st == nil || st.Editing == nil {

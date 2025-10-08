@@ -499,7 +499,12 @@ func HandleAddScoreCallback(ctx context.Context, bot *tgbotapi.BotAPI, database 
 
 // ==== текстовый шаг ====
 
-func HandleAddScoreText(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
+func HandleAddScoreText(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
 	chatID := msg.Chat.ID
 	state, ok := addStates[chatID]
 	if !ok {

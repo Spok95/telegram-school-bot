@@ -74,7 +74,12 @@ func studentEditMenu(bot *tgbotapi.BotAPI, chatID int64, messageID int, text str
 }
 
 // StartStudentRegistration Начало FSM ученика
-func StartStudentRegistration(chatID int64, bot *tgbotapi.BotAPI) {
+func StartStudentRegistration(ctx context.Context, chatID int64, bot *tgbotapi.BotAPI) {
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
 	delete(studentFSM, chatID)
 	delete(studentData, chatID)
 
@@ -85,7 +90,12 @@ func StartStudentRegistration(chatID int64, bot *tgbotapi.BotAPI) {
 }
 
 // HandleStudentFSM Обработка шагов FSM
-func HandleStudentFSM(chatID int64, msg string, bot *tgbotapi.BotAPI) {
+func HandleStudentFSM(ctx context.Context, chatID int64, msg string, bot *tgbotapi.BotAPI) {
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
 	trimmed := strings.TrimSpace(msg)
 	if strings.EqualFold(trimmed, "отмена") || strings.EqualFold(trimmed, "/cancel") {
 		delete(studentFSM, chatID)

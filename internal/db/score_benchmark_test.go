@@ -12,38 +12,45 @@ import (
 )
 
 func BenchmarkAddScore(b *testing.B) {
-	h, err := testdb.Start(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	h, err := testdb.Start(ctx)
 	if err != nil {
 		b.Fatal(err)
 	}
 	defer h.Close()
 
-	adminID := mustSeedUserB(b, h.DB, "Админ", models.Admin, nil, nil)
-	stID := mustSeedUserB(b, h.DB, "Бенч", models.Student, ptrInt64(11), ptrString("А"))
+	adminID := mustSeedUserB(ctx, b, h.DB, "Админ", models.Admin, nil, nil)
+	stID := mustSeedUserB(ctx, b, h.DB, "Бенч", models.Student, ptrInt64(11), ptrString("А"))
 
 	// В проде активный определяется по CURRENT_DATE → делаем период границами текущих суток
-	today := time.Now().Truncate(24 * time.Hour)
-	if _, err := db.CreatePeriod(h.DB, models.Period{
-		Name: "bench", StartDate: today, EndDate: today.Add(24 * time.Hour),
+	now := time.Now().UTC()
+	start := now.Add(-24 * time.Hour)
+	end := now.Add(24 * time.Hour)
+	if _, err := db.CreatePeriod(ctx, h.DB, models.Period{
+		Name: "bench", StartDate: start, EndDate: end,
 	}); err != nil {
 		b.Fatal(err)
 	}
-	if err := db.SetActivePeriod(h.DB); err != nil {
+	if err := db.SetActivePeriod(ctx, h.DB); err != nil {
 		b.Fatal(err)
 	}
-	ap, _ := db.GetActivePeriod(h.DB)
+	ap, err := db.GetActivePeriod(ctx, h.DB)
+	if err != nil {
+		b.Fatal(err)
+	}
 	if ap == nil {
 		b.Fatal("active period not set")
 	}
 	pid := ap.ID
 
-	cat := db.GetCategoryIDByName(h.DB, "Социальные поступки")
+	cat := db.GetCategoryIDByName(ctx, h.DB, "Социальные поступки")
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			_ = db.AddScore(h.DB, models.Score{
+			if err := db.AddScore(ctx, h.DB, models.Score{
 				StudentID:  stID,
 				CategoryID: int64(cat),
 				Points:     1,
@@ -52,15 +59,17 @@ func BenchmarkAddScore(b *testing.B) {
 				CreatedBy:  adminID,
 				CreatedAt:  time.Now(),
 				PeriodID:   &pid,
-			})
+			}); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 }
 
-func mustSeedUserB(b *testing.B, dbx *sql.DB, name string, role models.Role, classNum *int64, classLet *string) int64 {
+func mustSeedUserB(ctx context.Context, b *testing.B, dbx *sql.DB, name string, role models.Role, classNum *int64, classLet *string) int64 {
 	b.Helper()
 	var id int64
-	err := dbx.QueryRow(`
+	err := dbx.QueryRowContext(ctx, `
 		INSERT INTO users (telegram_id, name, role, class_number, class_letter, confirmed, is_active)
 		VALUES (floor(random()*1e9)::bigint, $1, $2, $3, $4, true, true)
 		RETURNING id`, name, string(role), classNum, classLet).Scan(&id)

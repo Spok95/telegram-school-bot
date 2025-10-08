@@ -23,7 +23,12 @@ var (
 	staffData = make(map[int64]string)
 )
 
-func StartStaffRegistration(chatID int64, bot *tgbotapi.BotAPI) {
+func StartStaffRegistration(ctx context.Context, chatID int64, bot *tgbotapi.BotAPI) {
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
 	staffFSM[chatID] = StateStaffName
 	if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Введите ваше ФИО:")); err != nil {
 		metrics.HandlerErrors.Inc()

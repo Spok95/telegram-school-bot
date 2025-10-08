@@ -68,7 +68,12 @@ func addChildEditMenu(bot *tgbotapi.BotAPI, chatID int64, messageID int, text st
 
 // ===== Старт/текстовые шаги =====
 
-func StartAddChild(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
+func StartAddChild(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
 	chatID := msg.Chat.ID
 	addChildFSM[chatID] = StateAddChildName
 	addChildData[chatID] = &ParentRegisterData{}
