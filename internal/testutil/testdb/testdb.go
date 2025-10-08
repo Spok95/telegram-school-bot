@@ -69,7 +69,7 @@ func Start(ctx context.Context) (*DBHandle, error) {
 		return nil, err
 	}
 
-	if err := applyMigrations(db); err != nil {
+	if err := applyMigrations(ctx, db); err != nil {
 		_ = pg.Terminate(ctx)
 		cancel()
 		return nil, err
@@ -109,7 +109,7 @@ func repoRoot() (string, error) {
 	return "", fmt.Errorf("go.mod not found from %s", wd)
 }
 
-func applyMigrations(db *sql.DB) error {
+func applyMigrations(ctx context.Context, db *sql.DB) error {
 	root, err := repoRoot()
 	if err != nil {
 		return err
@@ -139,7 +139,7 @@ func applyMigrations(db *sql.DB) error {
 		if strings.TrimSpace(up) == "" {
 			continue
 		}
-		if _, err := db.Exec(up); err != nil {
+		if _, err := db.ExecContext(ctx, up); err != nil {
 			return fmt.Errorf("migration %s: %w", filepath.Base(f), err)
 		}
 	}

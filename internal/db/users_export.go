@@ -28,7 +28,7 @@ type ParentRow struct {
 	Classes    string // «7А, 11Б»
 }
 
-func ListAllUsersContext(ctx context.Context, database *sql.DB, includeInactive bool) ([]UserRow, error) {
+func ListAllUsers(ctx context.Context, database *sql.DB, includeInactive bool) ([]UserRow, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	var q string
@@ -63,11 +63,7 @@ func ListAllUsersContext(ctx context.Context, database *sql.DB, includeInactive 
 	return out, rows.Err()
 }
 
-func ListAllUsers(database *sql.DB, includeInactive bool) ([]UserRow, error) {
-	return ListAllUsersContext(context.Background(), database, includeInactive)
-}
-
-func ListTeachersContext(ctx context.Context, database *sql.DB, includeInactive bool) ([]string, error) {
+func ListTeachers(ctx context.Context, database *sql.DB, includeInactive bool) ([]string, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	q := ""
@@ -92,11 +88,7 @@ func ListTeachersContext(ctx context.Context, database *sql.DB, includeInactive 
 	return res, rows.Err()
 }
 
-func ListTeachers(database *sql.DB, includeInactive bool) ([]string, error) {
-	return ListTeachersContext(context.Background(), database, includeInactive)
-}
-
-func ListAdministrationContext(ctx context.Context, database *sql.DB, includeInactive bool) ([]string, error) {
+func ListAdministration(ctx context.Context, database *sql.DB, includeInactive bool) ([]string, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	q := ""
@@ -121,11 +113,7 @@ func ListAdministrationContext(ctx context.Context, database *sql.DB, includeIna
 	return res, rows.Err()
 }
 
-func ListAdministration(database *sql.DB, includeInactive bool) ([]string, error) {
-	return ListAdministrationContext(context.Background(), database, includeInactive)
-}
-
-func ListStudentsContext(ctx context.Context, database *sql.DB, includeInactive bool) ([]StudentRow, error) {
+func ListStudents(ctx context.Context, database *sql.DB, includeInactive bool) ([]StudentRow, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	q := `
@@ -167,11 +155,7 @@ func ListStudentsContext(ctx context.Context, database *sql.DB, includeInactive 
 	return res, rows.Err()
 }
 
-func ListStudents(database *sql.DB, includeInactive bool) ([]StudentRow, error) {
-	return ListStudentsContext(context.Background(), database, includeInactive)
-}
-
-func ListParentsContext(ctx context.Context, database *sql.DB, includeInactive bool) ([]ParentRow, error) {
+func ListParents(ctx context.Context, database *sql.DB, includeInactive bool) ([]ParentRow, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	q := `
@@ -216,8 +200,4 @@ func ListParentsContext(ctx context.Context, database *sql.DB, includeInactive b
 		res = append(res, r)
 	}
 	return res, rows.Err()
-}
-
-func ListParents(database *sql.DB, includeInactive bool) ([]ParentRow, error) {
-	return ListParentsContext(context.Background(), database, includeInactive)
 }

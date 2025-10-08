@@ -15,8 +15,11 @@ import (
 )
 
 // HandleAdminBackup — триггерит бэкап в sidecar (файл сохраняется в ./backups)
-func HandleAdminBackup(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
-	user, err := db.GetUserByTelegramID(database, chatID)
+func HandleAdminBackup(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	user, err := db.GetUserByTelegramID(ctx, database, chatID)
 	if err != nil || user == nil || user.Role == nil || *user.Role != "admin" {
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Только для администратора")); err != nil {
 			metrics.HandlerErrors.Inc()
@@ -28,9 +31,6 @@ func HandleAdminBackup(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
 		metrics.HandlerErrors.Inc()
 		observability.CaptureErr(err)
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
 
 	path, err := backupclient.TriggerBackup(ctx)
 	if err != nil {

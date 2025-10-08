@@ -29,11 +29,11 @@ import (
 )
 
 // HandleAdminRestoreLatest — восстанавливает БД из последнего файла в ./backups через sidecar
-func HandleAdminRestoreLatest(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
-	ctx, cancel := ctxutil.WithTimeout(context.Background(), 5*time.Minute)
+func HandleAdminRestoreLatest(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
+	ctx, cancel := ctxutil.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	user, _ := db.GetUserByTelegramID(database, chatID)
+	user, _ := db.GetUserByTelegramID(ctx, database, chatID)
 	if user == nil || user.Role == nil || *user.Role != "admin" {
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Только для администратора")); err != nil {
 			metrics.HandlerErrors.Inc()
@@ -63,8 +63,8 @@ var restoreWaiting = map[int64]bool{}
 
 func AdminRestoreFSMActive(chatID int64) bool { return restoreWaiting[chatID] }
 
-func HandleAdminRestoreStart(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
-	user, _ := db.GetUserByTelegramID(database, chatID)
+func HandleAdminRestoreStart(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
+	user, _ := db.GetUserByTelegramID(ctx, database, chatID)
 	if user == nil || user.Role == nil || *user.Role != "admin" {
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Только для администратора")); err != nil {
 			metrics.HandlerErrors.Inc()
@@ -101,8 +101,8 @@ func HandleAdminRestoreCallback(bot *tgbotapi.BotAPI, cb *tgbotapi.CallbackQuery
 	}
 }
 
-func HandleAdminRestoreMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
-	ctx, cancel := ctxutil.WithTimeout(context.Background(), 10*time.Minute)
+func HandleAdminRestoreMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+	ctx, cancel := ctxutil.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	chatID := msg.Chat.ID
 	if !AdminRestoreFSMActive(chatID) {

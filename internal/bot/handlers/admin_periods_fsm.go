@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -46,15 +47,15 @@ const (
 )
 
 // StartAdminPeriods Старт: список периодов + «Создать / Изменить»
-func StartAdminPeriods(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+func StartAdminPeriods(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
 	state := &PeriodsFSMState{}
 	periodsStates[chatID] = state
-	showPeriodsList(bot, database, chatID, state)
+	showPeriodsList(ctx, bot, database, chatID, state)
 }
 
-func showPeriodsList(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, st *PeriodsFSMState) {
-	per, _ := db.ListPeriods(database)
+func showPeriodsList(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, st *PeriodsFSMState) {
+	per, _ := db.ListPeriods(ctx, database)
 	text := "📅 Периоды:\n"
 	now := time.Now()
 	for _, p := range per {
@@ -88,7 +89,7 @@ func showPeriodsList(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, st *P
 }
 
 // HandleAdminPeriodsCallback коллбэки списка
-func HandleAdminPeriodsCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
+func HandleAdminPeriodsCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
 	chatID := cb.Message.Chat.ID
 	st := periodsStates[chatID]
 	if st == nil {
@@ -132,21 +133,13 @@ func HandleAdminPeriodsCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbo
 		idStr := strings.TrimPrefix(data, perAdmEditPref)
 		pid64, err := strconv.ParseInt(strings.TrimSpace(idStr), 10, 64)
 
-		fmt.Println()
-		fmt.Println("pid64, err := strconv.ParseInt(strings.TrimSpace(idStr), 10, 64)", pid64)
-		fmt.Println()
-
 		if err != nil || pid64 <= 0 {
 			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Некорректный идентификатор периода. Попробуйте обновить список.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
 		}
-		p, err := db.GetPeriodByID(database, int(pid64))
-
-		fmt.Println()
-		fmt.Println("db.GetPeriodByID(database, int(pid64))", p)
-		fmt.Println()
+		p, err := db.GetPeriodByID(ctx, database, int(pid64))
 
 		if errors.Is(err, sql.ErrNoRows) || p == nil {
 			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Период не найден в базе. Обновите список периодов.")); err != nil {
@@ -258,7 +251,7 @@ func HandleAdminPeriodsText(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 }
 
 // HandleAdminPeriodsEditCallback Колбэки редактора
-func HandleAdminPeriodsEditCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
+func HandleAdminPeriodsEditCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
 	chatID := cb.Message.Chat.ID
 	st := periodsStates[chatID]
 	if st == nil || st.Editing == nil {
@@ -295,7 +288,7 @@ func HandleAdminPeriodsEditCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *
 			}
 			return
 		}
-		if err := db.UpdatePeriod(database, models.Period{
+		if err := db.UpdatePeriod(ctx, database, models.Period{
 			ID:        int64(ep.PeriodID),
 			Name:      ep.Name,
 			StartDate: ep.StartDate,
@@ -307,11 +300,11 @@ func HandleAdminPeriodsEditCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *
 			}
 			return
 		}
-		_ = db.SetActivePeriod(database) // пересчитать активный
+		_ = db.SetActivePeriod(ctx, database) // пересчитать активный
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "✅ Период обновлён.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
-		if p, _ := db.GetPeriodByID(database, ep.PeriodID); p != nil {
+		if p, _ := db.GetPeriodByID(ctx, database, ep.PeriodID); p != nil {
 			ep.StartDate, ep.EndDate, ep.IsActive = p.StartDate, p.EndDate, p.IsActive
 		}
 		showEditCard(bot, chatID, ep)

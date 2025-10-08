@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -80,10 +81,10 @@ func ClassLetterRows(action string) [][]tgbotapi.InlineKeyboardButton {
 
 // ==== start ====
 
-func StartAddScoreFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+func StartAddScoreFSM(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
 	// запрет неактивным
-	u, _ := db.GetUserByTelegramID(database, chatID)
+	u, _ := db.GetUserByTelegramID(ctx, database, chatID)
 	if u == nil || !fsmutil.MustBeActiveForOps(u) {
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Доступ временно закрыт. Обратитесь к администратору.")); err != nil {
 			metrics.HandlerErrors.Inc()
@@ -105,7 +106,7 @@ func StartAddScoreFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 
 // ==== callbacks ====
 
-func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.CallbackQuery) {
+func HandleAddScoreCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.CallbackQuery) {
 	chatID := cq.From.ID
 	state, ok := addStates[chatID]
 	if !ok {
@@ -144,8 +145,8 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		// погасим клавиатуру до операций, чтобы второй клик не сработал
 		fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
 
-		level, _ := db.GetLevelByID(database, state.LevelID)
-		user, _ := db.GetUserByTelegramID(database, chatID)
+		level, _ := db.GetLevelByID(ctx, database, state.LevelID)
+		user, _ := db.GetUserByTelegramID(ctx, database, chatID)
 		var createdBy int64
 		if user != nil {
 			createdBy = user.ID
@@ -162,12 +163,12 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		now := time.Now()
 
 		// Уточним активный период (не критично, AddScoreInstant сам подхватит, если есть)
-		_ = db.SetActivePeriod(database)
+		_ = db.SetActivePeriod(ctx, database)
 
 		// Пропускаем неактивных на момент подтверждения
 		var skipped []string
 		for _, sid := range state.SelectedStudentIDs {
-			u, _ := db.GetUserByID(database, sid)
+			u, _ := db.GetUserByID(ctx, database, sid)
 			if u.ID == 0 || !u.IsActive {
 				if u.ID != 0 && strings.TrimSpace(u.Name) != "" {
 					skipped = append(skipped, u.Name)
@@ -187,7 +188,7 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 				c := trim
 				score.Comment = &c
 			}
-			if err := db.AddScoreInstant(database, score, createdBy, now); err != nil {
+			if err := db.AddScoreInstant(ctx, database, score, createdBy, now); err != nil {
 				log.Printf("AddScoreInstant error student=%d: %v", sid, err)
 			}
 		}
@@ -218,7 +219,7 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		case 4: // выбирали категорию → назад к ученикам
 			state.Step = 3
 			// пересоберём список учеников
-			students, _ := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
+			students, _ := db.GetStudentsByClass(ctx, database, state.ClassNumber, state.ClassLetter)
 			var buttons [][]tgbotapi.InlineKeyboardButton
 			for _, s := range students {
 				label := s.Name
@@ -238,8 +239,8 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 			return
 		case 5: // выбирали уровень → назад к категории
 			state.Step = 4
-			user, _ := db.GetUserByTelegramID(database, chatID)
-			cats, _ := db.GetCategories(database, false)
+			user, _ := db.GetUserByTelegramID(ctx, database, chatID)
+			cats, _ := db.GetCategories(ctx, database, false)
 			categories := make([]models.Category, 0, len(cats))
 			role := ""
 			if user != nil && user.Role != nil {
@@ -263,7 +264,7 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 			return
 		case 6: // ввод комментария → назад к уровню
 			state.Step = 5
-			levels, _ := db.GetLevelsByCategoryIDFull(database, int64(state.CategoryID), false)
+			levels, _ := db.GetLevelsByCategoryIDFull(ctx, database, int64(state.CategoryID), false)
 			var buttons [][]tgbotapi.InlineKeyboardButton
 			for _, l := range levels {
 				callback := fmt.Sprintf("add_score_level_%d", l.ID)
@@ -302,7 +303,7 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		state.ClassLetter = strings.TrimPrefix(data, "add_class_letter_")
 		state.Step = 3
 
-		students, _ := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
+		students, _ := db.GetStudentsByClass(ctx, database, state.ClassNumber, state.ClassLetter)
 		if len(students) == 0 {
 			delete(addStates, chatID)
 			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
@@ -347,7 +348,7 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 			}
 		} else {
 			// выбрать всех
-			students, _ := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
+			students, _ := db.GetStudentsByClass(ctx, database, state.ClassNumber, state.ClassLetter)
 			for _, s := range students {
 				found := false
 				for _, sid := range state.SelectedStudentIDs {
@@ -363,7 +364,7 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		}
 
 		// пересобираем клавиатуру
-		students, _ := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
+		students, _ := db.GetStudentsByClass(ctx, database, state.ClassNumber, state.ClassLetter)
 		var buttons [][]tgbotapi.InlineKeyboardButton
 		for _, s := range students {
 			label := s.Name
@@ -391,8 +392,8 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 
 	if data == "add_students_done" {
 		state.Step = 4
-		user, _ := db.GetUserByTelegramID(database, chatID)
-		cats, _ := db.GetCategories(database, false) // только активные
+		user, _ := db.GetUserByTelegramID(ctx, database, chatID)
+		cats, _ := db.GetCategories(ctx, database, false) // только активные
 		categories := make([]models.Category, 0, len(cats))
 		role := ""
 		if user != nil && user.Role != nil {
@@ -422,7 +423,7 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		catID, _ := strconv.Atoi(strings.TrimPrefix(data, "add_score_category_"))
 		state.CategoryID = catID
 		state.Step = 5
-		levels, _ := db.GetLevelsByCategoryIDFull(database, int64(state.CategoryID), false)
+		levels, _ := db.GetLevelsByCategoryIDFull(ctx, database, int64(state.CategoryID), false)
 		var buttons [][]tgbotapi.InlineKeyboardButton
 		for _, l := range levels {
 			callback := fmt.Sprintf("add_score_level_%d", l.ID)
@@ -444,12 +445,12 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		// === Новый шаг: карточка подтверждения (без текстового комментария) ===
 
 		// уровень
-		level, _ := db.GetLevelByID(database, state.LevelID)
+		level, _ := db.GetLevelByID(ctx, database, state.LevelID)
 		points := level.Value
 
 		// имя категории (без отдельного метода — через общий список)
 		catName := fmt.Sprintf("Категория #%d", state.CategoryID)
-		if cats, err := db.GetCategories(database, false); err == nil {
+		if cats, err := db.GetCategories(ctx, database, false); err == nil {
 			for _, c := range cats {
 				if c.ID == state.CategoryID {
 					catName = c.Name
@@ -458,7 +459,7 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 			}
 		}
 
-		period, err := db.GetActivePeriod(database)
+		period, err := db.GetActivePeriod(ctx, database)
 		if err != nil || period == nil {
 			edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "❌ Нет активного периода. Установите активный период и попробуйте снова.")
 			if _, err := tg.Send(bot, edit); err != nil {
@@ -471,7 +472,7 @@ func HandleAddScoreCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi
 		// имена учеников
 		var names []string
 		for _, sid := range state.SelectedStudentIDs {
-			u, err := db.GetUserByID(database, sid)
+			u, err := db.GetUserByID(ctx, database, sid)
 			if err != nil || u.ID == 0 || strings.TrimSpace(u.Name) == "" {
 				names = append(names, fmt.Sprintf("ID:%d", sid))
 			} else {

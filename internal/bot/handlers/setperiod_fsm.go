@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -110,7 +111,7 @@ func HandleSetPeriodInput(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 	}
 }
 
-func HandleSetPeriodCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
+func HandleSetPeriodCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
 	chatID := cb.Message.Chat.ID
 	state := periodStates[chatID]
 	if state == nil {
@@ -151,7 +152,7 @@ func HandleSetPeriodCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotap
 			StartDate: state.StartDate,
 			EndDate:   state.EndDate,
 		}
-		if _, err := db.CreatePeriod(database, period); err != nil {
+		if _, err := db.CreatePeriod(ctx, database, period); err != nil {
 			mk := tgbotapi.NewInlineKeyboardMarkup(
 				fsmutil.BackCancelRow(perBackToStart, perCancel),
 			)

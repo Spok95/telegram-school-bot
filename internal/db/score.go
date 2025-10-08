@@ -37,7 +37,7 @@ func scanScoreWithUserFull(rows *sql.Rows) (models.ScoreWithUser, error) {
 	return s, err
 }
 
-func AddScoreContext(ctx context.Context, database *sql.DB, score models.Score) error {
+func AddScore(ctx context.Context, database *sql.DB, score models.Score) error {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	query := `
@@ -68,11 +68,8 @@ INSERT INTO scores (
 	return err
 }
 
-func AddScore(database *sql.DB, score models.Score) error {
-	return AddScoreContext(context.Background(), database, score)
-}
-
-func GetPendingScoresContext(ctx context.Context, database *sql.DB) ([]models.Score, error) {
+// GetPendingScores возвращает все заявки, ожидающие подтверждения
+func GetPendingScores(ctx context.Context, database *sql.DB) ([]models.Score, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	rows, err := database.QueryContext(ctx, `
@@ -99,12 +96,8 @@ func GetPendingScoresContext(ctx context.Context, database *sql.DB) ([]models.Sc
 	return results, nil
 }
 
-// GetPendingScores возвращает все заявки, ожидающие подтверждения
-func GetPendingScores(database *sql.DB) ([]models.Score, error) {
-	return GetPendingScoresContext(context.Background(), database)
-}
-
-func AddScoreInstantContext(ctx context.Context, database *sql.DB, score models.Score, approvedBy int64, approvedAt time.Time) error {
+// AddScoreInstant создать начисление сразу approved и обновить коллективный рейтинг
+func AddScoreInstant(ctx context.Context, database *sql.DB, score models.Score, approvedBy int64, approvedAt time.Time) error {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 
@@ -160,12 +153,8 @@ func AddScoreInstantContext(ctx context.Context, database *sql.DB, score models.
 	return tx.Commit()
 }
 
-// AddScoreInstant создать начисление сразу approved и обновить коллективный рейтинг
-func AddScoreInstant(database *sql.DB, score models.Score, approvedBy int64, approvedAt time.Time) error {
-	return AddScoreInstantContext(context.Background(), database, score, approvedBy, approvedAt)
-}
-
-func ApproveScoreContext(ctx context.Context, database *sql.DB, scoreID int64, adminID int64, approvedAt time.Time) error {
+// ApproveScore подтверждает заявку и обновляет рейтинг ученика и класса
+func ApproveScore(ctx context.Context, database *sql.DB, scoreID int64, adminID int64, approvedAt time.Time) error {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	tx, err := database.BeginTx(ctx, &sql.TxOptions{})
@@ -223,23 +212,15 @@ func ApproveScoreContext(ctx context.Context, database *sql.DB, scoreID int64, a
 	return tx.Commit()
 }
 
-// ApproveScore подтверждает заявку и обновляет рейтинг ученика и класса
-func ApproveScore(database *sql.DB, scoreID int64, adminID int64, approvedAt time.Time) error {
-	return ApproveScoreContext(context.Background(), database, scoreID, adminID, approvedAt)
-}
-
-func RejectScoreContext(ctx context.Context, database *sql.DB, scoreID int64, adminID int64, rejectedAt time.Time) error {
+func RejectScore(ctx context.Context, database *sql.DB, scoreID int64, adminID int64, rejectedAt time.Time) error {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	_, err := database.ExecContext(ctx, `UPDATE scores SET status = 'rejected', approved_by = $1, approved_at = $2 WHERE id = $3`, adminID, rejectedAt, scoreID)
 	return err
 }
 
-func RejectScore(database *sql.DB, scoreID int64, adminID int64, rejectedAt time.Time) error {
-	return RejectScoreContext(context.Background(), database, scoreID, adminID, rejectedAt)
-}
-
-func GetScoreStatusByIDContext(ctx context.Context, database *sql.DB, scoreID int64) (string, error) {
+// GetScoreStatusByID возвращает статус заявки по ID
+func GetScoreStatusByID(ctx context.Context, database *sql.DB, scoreID int64) (string, error) {
 	var status string
 	err := database.QueryRowContext(ctx, `SELECT status FROM scores WHERE id = $1`, scoreID).Scan(&status)
 	if err != nil {
@@ -248,12 +229,7 @@ func GetScoreStatusByIDContext(ctx context.Context, database *sql.DB, scoreID in
 	return status, nil
 }
 
-// GetScoreStatusByID возвращает статус заявки по ID
-func GetScoreStatusByID(database *sql.DB, scoreID int64) (string, error) {
-	return GetScoreStatusByIDContext(context.Background(), database, scoreID)
-}
-
-func GetApprovedScoreSumContext(ctx context.Context, database *sql.DB, studentID int64) (int, error) {
+func GetApprovedScoreSum(ctx context.Context, database *sql.DB, studentID int64) (int, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	var total int
@@ -267,11 +243,7 @@ func GetApprovedScoreSumContext(ctx context.Context, database *sql.DB, studentID
 	return total, nil
 }
 
-func GetApprovedScoreSum(database *sql.DB, studentID int64) (int, error) {
-	return GetApprovedScoreSumContext(context.Background(), database, studentID)
-}
-
-func GetScoresByPeriodContext(ctx context.Context, database *sql.DB, periodID int) ([]models.ScoreWithUser, error) {
+func GetScoresByPeriod(ctx context.Context, database *sql.DB, periodID int) ([]models.ScoreWithUser, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	row := database.QueryRowContext(ctx, `SELECT start_date, end_date FROM periods WHERE id = $1`, periodID)
@@ -324,11 +296,7 @@ func GetScoresByPeriodContext(ctx context.Context, database *sql.DB, periodID in
 	return result, nil
 }
 
-func GetScoresByPeriod(database *sql.DB, periodID int) ([]models.ScoreWithUser, error) {
-	return GetScoresByPeriodContext(context.Background(), database, periodID)
-}
-
-func GetScoresByStudentAndDateRangeContext(ctx context.Context, database *sql.DB, studentID int64, from, to time.Time) ([]models.ScoreWithUser, error) {
+func GetScoresByStudentAndDateRange(ctx context.Context, database *sql.DB, studentID int64, from, to time.Time) ([]models.ScoreWithUser, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	query := `
@@ -367,12 +335,8 @@ func GetScoresByStudentAndDateRangeContext(ctx context.Context, database *sql.DB
 	return result, nil
 }
 
-// GetScoresByStudentAndDateRange Для отчёта по ученику
-func GetScoresByStudentAndDateRange(database *sql.DB, studentID int64, from, to time.Time) ([]models.ScoreWithUser, error) {
-	return GetScoresByStudentAndDateRangeContext(context.Background(), database, studentID, from, to)
-}
-
-func GetScoresByClassAndDateRangeContext(ctx context.Context, database *sql.DB, classNumber int, classLetter string, from, to time.Time) ([]models.ScoreWithUser, error) {
+// GetScoresByClassAndDateRange Для отчёта по классу
+func GetScoresByClassAndDateRange(ctx context.Context, database *sql.DB, classNumber int, classLetter string, from, to time.Time) ([]models.ScoreWithUser, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	query := `
@@ -412,12 +376,8 @@ func GetScoresByClassAndDateRangeContext(ctx context.Context, database *sql.DB, 
 	return result, nil
 }
 
-// GetScoresByClassAndDateRange Для отчёта по классу
-func GetScoresByClassAndDateRange(database *sql.DB, classNumber int, classLetter string, from, to time.Time) ([]models.ScoreWithUser, error) {
-	return GetScoresByClassAndDateRangeContext(context.Background(), database, classNumber, classLetter, from, to)
-}
-
-func GetScoresByDateRangeContext(ctx context.Context, database *sql.DB, from, to time.Time) ([]models.ScoreWithUser, error) {
+// GetScoresByDateRange Для отчёта по школе
+func GetScoresByDateRange(ctx context.Context, database *sql.DB, from, to time.Time) ([]models.ScoreWithUser, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	query := `
@@ -457,12 +417,7 @@ func GetScoresByDateRangeContext(ctx context.Context, database *sql.DB, from, to
 	return result, nil
 }
 
-// GetScoresByDateRange Для отчёта по школе
-func GetScoresByDateRange(database *sql.DB, from, to time.Time) ([]models.ScoreWithUser, error) {
-	return GetScoresByDateRangeContext(context.Background(), database, from, to)
-}
-
-func GetScoresByStudentAndPeriodContext(ctx context.Context, database *sql.DB, selectedStudentID int64, periodID int) ([]models.ScoreWithUser, error) {
+func GetScoresByStudentAndPeriod(ctx context.Context, database *sql.DB, selectedStudentID int64, periodID int) ([]models.ScoreWithUser, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	row := database.QueryRowContext(ctx, `SELECT start_date, end_date FROM periods WHERE id = $1`, periodID)
@@ -512,11 +467,7 @@ func GetScoresByStudentAndPeriodContext(ctx context.Context, database *sql.DB, s
 	return result, nil
 }
 
-func GetScoresByStudentAndPeriod(database *sql.DB, selectedStudentID int64, periodID int) ([]models.ScoreWithUser, error) {
-	return GetScoresByStudentAndPeriodContext(context.Background(), database, selectedStudentID, periodID)
-}
-
-func GetScoresByClassAndPeriodContext(ctx context.Context, database *sql.DB, classNumber int64, classLetter string, periodID int64) ([]models.ScoreWithUser, error) {
+func GetScoresByClassAndPeriod(ctx context.Context, database *sql.DB, classNumber int64, classLetter string, periodID int64) ([]models.ScoreWithUser, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	row := database.QueryRowContext(ctx, `SELECT start_date, end_date FROM periods WHERE id = $1`, periodID)
@@ -564,8 +515,4 @@ func GetScoresByClassAndPeriodContext(ctx context.Context, database *sql.DB, cla
 		result = append(result, s)
 	}
 	return result, nil
-}
-
-func GetScoresByClassAndPeriod(database *sql.DB, classNumber int64, classLetter string, periodID int64) ([]models.ScoreWithUser, error) {
-	return GetScoresByClassAndPeriodContext(context.Background(), database, classNumber, classLetter, periodID)
 }

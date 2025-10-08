@@ -14,7 +14,7 @@ import (
 
 var UserFSMRole = make(map[int64]string)
 
-func EnsureAdminContext(ctx context.Context, chatID int64, database *sql.DB, text string, bot *tgbotapi.BotAPI) {
+func EnsureAdmin(ctx context.Context, chatID int64, database *sql.DB, text string, bot *tgbotapi.BotAPI) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 
@@ -41,7 +41,7 @@ func EnsureAdminContext(ctx context.Context, chatID int64, database *sql.DB, tex
 				return
 			}
 
-			user, err := GetUserByTelegramID(database, chatID)
+			user, err := GetUserByTelegramID(ctx, database, chatID)
 			if err != nil || user == nil {
 				log.Println("❌ Не удалось получить admin user:", err)
 			} else {
@@ -61,10 +61,6 @@ func EnsureAdminContext(ctx context.Context, chatID int64, database *sql.DB, tex
 			metrics.HandlerErrors.Inc()
 		}
 	}
-}
-
-func EnsureAdmin(chatID int64, database *sql.DB, text string, bot *tgbotapi.BotAPI) {
-	EnsureAdminContext(context.Background(), chatID, database, text, bot)
 }
 
 func SetUserFSMRole(chatID int64, role string) {

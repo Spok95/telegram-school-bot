@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strconv"
@@ -72,8 +73,8 @@ func studentEditMenu(bot *tgbotapi.BotAPI, chatID int64, messageID int, text str
 	}
 }
 
-// Начало FSM ученика
-func StartStudentRegistration(chatID int64, msg string, bot *tgbotapi.BotAPI, database *sql.DB) {
+// StartStudentRegistration Начало FSM ученика
+func StartStudentRegistration(chatID int64, bot *tgbotapi.BotAPI) {
 	delete(studentFSM, chatID)
 	delete(studentData, chatID)
 
@@ -83,8 +84,8 @@ func StartStudentRegistration(chatID int64, msg string, bot *tgbotapi.BotAPI, da
 	}
 }
 
-// Обработка шагов FSM
-func HandleStudentFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *sql.DB) {
+// HandleStudentFSM Обработка шагов FSM
+func HandleStudentFSM(chatID int64, msg string, bot *tgbotapi.BotAPI) {
 	trimmed := strings.TrimSpace(msg)
 	if strings.EqualFold(trimmed, "отмена") || strings.EqualFold(trimmed, "/cancel") {
 		delete(studentFSM, chatID)
@@ -108,13 +109,13 @@ func HandleStudentFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *
 	}
 }
 
-func SaveStudentRequest(database *sql.DB, chatID int64, data *StudentRegisterData) (int64, error) {
-	classID, err := db.ClassIDByNumberAndLetter(database, data.ClassNumber, data.ClassLetter)
+func SaveStudentRequest(ctx context.Context, database *sql.DB, chatID int64, data *StudentRegisterData) (int64, error) {
+	classID, err := db.ClassIDByNumberAndLetter(ctx, database, data.ClassNumber, data.ClassLetter)
 	if err != nil {
 		return 0, fmt.Errorf("❌ Ошибка: выбранный класс не существует. %w", err)
 	}
 	var newID int64
-	if err := database.QueryRow(`
+	if err := database.QueryRowContext(ctx, `
     	INSERT INTO users (telegram_id, name, role, class_id, class_number, class_letter, confirmed)
     	VALUES ($1,$2,'student',$3,$4,$5,FALSE)
     	RETURNING id
@@ -124,7 +125,7 @@ func SaveStudentRequest(database *sql.DB, chatID int64, data *StudentRegisterDat
 	return newID, nil
 }
 
-func HandleStudentCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, database *sql.DB) {
+func HandleStudentCallback(ctx context.Context, cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, database *sql.DB) {
 	chatID := cb.Message.Chat.ID
 	data := cb.Data
 	if data == "student_cancel" {
@@ -182,7 +183,7 @@ func HandleStudentCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, dat
 		studentData[chatID].ClassLetter = letter
 		studentFSM[chatID] = StateStudentWaitingConfirm
 
-		id, err := SaveStudentRequest(database, chatID, studentData[chatID])
+		id, err := SaveStudentRequest(ctx, database, chatID, studentData[chatID])
 		if err != nil {
 			fsmutil.DisableMarkup(bot, chatID, cb.Message.MessageID)
 			if _, err := tg.Send(bot, tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "Ошибка при сохранении заявки. Попробуйте позже.")); err != nil {
@@ -196,7 +197,7 @@ func HandleStudentCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, dat
 		if _, err := tg.Send(bot, tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "Заявка на регистрацию отправлена администратору. Ожидайте подтверждения.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
-		handlers.NotifyAdminsAboutNewUser(bot, database, id)
+		handlers.NotifyAdminsAboutNewUser(ctx, bot, database, id)
 		delete(studentFSM, chatID)
 		delete(studentData, chatID)
 		return

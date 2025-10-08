@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -15,9 +16,9 @@ import (
 )
 
 // StartStudentHistoryExcel Ученик → Excel история за активный период
-func StartStudentHistoryExcel(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+func StartStudentHistoryExcel(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
-	u, err := db.GetUserByTelegramID(database, chatID)
+	u, err := db.GetUserByTelegramID(ctx, database, chatID)
 	if err != nil || u == nil || u.Role == nil || *u.Role != models.Student {
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Доступно только ученикам.")); err != nil {
 			metrics.HandlerErrors.Inc()
@@ -30,27 +31,27 @@ func StartStudentHistoryExcel(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbot
 		}
 		return
 	}
-	act, err := db.GetActivePeriod(database)
+	act, err := db.GetActivePeriod(ctx, database)
 	if err != nil || act == nil {
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Активный период не найден.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
 	}
-	go generateAndSendStudentHistoryExcel(bot, database, chatID, u.ID, int(*u.ClassNumber), *u.ClassLetter, act.ID, act.Name)
+	go generateAndSendStudentHistoryExcel(ctx, bot, database, chatID, u.ID, int(*u.ClassNumber), *u.ClassLetter, act.ID, act.Name)
 }
 
 // StartParentHistoryExcel Родитель → один ребёнок: сразу отчёт; несколько — выбор ребёнка
-func StartParentHistoryExcel(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+func StartParentHistoryExcel(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
-	u, err := db.GetUserByTelegramID(database, chatID)
+	u, err := db.GetUserByTelegramID(ctx, database, chatID)
 	if err != nil || u == nil || u.Role == nil || *u.Role != models.Parent {
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Доступно только родителям.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
 	}
-	children, err := db.GetChildrenByParentID(database, u.ID)
+	children, err := db.GetChildrenByParentID(ctx, database, u.ID)
 	if err != nil || len(children) == 0 {
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "У вас нет привязанных активных детей.")); err != nil {
 			metrics.HandlerErrors.Inc()
@@ -58,9 +59,9 @@ func StartParentHistoryExcel(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbota
 		return
 	}
 	if len(children) == 1 {
-		if act, _ := db.GetActivePeriod(database); act != nil {
+		if act, _ := db.GetActivePeriod(ctx, database); act != nil {
 			c := children[0]
-			go generateAndSendStudentHistoryExcel(bot, database, chatID, c.ID, int(*c.ClassNumber), *c.ClassLetter, act.ID, act.Name)
+			go generateAndSendStudentHistoryExcel(ctx, bot, database, chatID, c.ID, int(*c.ClassNumber), *c.ClassLetter, act.ID, act.Name)
 			return
 		}
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Активный период не найден.")); err != nil {
@@ -84,7 +85,7 @@ func StartParentHistoryExcel(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbota
 }
 
 // HandleHistoryExcelCallback Callback выбора ребёнка
-func HandleHistoryExcelCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
+func HandleHistoryExcelCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
 	chatID := cb.Message.Chat.ID
 	data := cb.Data
 	if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "")); err != nil {
@@ -100,15 +101,15 @@ func HandleHistoryExcelCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbo
 			}
 			return
 		}
-		u, err := db.GetUserByID(database, stuID)
+		u, err := db.GetUserByID(ctx, database, stuID)
 		if err != nil || u.ID == 0 || u.ClassNumber == nil || u.ClassLetter == nil {
 			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Не удалось определить класс ученика.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
 		}
-		if act, _ := db.GetActivePeriod(database); act != nil {
-			go generateAndSendStudentHistoryExcel(bot, database, chatID, stuID, int(*u.ClassNumber), *u.ClassLetter, act.ID, act.Name)
+		if act, _ := db.GetActivePeriod(ctx, database); act != nil {
+			go generateAndSendStudentHistoryExcel(ctx, bot, database, chatID, stuID, int(*u.ClassNumber), *u.ClassLetter, act.ID, act.Name)
 			return
 		}
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Активный период не найден.")); err != nil {
@@ -118,8 +119,8 @@ func HandleHistoryExcelCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbo
 }
 
 // generateAndSendStudentHistoryExcel Реальная генерация Excel: используем готовый generateStudentReport(...)
-func generateAndSendStudentHistoryExcel(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, studentID int64, classNumber int, classLetter string, periodID int64, periodName string) {
-	scores, err := db.GetScoresByStudentAndPeriod(database, studentID, int(periodID))
+func generateAndSendStudentHistoryExcel(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, studentID int64, classNumber int, classLetter string, periodID int64, periodName string) {
+	scores, err := db.GetScoresByStudentAndPeriod(ctx, database, studentID, int(periodID))
 	if err != nil {
 		log.Println("history export: get scores:", err)
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Не удалось получить историю за период.")); err != nil {
@@ -127,7 +128,7 @@ func generateAndSendStudentHistoryExcel(bot *tgbotapi.BotAPI, database *sql.DB, 
 		}
 		return
 	}
-	collective := calcCollectiveForClassPeriod(database, int64(classNumber), classLetter, periodID) // без «Аукцион»
+	collective := calcCollectiveForClassPeriod(ctx, database, int64(classNumber), classLetter, periodID) // без «Аукцион»
 	className := fmt.Sprintf("%d%s", classNumber, classLetter)
 
 	filePath, err := generateStudentReport(scores, collective, className, periodName)
@@ -146,12 +147,12 @@ func generateAndSendStudentHistoryExcel(bot *tgbotapi.BotAPI, database *sql.DB, 
 }
 
 // calcCollectiveForClassPeriod Коллективный рейтинг класса за период (30%), исключая категорию «Аукцион».
-func calcCollectiveForClassPeriod(database *sql.DB, classNumber int64, classLetter string, periodID int64) int64 {
-	classScores, err := db.GetScoresByClassAndPeriod(database, classNumber, classLetter, periodID)
+func calcCollectiveForClassPeriod(ctx context.Context, database *sql.DB, classNumber int64, classLetter string, periodID int64) int64 {
+	classScores, err := db.GetScoresByClassAndPeriod(ctx, database, classNumber, classLetter, periodID)
 	if err != nil {
 		return 0
 	}
-	auctionID := db.GetCategoryIDByName(database, "Аукцион")
+	auctionID := db.GetCategoryIDByName(ctx, database, "Аукцион")
 	totals := map[int64]int{}
 	for _, sc := range classScores {
 		if int(sc.CategoryID) == auctionID {

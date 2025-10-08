@@ -13,7 +13,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/models"
 )
 
-func GetUserByTelegramIDContext(ctx context.Context, database *sql.DB, telegramID int64) (*models.User, error) {
+func GetUserByTelegramID(ctx context.Context, database *sql.DB, telegramID int64) (*models.User, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	query := `
@@ -31,11 +31,7 @@ FROM users WHERE telegram_id = $1`
 	return &u, nil
 }
 
-func GetUserByTelegramID(database *sql.DB, telegramID int64) (*models.User, error) {
-	return GetUserByTelegramIDContext(context.Background(), database, telegramID)
-}
-
-func GetStudentsByClassContext(ctx context.Context, database *sql.DB, number int64, letter string) ([]models.User, error) {
+func GetStudentsByClass(ctx context.Context, database *sql.DB, number int64, letter string) ([]models.User, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	rows, err := database.QueryContext(ctx, `
@@ -64,11 +60,7 @@ func GetStudentsByClassContext(ctx context.Context, database *sql.DB, number int
 	return students, nil
 }
 
-func GetStudentsByClass(database *sql.DB, number int64, letter string) ([]models.User, error) {
-	return GetStudentsByClassContext(context.Background(), database, number, letter)
-}
-
-func GetChildrenByParentIDContext(ctx context.Context, database *sql.DB, parentID int64) ([]models.User, error) {
+func GetChildrenByParentID(ctx context.Context, database *sql.DB, parentID int64) ([]models.User, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	rows, err := database.QueryContext(ctx, `
@@ -93,11 +85,7 @@ func GetChildrenByParentIDContext(ctx context.Context, database *sql.DB, parentI
 	return students, nil
 }
 
-func GetChildrenByParentID(database *sql.DB, parentID int64) ([]models.User, error) {
-	return GetChildrenByParentIDContext(context.Background(), database, parentID)
-}
-
-func GetUserByIDContext(ctx context.Context, database *sql.DB, id int64) (models.User, error) {
+func GetUserByID(ctx context.Context, database *sql.DB, id int64) (models.User, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	var user models.User
@@ -123,11 +111,7 @@ func GetUserByIDContext(ctx context.Context, database *sql.DB, id int64) (models
 	return user, err
 }
 
-func GetUserByID(database *sql.DB, id int64) (models.User, error) {
-	return GetUserByIDContext(context.Background(), database, id)
-}
-
-func ClassIDByNumberAndLetterContext(ctx context.Context, database *sql.DB, number int64, letter string) (int64, error) {
+func ClassIDByNumberAndLetter(ctx context.Context, database *sql.DB, number int64, letter string) (int64, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	var classID int64
@@ -140,11 +124,8 @@ func ClassIDByNumberAndLetterContext(ctx context.Context, database *sql.DB, numb
 	return classID, nil
 }
 
-func ClassIDByNumberAndLetter(database *sql.DB, number int64, letter string) (int64, error) {
-	return ClassIDByNumberAndLetterContext(context.Background(), database, number, letter)
-}
-
-func FindUsersByQueryContext(ctx context.Context, database *sql.DB, q string, limit int) ([]models.User, error) {
+// FindUsersByQuery returns users matching name substring or class like "7А".
+func FindUsersByQuery(ctx context.Context, database *sql.DB, q string, limit int) ([]models.User, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 
@@ -200,11 +181,6 @@ LIMIT $5`
 	return res, nil
 }
 
-// FindUsersByQuery returns users matching name substring or class like "7А".
-func FindUsersByQuery(database *sql.DB, q string, limit int) ([]models.User, error) {
-	return FindUsersByQueryContext(context.Background(), database, q, limit)
-}
-
 func normalizeClassQuery(q string) string {
 	pairs := map[rune]rune{
 		'A': 'А', 'a': 'А',
@@ -229,10 +205,11 @@ func normalizeClassQuery(q string) string {
 	return strings.ToUpper(string(out))
 }
 
-func ChangeRoleWithCleanupContext(ctx context.Context, database *sql.DB, targetUserID int64, newRole string, changedBy int64) error {
+// ChangeRoleWithCleanup меняет роль и делает уборку (чистит класс/родительские связи) + аудит.
+func ChangeRoleWithCleanup(ctx context.Context, database *sql.DB, targetUserID int64, newRole string, changedBy int64) error {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
-	tx, err := database.Begin()
+	tx, err := database.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return err
 	}
@@ -329,15 +306,11 @@ func ChangeRoleWithCleanupContext(ctx context.Context, database *sql.DB, targetU
 	return tx.Commit()
 }
 
-// ChangeRoleWithCleanup меняет роль и делает уборку (чистит класс/родительские связи) + аудит.
-func ChangeRoleWithCleanup(database *sql.DB, targetUserID int64, newRole string, changedBy int64) error {
-	return ChangeRoleWithCleanupContext(context.Background(), database, targetUserID, newRole, changedBy)
-}
-
-func ChangeRoleToStudentWithAuditContext(ctx context.Context, database *sql.DB, targetUserID int64, classNumber int64, classLetter string, changedBy int64) error {
+// ChangeRoleToStudentWithAudit переводим в student + ставим класс и аудит.
+func ChangeRoleToStudentWithAudit(ctx context.Context, database *sql.DB, targetUserID int64, classNumber int64, classLetter string, changedBy int64) error {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
-	tx, err := database.Begin()
+	tx, err := database.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return err
 	}
@@ -382,11 +355,6 @@ func ChangeRoleToStudentWithAuditContext(ctx context.Context, database *sql.DB, 
 	return tx.Commit()
 }
 
-// ChangeRoleToStudentWithAudit переводим в student + ставим класс и аудит.
-func ChangeRoleToStudentWithAudit(database *sql.DB, targetUserID int64, classNumber int64, classLetter string, changedBy int64) error {
-	return ChangeRoleToStudentWithAuditContext(context.Background(), database, targetUserID, classNumber, classLetter, changedBy)
-}
-
 func ToTitleRU(s string) string {
 	var b strings.Builder
 	prevSpace := true
@@ -411,31 +379,24 @@ func toUpperRU(s string) string {
 	return strings.ToUpper(s) // в Go это работает и для кириллицы
 }
 
-func DeactivateUserContext(ctx context.Context, database *sql.DB, userID int64, at time.Time) error {
+// DeactivateUser ставит is_active=false и фиксирует деактивацию
+func DeactivateUser(ctx context.Context, database *sql.DB, userID int64, at time.Time) error {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	_, err := database.ExecContext(ctx, `UPDATE users SET is_active=FALSE, deactivated_at=COALESCE(deactivated_at, $2) WHERE id=$1`, userID, at)
 	return err
 }
 
-// DeactivateUser ставит is_active=false и фиксирует деактивацию
-func DeactivateUser(database *sql.DB, userID int64, at time.Time) error {
-	return DeactivateUserContext(context.Background(), database, userID, at)
-}
-
-func ActivateUserContext(ctx context.Context, database *sql.DB, userID int64) error {
+// ActivateUser возвращает доступ (is_active=true), но deactivated_at не трогаем
+func ActivateUser(ctx context.Context, database *sql.DB, userID int64) error {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	_, err := database.ExecContext(ctx, `UPDATE users SET is_active=TRUE WHERE id=$1`, userID)
 	return err
 }
 
-// ActivateUser возвращает доступ (is_active=true), но deactivated_at не трогаем
-func ActivateUser(database *sql.DB, userID int64) error {
-	return ActivateUserContext(context.Background(), database, userID)
-}
-
-func RefreshParentActiveFlagContext(ctx context.Context, database *sql.DB, parentID int64) error {
+// RefreshParentActiveFlag если нет активных детей — родитель становится неактивным
+func RefreshParentActiveFlag(ctx context.Context, database *sql.DB, parentID int64) error {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	var n int
@@ -457,12 +418,8 @@ func RefreshParentActiveFlagContext(ctx context.Context, database *sql.DB, paren
 	return err
 }
 
-// RefreshParentActiveFlag если нет активных детей — родитель становится неактивным
-func RefreshParentActiveFlag(database *sql.DB, parentID int64) error {
-	return RefreshParentActiveFlagContext(context.Background(), database, parentID)
-}
-
-func GetAdminTelegramIDsContext(ctx context.Context, database *sql.DB) ([]int64, error) {
+// GetAdminTelegramIDs — chat_id админов (admin + administration), только активные.
+func GetAdminTelegramIDs(ctx context.Context, database *sql.DB) ([]int64, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	rows, err := database.QueryContext(ctx, `
@@ -485,9 +442,4 @@ func GetAdminTelegramIDsContext(ctx context.Context, database *sql.DB) ([]int64,
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
-}
-
-// GetAdminTelegramIDs — chat_id админов (admin + administration), только активные.
-func GetAdminTelegramIDs(database *sql.DB) ([]int64, error) {
-	return GetAdminTelegramIDsContext(context.Background(), database)
 }

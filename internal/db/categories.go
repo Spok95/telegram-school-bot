@@ -9,7 +9,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/models"
 )
 
-func GetLevelByIDContext(ctx context.Context, database *sql.DB, levelID int) (*models.ScoreLevel, error) {
+func GetLevelByID(ctx context.Context, database *sql.DB, levelID int) (*models.ScoreLevel, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	var level models.ScoreLevel
@@ -20,11 +20,8 @@ func GetLevelByIDContext(ctx context.Context, database *sql.DB, levelID int) (*m
 	return &level, nil
 }
 
-func GetLevelByID(database *sql.DB, levelID int) (*models.ScoreLevel, error) {
-	return GetLevelByIDContext(context.Background(), database, levelID)
-}
-
-func GetCategoriesContext(ctx context.Context, database *sql.DB, includeInactive bool) ([]models.Category, error) {
+// GetCategories список (includeInactive=true — вернём и скрытые)
+func GetCategories(ctx context.Context, database *sql.DB, includeInactive bool) ([]models.Category, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	query := "SELECT id, name, label, is_active FROM categories"
@@ -51,12 +48,8 @@ func GetCategoriesContext(ctx context.Context, database *sql.DB, includeInactive
 	return out, nil
 }
 
-// GetCategories список (includeInactive=true — вернём и скрытые)
-func GetCategories(database *sql.DB, includeInactive bool) ([]models.Category, error) {
-	return GetCategoriesContext(context.Background(), database, includeInactive)
-}
-
-func GetCategoryByIDContext(ctx context.Context, database *sql.DB, id int64) (*models.Category, error) {
+// GetCategoryByID по id
+func GetCategoryByID(ctx context.Context, database *sql.DB, id int64) (*models.Category, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	var c models.Category
@@ -70,12 +63,8 @@ func GetCategoryByIDContext(ctx context.Context, database *sql.DB, id int64) (*m
 	return &c, nil
 }
 
-// GetCategoryByID по id
-func GetCategoryByID(database *sql.DB, id int64) (*models.Category, error) {
-	return GetCategoryByIDContext(context.Background(), database, id)
-}
-
-func CreateCategoryContext(ctx context.Context, database *sql.DB, name, label string) (int64, error) {
+// CreateCategory создать (name, label) — label уже есть в схеме
+func CreateCategory(ctx context.Context, database *sql.DB, name, label string) (int64, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	var id int64
@@ -90,12 +79,8 @@ func CreateCategoryContext(ctx context.Context, database *sql.DB, name, label st
 	return id, nil
 }
 
-// CreateCategory создать (name, label) — label уже есть в схеме
-func CreateCategory(database *sql.DB, name, label string) (int64, error) {
-	return CreateCategoryContext(context.Background(), database, name, label)
-}
-
-func RenameCategoryContext(ctx context.Context, database *sql.DB, id int64, name string) error {
+// RenameCategory переименовать (меняем name; при желании добавь и UpdateCategoryLabel)
+func RenameCategory(ctx context.Context, database *sql.DB, id int64, name string) error {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	res, err := database.ExecContext(ctx,
@@ -112,12 +97,8 @@ func RenameCategoryContext(ctx context.Context, database *sql.DB, id int64, name
 	return nil
 }
 
-// RenameCategory переименовать (меняем name; при желании добавь и UpdateCategoryLabel)
-func RenameCategory(database *sql.DB, id int64, name string) error {
-	return RenameCategoryContext(context.Background(), database, id, name)
-}
-
-func SetCategoryActiveContext(ctx context.Context, database *sql.DB, id int64, active bool) error {
+// SetCategoryActive включить/выключить (is_active)
+func SetCategoryActive(ctx context.Context, database *sql.DB, id int64, active bool) error {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	res, err := database.ExecContext(ctx,
@@ -134,12 +115,8 @@ func SetCategoryActiveContext(ctx context.Context, database *sql.DB, id int64, a
 	return nil
 }
 
-// SetCategoryActive включить/выключить (is_active)
-func SetCategoryActive(database *sql.DB, id int64, active bool) error {
-	return SetCategoryActiveContext(context.Background(), database, id, active)
-}
-
-func GetLevelsByCategoryIDFullContext(ctx context.Context, database *sql.DB, catID int64, includeInactive bool) ([]models.ScoreLevel, error) {
+// GetLevelsByCategoryIDFull список уровней категории (includeInactive как выше)
+func GetLevelsByCategoryIDFull(ctx context.Context, database *sql.DB, catID int64, includeInactive bool) ([]models.ScoreLevel, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	query := "SELECT id, value, label, category_id, is_active FROM score_levels WHERE category_id = $1"
@@ -166,12 +143,7 @@ func GetLevelsByCategoryIDFullContext(ctx context.Context, database *sql.DB, cat
 	return out, nil
 }
 
-// GetLevelsByCategoryIDFull список уровней категории (includeInactive как выше)
-func GetLevelsByCategoryIDFull(database *sql.DB, catID int64, includeInactive bool) ([]models.ScoreLevel, error) {
-	return GetLevelsByCategoryIDFullContext(context.Background(), database, catID, includeInactive)
-}
-
-func CreateLevelContext(ctx context.Context, database *sql.DB, catID int64, value int, label string) (int64, error) {
+func CreateLevel(ctx context.Context, database *sql.DB, catID int64, value int, label string) (int64, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	var id int64
@@ -185,11 +157,7 @@ func CreateLevelContext(ctx context.Context, database *sql.DB, catID int64, valu
 	return id, nil
 }
 
-func CreateLevel(database *sql.DB, catID int64, value int, label string) (int64, error) {
-	return CreateLevelContext(context.Background(), database, catID, value, label)
-}
-
-func RenameLevelContext(ctx context.Context, database *sql.DB, id int64, label string) error {
+func RenameLevel(ctx context.Context, database *sql.DB, id int64, label string) error {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	res, err := database.ExecContext(ctx,
@@ -206,11 +174,7 @@ func RenameLevelContext(ctx context.Context, database *sql.DB, id int64, label s
 	return nil
 }
 
-func RenameLevel(database *sql.DB, id int64, label string) error {
-	return RenameLevelContext(context.Background(), database, id, label)
-}
-
-func SetLevelActiveContext(ctx context.Context, database *sql.DB, id int64, active bool) error {
+func SetLevelActive(ctx context.Context, database *sql.DB, id int64, active bool) error {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	res, err := database.ExecContext(ctx,
@@ -227,11 +191,7 @@ func SetLevelActiveContext(ctx context.Context, database *sql.DB, id int64, acti
 	return nil
 }
 
-func SetLevelActive(database *sql.DB, id int64, active bool) error {
-	return SetLevelActiveContext(context.Background(), database, id, active)
-}
-
-func GetCategoryIDByNameContext(ctx context.Context, database *sql.DB, name string) int {
+func GetCategoryIDByName(ctx context.Context, database *sql.DB, name string) int {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	var id int
@@ -240,19 +200,11 @@ func GetCategoryIDByNameContext(ctx context.Context, database *sql.DB, name stri
 	return id
 }
 
-func GetCategoryIDByName(database *sql.DB, name string) int {
-	return GetCategoryIDByNameContext(context.Background(), database, name)
-}
-
-func GetCategoryNameByIDContext(ctx context.Context, database *sql.DB, id int) string {
+func GetCategoryNameByID(ctx context.Context, database *sql.DB, id int) string {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	var name string
 	row := database.QueryRowContext(ctx, `SELECT name FROM categories WHERE id = $1`, id)
 	_ = row.Scan(&name)
 	return name
-}
-
-func GetCategoryNameByID(database *sql.DB, id int) string {
-	return GetCategoryNameByIDContext(context.Background(), database, id)
 }

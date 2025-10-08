@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -52,7 +53,7 @@ func StartExportUsers(bot *tgbotapi.BotAPI, _ *sql.DB, msg *tgbotapi.Message, is
 	st.MessageID = sent.MessageID
 }
 
-func HandleExportUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery, isAdmin bool) {
+func HandleExportUsersCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery, isAdmin bool) {
 	chatID := cb.Message.Chat.ID
 	state := expUsers[chatID]
 	if state == nil {
@@ -81,7 +82,7 @@ func HandleExportUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbot
 			metrics.HandlerErrors.Inc()
 		}
 		delete(expUsers, chatID)
-		StartExportFSM(bot, database, cb.Message)
+		StartExportFSM(ctx, bot, database, cb.Message)
 		return
 	case cbEUToggle:
 		if !isAdmin {
@@ -122,27 +123,27 @@ func HandleExportUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbot
 			defer fsmutil.ClearPending(chatID, key)
 			defer delete(expUsers, chatID)
 
-			all, err := db.ListAllUsers(database, state.IncludeInactive)
+			all, err := db.ListAllUsers(ctx, database, state.IncludeInactive)
 			if err != nil {
 				fail(bot, chatID, state, err)
 				return
 			}
-			teachers, err := db.ListTeachers(database, state.IncludeInactive)
+			teachers, err := db.ListTeachers(ctx, database, state.IncludeInactive)
 			if err != nil {
 				fail(bot, chatID, state, err)
 				return
 			}
-			admins, err := db.ListAdministration(database, state.IncludeInactive)
+			admins, err := db.ListAdministration(ctx, database, state.IncludeInactive)
 			if err != nil {
 				fail(bot, chatID, state, err)
 				return
 			}
-			students, err := db.ListStudents(database, state.IncludeInactive)
+			students, err := db.ListStudents(ctx, database, state.IncludeInactive)
 			if err != nil {
 				fail(bot, chatID, state, err)
 				return
 			}
-			parents, err := db.ListParents(database, state.IncludeInactive)
+			parents, err := db.ListParents(ctx, database, state.IncludeInactive)
 			if err != nil {
 				fail(bot, chatID, state, err)
 				return

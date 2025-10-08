@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -110,7 +111,7 @@ func HandleParentFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *s
 	}
 }
 
-func HandleParentCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.CallbackQuery) {
+func HandleParentCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.CallbackQuery) {
 	chatID := cq.Message.Chat.ID
 	data := cq.Data
 	state := parentFSM[chatID]
@@ -164,7 +165,7 @@ func HandleParentCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 		parentData[chatID].ClassLetter = letter
 		parentFSM[chatID] = StateParentWaiting
 
-		studentID, err := FindStudentID(database, parentData[chatID])
+		studentID, err := FindStudentID(ctx, database, parentData[chatID])
 		if err != nil {
 			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
 			if _, err := tg.Send(bot, tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "❌ Ученик не найден. Введите ФИО заново:")); err != nil {
@@ -174,7 +175,7 @@ func HandleParentCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			return
 		}
 
-		parentID, err := SaveParentRequest(database, chatID, studentID, parentData[chatID].ParentName)
+		parentID, err := SaveParentRequest(ctx, database, chatID, studentID, parentData[chatID].ParentName)
 		if err != nil {
 			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
 			if _, err := tg.Send(bot, tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "Ошибка при сохранении. Попробуйте позже.")); err != nil {
@@ -188,18 +189,18 @@ func HandleParentCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 		if _, err := tg.Send(bot, tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "Заявка на регистрацию родителя отправлена администратору. Ожидайте подтверждения.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
-		handlers.NotifyAdminsAboutNewUser(bot, database, parentID)
+		handlers.NotifyAdminsAboutNewUser(ctx, bot, database, parentID)
 		delete(parentFSM, chatID)
 		delete(parentData, chatID)
 		return
 	}
 }
 
-func FindStudentID(database *sql.DB, data *ParentRegisterData) (int, error) {
+func FindStudentID(ctx context.Context, database *sql.DB, data *ParentRegisterData) (int, error) {
 	var id int
 	// Полное равенство без учета регистра: UPPER(name) = UPPER($1)
 	// (работает корректно и для кириллицы в Postgres)
-	err := database.QueryRow(`
+	err := database.QueryRowContext(ctx, `
 		SELECT id FROM users
 		WHERE UPPER(name) = UPPER($1)
 		  AND class_number = $2
@@ -209,17 +210,17 @@ func FindStudentID(database *sql.DB, data *ParentRegisterData) (int, error) {
 	return id, err
 }
 
-func SaveParentRequest(database *sql.DB, parentTelegramID int64, studentID int, parentName string) (int64, error) {
+func SaveParentRequest(ctx context.Context, database *sql.DB, parentTelegramID int64, studentID int, parentName string) (int64, error) {
 	var parentID int64
-	tx, err := database.Begin()
+	tx, err := database.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		log.Printf("[PARENT_ERROR] failed to begin transaction: %v", err)
 		return 0, err
 	}
-	err = tx.QueryRow(`SELECT id FROM users WHERE telegram_id = $1`, parentTelegramID).Scan(&parentID)
+	err = tx.QueryRowContext(ctx, `SELECT id FROM users WHERE telegram_id = $1`, parentTelegramID).Scan(&parentID)
 	if err == sql.ErrNoRows {
 		// Вставка родителя в users
-		err := tx.QueryRow(`
+		err := tx.QueryRowContext(ctx, `
 			INSERT INTO users (telegram_id, name, role, confirmed)
 			VALUES ($1, $2, 'parent', FALSE)
 			ON CONFLICT (telegram_id) DO UPDATE
@@ -237,7 +238,7 @@ func SaveParentRequest(database *sql.DB, parentTelegramID int64, studentID int, 
 	}
 
 	// Привязка к ученику
-	_, err = tx.Exec(`INSERT INTO parents_students (parent_id, student_id) VALUES ($1, $2)`, parentID, studentID)
+	_, err = tx.ExecContext(ctx, `INSERT INTO parents_students (parent_id, student_id) VALUES ($1, $2)`, parentID, studentID)
 	if err != nil {
 		log.Printf("[PARENT_ERROR] failed to insert into parents_students: %v", err)
 		_ = tx.Rollback()
@@ -251,7 +252,7 @@ func SaveParentRequest(database *sql.DB, parentTelegramID int64, studentID int, 
 
 	// Родитель мог быть неактивным — сразу пересчитаем активность:
 	// если теперь у него есть хотя бы один активный ребёнок, он станет активным.
-	if err := db.RefreshParentActiveFlag(database, parentID); err != nil {
+	if err := db.RefreshParentActiveFlag(ctx, database, parentID); err != nil {
 		log.Printf("[PARENT_ERROR] refresh parent activity failed: %v", err)
 	}
 

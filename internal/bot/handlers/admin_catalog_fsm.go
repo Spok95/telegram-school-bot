@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strconv"
@@ -47,10 +48,10 @@ func mark(b bool) string {
 
 // ====== start
 
-func StartCatalogFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+func StartCatalogFSM(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
 	catalogStates[chatID] = &CatalogFSMState{Step: 1}
-	showCategoriesList(bot, chatID, 0, false, database)
+	showCategoriesList(ctx, bot, chatID, 0, false, database)
 }
 
 func GetCatalogState(userID int64) *CatalogFSMState {
@@ -59,12 +60,8 @@ func GetCatalogState(userID int64) *CatalogFSMState {
 
 // ====== UI builders
 
-func showCategoriesList(bot *tgbotapi.BotAPI, chatID int64, messageID int, edit bool, database *sql.DB) {
-	cats, _ := db.GetCategories(database, true)
-
-	fmt.Println()
-	fmt.Println("Функция showCategoriesList", cats)
-	fmt.Println()
+func showCategoriesList(ctx context.Context, bot *tgbotapi.BotAPI, chatID int64, messageID int, edit bool, database *sql.DB) {
+	cats, _ := db.GetCategories(ctx, database, true)
 
 	text := "🗂 Справочники → Категории"
 	var rows [][]tgbotapi.InlineKeyboardButton
@@ -88,8 +85,8 @@ func showCategoriesList(bot *tgbotapi.BotAPI, chatID int64, messageID int, edit 
 	}
 }
 
-func showCategoryCard(bot *tgbotapi.BotAPI, chatID int64, messageID int, catID int64, database *sql.DB) {
-	c, _ := db.GetCategoryByID(database, catID)
+func showCategoryCard(ctx context.Context, bot *tgbotapi.BotAPI, chatID int64, messageID int, catID int64, database *sql.DB) {
+	c, _ := db.GetCategoryByID(ctx, database, catID)
 	text := fmt.Sprintf("📁 Категория: %s %s", c.Name, mark(c.IsActive))
 	rows := [][]tgbotapi.InlineKeyboardButton{
 		tgbotapi.NewInlineKeyboardRow(
@@ -107,9 +104,9 @@ func showCategoryCard(bot *tgbotapi.BotAPI, chatID int64, messageID int, catID i
 	editTextAndMarkup(bot, chatID, messageID, text, rows)
 }
 
-func showLevels(bot *tgbotapi.BotAPI, chatID int64, messageID int, catID int64, database *sql.DB) {
-	c, _ := db.GetCategoryByID(database, catID)
-	levels, _ := db.GetLevelsByCategoryIDFull(database, catID, true)
+func showLevels(ctx context.Context, bot *tgbotapi.BotAPI, chatID int64, messageID int, catID int64, database *sql.DB) {
+	c, _ := db.GetCategoryByID(ctx, database, catID)
+	levels, _ := db.GetLevelsByCategoryIDFull(ctx, database, catID, true)
 
 	text := fmt.Sprintf("📶 Уровни категории «%s»", c.Name)
 
@@ -128,8 +125,8 @@ func showLevels(bot *tgbotapi.BotAPI, chatID int64, messageID int, catID int64, 
 	editTextAndMarkup(bot, chatID, messageID, text, rows)
 }
 
-func showLevelCard(bot *tgbotapi.BotAPI, chatID int64, messageID int, levelID int64, database *sql.DB) {
-	l, _ := db.GetLevelByID(database, int(levelID))
+func showLevelCard(ctx context.Context, bot *tgbotapi.BotAPI, chatID int64, messageID int, levelID int64, database *sql.DB) {
+	l, _ := db.GetLevelByID(ctx, database, int(levelID))
 	text := fmt.Sprintf("🔢 Уровень: %s (%d) %s", l.Label, l.Value, mark(l.IsActive))
 	rows := [][]tgbotapi.InlineKeyboardButton{
 		tgbotapi.NewInlineKeyboardRow(
@@ -146,7 +143,7 @@ func showLevelCard(bot *tgbotapi.BotAPI, chatID int64, messageID int, levelID in
 
 // ====== callbacks
 
-func HandleCatalogCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.CallbackQuery) {
+func HandleCatalogCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.CallbackQuery) {
 	chatID := cq.Message.Chat.ID
 	st := catalogStates[chatID]
 	if st == nil {
@@ -171,7 +168,7 @@ func HandleCatalogCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 		st.Awaiting = ""
 		st.LevelID = nil
 		st.CategoryID = nil
-		showCategoriesList(bot, chatID, cq.Message.MessageID, true, database)
+		showCategoriesList(ctx, bot, chatID, cq.Message.MessageID, true, database)
 		return
 	}
 
@@ -185,13 +182,13 @@ func HandleCatalogCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 	case strings.HasPrefix(data, "catalog_cat_open_"):
 		id, _ := strconv.ParseInt(strings.TrimPrefix(data, "catalog_cat_open_"), 10, 64)
 		st.CategoryID = &id
-		showCategoryCard(bot, chatID, cq.Message.MessageID, id, database)
+		showCategoryCard(ctx, bot, chatID, cq.Message.MessageID, id, database)
 
 	case strings.HasPrefix(data, "catalog_cat_toggle_"):
 		id, _ := strconv.ParseInt(strings.TrimPrefix(data, "catalog_cat_toggle_"), 10, 64)
-		c, _ := db.GetCategoryByID(database, id)
-		_ = db.SetCategoryActive(database, id, !c.IsActive)
-		showCategoryCard(bot, chatID, cq.Message.MessageID, id, database)
+		c, _ := db.GetCategoryByID(ctx, database, id)
+		_ = db.SetCategoryActive(ctx, database, id, !c.IsActive)
+		showCategoryCard(ctx, bot, chatID, cq.Message.MessageID, id, database)
 
 	case strings.HasPrefix(data, "catalog_cat_rename_"):
 		id, _ := strconv.ParseInt(strings.TrimPrefix(data, "catalog_cat_rename_"), 10, 64)
@@ -203,7 +200,7 @@ func HandleCatalogCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 	case strings.HasPrefix(data, "catalog_levels_"):
 		id, _ := strconv.ParseInt(strings.TrimPrefix(data, "catalog_levels_"), 10, 64)
 		st.CategoryID = &id
-		showLevels(bot, chatID, cq.Message.MessageID, id, database)
+		showLevels(ctx, bot, chatID, cq.Message.MessageID, id, database)
 
 	// уровни
 	case strings.HasPrefix(data, "catalog_lvl_add_"):
@@ -217,13 +214,13 @@ func HandleCatalogCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 	case strings.HasPrefix(data, "catalog_lvl_open_"):
 		lvlID, _ := strconv.ParseInt(strings.TrimPrefix(data, "catalog_lvl_open_"), 10, 64)
 		st.LevelID = &lvlID
-		showLevelCard(bot, chatID, cq.Message.MessageID, lvlID, database)
+		showLevelCard(ctx, bot, chatID, cq.Message.MessageID, lvlID, database)
 
 	case strings.HasPrefix(data, "catalog_lvl_toggle_"):
 		lvlID, _ := strconv.ParseInt(strings.TrimPrefix(data, "catalog_lvl_toggle_"), 10, 64)
-		l, _ := db.GetLevelByID(database, int(lvlID))
-		_ = db.SetLevelActive(database, lvlID, !l.IsActive)
-		showLevelCard(bot, chatID, cq.Message.MessageID, lvlID, database)
+		l, _ := db.GetLevelByID(ctx, database, int(lvlID))
+		_ = db.SetLevelActive(ctx, database, lvlID, !l.IsActive)
+		showLevelCard(ctx, bot, chatID, cq.Message.MessageID, lvlID, database)
 
 	case strings.HasPrefix(data, "catalog_lvl_rename_"):
 		lvlID, _ := strconv.ParseInt(strings.TrimPrefix(data, "catalog_lvl_rename_"), 10, 64)
@@ -236,7 +233,7 @@ func HandleCatalogCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 
 // ====== text
 
-func HandleCatalogText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+func HandleCatalogText(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
 	st := catalogStates[chatID]
 	if st == nil {
@@ -270,14 +267,14 @@ func HandleCatalogText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 		}
 		defer fsmutil.ClearPending(chatID, key)
 
-		if _, err := db.CreateCategory(database, name, name); err != nil {
+		if _, err := db.CreateCategory(ctx, database, name, name); err != nil {
 			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Ошибка создания категории (возможно, дубликат).")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
 		}
 		st.Awaiting = ""
-		showCategoriesList(bot, chatID, msg.MessageID, false, database)
+		showCategoriesList(ctx, bot, chatID, msg.MessageID, false, database)
 
 	case "cat_rename":
 		if st.CategoryID == nil {
@@ -299,9 +296,9 @@ func HandleCatalogText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 		}
 		defer fsmutil.ClearPending(chatID, key)
 
-		_ = db.RenameCategory(database, *st.CategoryID, name)
+		_ = db.RenameCategory(ctx, database, *st.CategoryID, name)
 		// вернём карточку
-		showCategoryCard(bot, chatID, msg.MessageID-1, *st.CategoryID, database) // -1: текст пришёл отдельным msg
+		showCategoryCard(ctx, bot, chatID, msg.MessageID-1, *st.CategoryID, database) // -1: текст пришёл отдельным msg
 
 	case "level_value":
 		val, err := strconv.Atoi(strings.TrimSpace(msg.Text))
@@ -340,14 +337,14 @@ func HandleCatalogText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 		}
 		defer fsmutil.ClearPending(chatID, key)
 
-		if _, err := db.CreateLevel(database, *st.CategoryID, *st.TempLevelValue, label); err != nil {
+		if _, err := db.CreateLevel(ctx, database, *st.CategoryID, *st.TempLevelValue, label); err != nil {
 			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Ошибка добавления уровня (возможно, такой value уже есть в категории).")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
 		}
 		st.Awaiting = ""
-		showLevels(bot, chatID, msg.MessageID-1, *st.CategoryID, database)
+		showLevels(ctx, bot, chatID, msg.MessageID-1, *st.CategoryID, database)
 
 	case "level_label_edit":
 		if st.LevelID == nil {
@@ -369,7 +366,7 @@ func HandleCatalogText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 		}
 		defer fsmutil.ClearPending(chatID, key)
 
-		_ = db.RenameLevel(database, *st.LevelID, label)
-		showLevelCard(bot, chatID, msg.MessageID-1, *st.LevelID, database)
+		_ = db.RenameLevel(ctx, database, *st.LevelID, label)
+		showLevelCard(ctx, bot, chatID, msg.MessageID-1, *st.LevelID, database)
 	}
 }

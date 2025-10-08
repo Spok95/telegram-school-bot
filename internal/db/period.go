@@ -9,7 +9,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/models"
 )
 
-func GetActivePeriodContext(ctx context.Context, database *sql.DB) (*models.Period, error) {
+func GetActivePeriod(ctx context.Context, database *sql.DB) (*models.Period, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	row := database.QueryRowContext(ctx, `
@@ -25,11 +25,7 @@ func GetActivePeriodContext(ctx context.Context, database *sql.DB) (*models.Peri
 	return &p, nil
 }
 
-func GetActivePeriod(database *sql.DB) (*models.Period, error) {
-	return GetActivePeriodContext(context.Background(), database)
-}
-
-func SetActivePeriodContext(ctx context.Context, database *sql.DB) error {
+func SetActivePeriod(ctx context.Context, database *sql.DB) error {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	tx, err := database.BeginTx(ctx, &sql.TxOptions{})
@@ -55,11 +51,7 @@ func SetActivePeriodContext(ctx context.Context, database *sql.DB) error {
 	return tx.Commit()
 }
 
-func SetActivePeriod(database *sql.DB) error {
-	return SetActivePeriodContext(context.Background(), database)
-}
-
-func CreatePeriodContext(ctx context.Context, database *sql.DB, p models.Period) (int64, error) {
+func CreatePeriod(ctx context.Context, database *sql.DB, p models.Period) (int64, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	if p.StartDate.After(p.EndDate) {
@@ -74,11 +66,7 @@ func CreatePeriodContext(ctx context.Context, database *sql.DB, p models.Period)
 	return id, err
 }
 
-func CreatePeriod(database *sql.DB, p models.Period) (int64, error) {
-	return CreatePeriodContext(context.Background(), database, p)
-}
-
-func UpdatePeriodContext(ctx context.Context, database *sql.DB, p models.Period) error {
+func UpdatePeriod(ctx context.Context, database *sql.DB, p models.Period) error {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	if p.StartDate.After(p.EndDate) {
@@ -91,11 +79,7 @@ func UpdatePeriodContext(ctx context.Context, database *sql.DB, p models.Period)
 	return err
 }
 
-func UpdatePeriod(database *sql.DB, p models.Period) error {
-	return UpdatePeriodContext(context.Background(), database, p)
-}
-
-func ListPeriodsContext(ctx context.Context, database *sql.DB) ([]models.Period, error) {
+func ListPeriods(ctx context.Context, database *sql.DB) ([]models.Period, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	rows, err := database.QueryContext(ctx, `
@@ -118,11 +102,7 @@ func ListPeriodsContext(ctx context.Context, database *sql.DB) ([]models.Period,
 	return result, nil
 }
 
-func ListPeriods(database *sql.DB) ([]models.Period, error) {
-	return ListPeriodsContext(context.Background(), database)
-}
-
-func GetPeriodByIDContext(ctx context.Context, database *sql.DB, id int) (*models.Period, error) {
+func GetPeriodByID(ctx context.Context, database *sql.DB, id int) (*models.Period, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
 	row := database.QueryRowContext(ctx, `
@@ -134,8 +114,4 @@ func GetPeriodByIDContext(ctx context.Context, database *sql.DB, id int) (*model
 		return nil, err
 	}
 	return &p, nil
-}
-
-func GetPeriodByID(database *sql.DB, id int) (*models.Period, error) {
-	return GetPeriodByIDContext(context.Background(), database, id)
 }

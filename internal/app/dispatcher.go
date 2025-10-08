@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"database/sql"
 	"log"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/bot/auth"
 	"github.com/Spok95/telegram-school-bot/internal/bot/handlers"
 	"github.com/Spok95/telegram-school-bot/internal/bot/menu"
+	"github.com/Spok95/telegram-school-bot/internal/ctxutil"
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	"github.com/Spok95/telegram-school-bot/internal/models"
@@ -18,20 +20,25 @@ import (
 
 var chatLimiter = NewChatLimiter()
 
-func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
+	// базовый контекст для обработки входящего сообщения
+	ctx = ctxutil.WithChatID(
+		ctxutil.WithOp(ctx, "tg.message"),
+		chatID,
+	)
 	text := msg.Text
-	db.EnsureAdmin(chatID, database, text, bot)
+	db.EnsureAdmin(ctx, chatID, database, text, bot)
 
 	// 🔁 Если активен FSM восстановления БД — делегируем туда любой апдейт (текст/документ)
 	if handlers.AdminRestoreFSMActive(chatID) {
-		handlers.HandleAdminRestoreMessage(bot, database, msg)
+		handlers.HandleAdminRestoreMessage(ctx, bot, database, msg)
 		return
 	}
 
 	// Обработка команды /start без проверки регистрации
 	if text == "/start" {
-		user, err := db.GetUserByTelegramID(database, chatID)
+		user, err := db.GetUserByTelegramID(ctx, database, chatID)
 		if err != nil || user == nil || user.Role == nil {
 			msg := tgbotapi.NewMessage(chatID, "Выберите роль для регистрации:")
 			roles := tgbotapi.NewInlineKeyboardMarkup(
@@ -60,6 +67,9 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 			return
 		}
 
+		// положим внутр. userID в контекст (полезно для логов/метрик ниже)
+		ctx = ctxutil.WithUserID(ctx, user.ID)
+
 		// Пользователь уже зарегистрирован
 		db.SetUserFSMRole(chatID, string(*user.Role))
 		keyboard := menu.GetRoleMenu(string(*user.Role))
@@ -72,7 +82,7 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 	}
 
 	// Все остальные команды требуют регистрации
-	user, err := db.GetUserByTelegramID(database, chatID)
+	user, err := db.GetUserByTelegramID(ctx, database, chatID)
 	registered := false
 	if err == nil || user != nil && user.Role != nil {
 		registered = true
@@ -81,7 +91,7 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 	if !registered {
 		role := getUserFSMRole(chatID)
 		if role != "" {
-			auth.HandleFSMMessage(chatID, text, role, bot, database)
+			auth.HandleFSMMessage(ctx, chatID, text, role, bot, database)
 			return
 		}
 
@@ -105,7 +115,7 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		return
 	}
 	if handlers.GetRemoveScoreState(chatID) != nil {
-		handlers.HandleRemoveText(bot, database, msg)
+		handlers.HandleRemoveText(ctx, bot, database, msg)
 		return
 	}
 	if handlers.GetSetPeriodState(chatID) != nil {
@@ -113,23 +123,23 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		return
 	}
 	if handlers.GetAuctionState(chatID) != nil {
-		handlers.HandleAuctionText(bot, database, msg)
+		handlers.HandleAuctionText(ctx, bot, database, msg)
 		return
 	}
 	if handlers.GetExportState(chatID) != nil {
-		handlers.HandleExportText(bot, database, msg)
+		handlers.HandleExportText(ctx, bot, database, msg)
 		return
 	}
 	if handlers.GetAdminUsersState(chatID) != nil {
-		handlers.HandleAdminUsersText(bot, database, msg)
+		handlers.HandleAdminUsersText(ctx, bot, database, msg)
 		return
 	}
 	if handlers.GetCatalogState(chatID) != nil {
-		handlers.HandleCatalogText(bot, database, msg)
+		handlers.HandleCatalogText(ctx, bot, database, msg)
 		return
 	}
 	if auth.GetAddChildFSMState(chatID) != "" {
-		auth.HandleAddChildText(bot, database, msg)
+		auth.HandleAddChildText(ctx, bot, database, msg)
 		return
 	}
 
@@ -138,23 +148,23 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		unlock := chatLimiter.lock(chatID)
 		go func() {
 			defer unlock()
-			handlers.StartAddScoreFSM(bot, database, msg)
+			handlers.StartAddScoreFSM(ctx, bot, database, msg)
 		}()
 	case "/remove_score", "📉 Списать баллы":
 		unlock := chatLimiter.lock(chatID)
 		go func() {
 			defer unlock()
-			handlers.StartRemoveScoreFSM(bot, database, msg)
+			handlers.StartRemoveScoreFSM(ctx, bot, database, msg)
 		}()
 	case "/my_score", "📊 Мой рейтинг":
-		go handlers.HandleMyScore(bot, database, msg)
+		go handlers.HandleMyScore(ctx, bot, database, msg)
 	case "📜 История получения баллов":
 		if user.Role != nil {
 			switch *user.Role {
 			case models.Student:
-				handlers.StartStudentHistoryExcel(bot, database, msg)
+				handlers.StartStudentHistoryExcel(ctx, bot, database, msg)
 			case models.Parent:
-				handlers.StartParentHistoryExcel(bot, database, msg)
+				handlers.StartParentHistoryExcel(ctx, bot, database, msg)
 			default:
 				if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Недоступно для вашей роли.")); err != nil {
 					metrics.HandlerErrors.Inc()
@@ -162,30 +172,30 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 			}
 		}
 	case "➕ Добавить ребёнка":
-		go auth.StartAddChild(bot, database, msg)
+		go auth.StartAddChild(bot, msg)
 	case "📊 Рейтинг ребёнка":
 		if *user.Role == models.Parent {
-			go handlers.HandleParentRatingRequest(bot, database, chatID, user.ID)
+			go handlers.HandleParentRatingRequest(ctx, bot, database, chatID, user.ID)
 		}
 	case "/approvals", "📥 Заявки на баллы":
 		if *user.Role == "admin" || *user.Role == "administration" {
-			go handlers.ShowPendingScores(bot, database, chatID)
+			go handlers.ShowPendingScores(ctx, bot, database, chatID)
 		}
 	case "📥 Заявки на авторизацию":
 		if db.IsAdminID(chatID) {
-			go handlers.ShowPendingUsers(bot, database, chatID)
-			go handlers.ShowPendingParentLinks(bot, database, chatID)
+			go handlers.ShowPendingUsers(ctx, bot, database, chatID)
+			go handlers.ShowPendingParentLinks(ctx, bot, database, chatID)
 		}
 	case "/periods", "📅 Периоды":
 		if *user.Role == "admin" {
-			go handlers.StartAdminPeriods(bot, database, msg)
+			go handlers.StartAdminPeriods(ctx, bot, database, msg)
 		}
 	case "/export", "📥 Экспорт отчёта":
 		if *user.Role == "admin" || *user.Role == "administration" {
 			unlock := chatLimiter.lock(chatID)
 			go func() {
 				defer unlock()
-				handlers.StartExportFSM(bot, database, msg)
+				handlers.StartExportFSM(ctx, bot, database, msg)
 			}()
 		}
 	case "👥 Пользователи":
@@ -194,18 +204,18 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 		}
 	case "/auction", "🎯 Аукцион":
 		if *user.Role == "admin" || *user.Role == "administration" {
-			go handlers.StartAuctionFSM(bot, database, msg)
+			go handlers.StartAuctionFSM(ctx, bot, database, msg)
 		}
 	case "🗂 Справочники":
 		if *user.Role == "admin" {
-			go handlers.StartCatalogFSM(bot, database, msg)
+			go handlers.StartCatalogFSM(ctx, bot, database, msg)
 		}
 	case "/backup", "💾 Бэкап БД":
 		if user.Role != nil && (*user.Role == "admin") {
 			unlock := chatLimiter.lock(chatID)
 			go func() {
 				defer unlock()
-				handlers.HandleAdminBackup(bot, database, chatID)
+				handlers.HandleAdminBackup(ctx, bot, database, chatID)
 			}()
 		}
 	case "♻️ Восстановить БД":
@@ -213,7 +223,7 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 			unlock := chatLimiter.lock(chatID)
 			go func() {
 				defer unlock()
-				handlers.HandleAdminRestoreLatest(bot, database, chatID)
+				handlers.HandleAdminRestoreLatest(ctx, bot, database, chatID)
 			}()
 		}
 	case "📥 Восстановить из файла":
@@ -221,7 +231,7 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 			unlock := chatLimiter.lock(chatID)
 			go func() {
 				defer unlock()
-				handlers.HandleAdminRestoreStart(bot, database, chatID)
+				handlers.HandleAdminRestoreStart(ctx, bot, database, chatID)
 			}()
 		}
 	default:
@@ -236,21 +246,25 @@ func HandleMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 			}
 			return
 		}
-		auth.HandleFSMMessage(chatID, text, role, bot, database)
+		auth.HandleFSMMessage(ctx, chatID, text, role, bot, database)
 	}
 }
 
-func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
+func HandleCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
 	if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 	data := cb.Data
 	chatID := cb.Message.Chat.ID
+	ctx = ctxutil.WithChatID(
+		ctxutil.WithOp(ctx, "tg.callback:"+cb.Data),
+		chatID,
+	)
 
 	// 🔒 Глобальная защёлка для inline-кнопок: неактивным всё режем
 	// берём пользователя по Telegram ID отправителя колбэка.
 	if cb.From != nil {
-		if u, err := db.GetUserByTelegramID(database, cb.From.ID); err == nil && u != nil && !u.IsActive {
+		if u, err := db.GetUserByTelegramID(ctx, database, cb.From.ID); err == nil && u != nil && !u.IsActive {
 			// И даём явное сообщение в чат (на случай, если кнопка была из старого меню)
 			msg := tgbotapi.NewMessage(chatID, "🚫 Доступ к боту временно закрыт. Обратитесь к администратору.")
 			// Уберём возможную «залипшую» клавиатуру
@@ -281,31 +295,31 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 	}
 
 	if strings.HasPrefix(data, "per_") || data == "per_confirm" {
-		handlers.HandleSetPeriodCallback(bot, database, cb)
+		handlers.HandleSetPeriodCallback(ctx, bot, database, cb)
 		return
 	}
 
 	if strings.HasPrefix(data, "link_confirm_") || strings.HasPrefix(data, "link_reject_") {
-		handlers.HandleParentLinkApprovalCallback(cb, bot, database)
+		handlers.HandleParentLinkApprovalCallback(ctx, cb, bot, database)
 		return
 	}
 
 	if strings.HasPrefix(data, "confirm_") ||
 		strings.HasPrefix(data, "reject_") {
-		handlers.HandleAdminCallback(cb, database, bot, chatID)
+		handlers.HandleAdminCallback(ctx, cb, database, bot, chatID)
 		return
 	}
 
 	if strings.HasPrefix(data, "score_confirm_") ||
 		strings.HasPrefix(data, "score_reject_") {
-		handlers.HandleScoreApprovalCallback(cb, bot, database, chatID)
+		handlers.HandleScoreApprovalCallback(ctx, cb, bot, database, chatID)
 		return
 	}
 	// Student
 	if strings.HasPrefix(data, "student_class_num_") ||
 		strings.HasPrefix(data, "student_class_letter_") ||
 		data == "student_back" || data == "student_cancel" {
-		auth.HandleStudentCallback(cb, bot, database)
+		auth.HandleStudentCallback(ctx, cb, bot, database)
 		return
 	}
 	if auth.GetAddChildFSMState(chatID) != "" {
@@ -313,7 +327,7 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		if data == "add_child_back" || data == "add_child_cancel" ||
 			strings.HasPrefix(data, "parent_class_num_") ||
 			strings.HasPrefix(data, "parent_class_letter_") {
-			auth.HandleAddChildCallback(bot, database, cb)
+			auth.HandleAddChildCallback(ctx, bot, database, cb)
 			return
 		}
 	}
@@ -321,7 +335,7 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 	if strings.HasPrefix(data, "parent_class_num_") ||
 		strings.HasPrefix(data, "parent_class_letter_") ||
 		data == "parent_back" || data == "parent_cancel" {
-		auth.HandleParentCallback(bot, database, cb)
+		auth.HandleParentCallback(ctx, bot, database, cb)
 		return
 	}
 	if strings.HasPrefix(data, "add_score_category_") ||
@@ -334,7 +348,7 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		data == "add_select_all_students" ||
 		data == "add_back" ||
 		data == "add_cancel" {
-		handlers.HandleAddScoreCallback(bot, database, cb)
+		handlers.HandleAddScoreCallback(ctx, bot, database, cb)
 		return
 	}
 	if strings.HasPrefix(data, "remove_category_") ||
@@ -346,7 +360,7 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		data == "remove_select_all_students" ||
 		data == "remove_back" ||
 		data == "remove_cancel" {
-		handlers.HandleRemoveCallback(bot, database, cb)
+		handlers.HandleRemoveCallback(ctx, bot, database, cb)
 		return
 	}
 	if strings.HasPrefix(data, "export_type_") ||
@@ -359,7 +373,7 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		data == "export_students_done" ||
 		data == "export_back" ||
 		data == "export_cancel" {
-		handlers.HandleExportCallback(bot, database, cb)
+		handlers.HandleExportCallback(ctx, bot, database, cb)
 		return
 	}
 	if strings.HasPrefix(data, "auction_mode_") ||
@@ -369,7 +383,7 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 		data == "auction_students_done" ||
 		data == "auction_back" ||
 		data == "auction_cancel" {
-		handlers.HandleAuctionCallback(bot, database, cb)
+		handlers.HandleAuctionCallback(ctx, bot, database, cb)
 		return
 	}
 	if data == "add_another_child_yes" {
@@ -377,7 +391,7 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 			metrics.HandlerErrors.Inc()
 		}
 		msg := &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: chatID}} // мок-сообщение для FSM
-		auth.StartAddChild(bot, database, msg)
+		auth.StartAddChild(bot, msg)
 		return
 	}
 	if data == "add_another_child_no" {
@@ -397,24 +411,24 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 			}
 			return
 		}
-		handlers.ShowStudentRating(bot, database, chatID, int64(studentID))
+		handlers.ShowStudentRating(ctx, bot, database, chatID, int64(studentID))
 		return
 	}
 	if strings.HasPrefix(data, "hist_excel_student_") {
-		handlers.HandleHistoryExcelCallback(bot, database, cb)
+		handlers.HandleHistoryExcelCallback(ctx, bot, database, cb)
 		return
 	}
 	if strings.HasPrefix(data, "admusr_") {
-		handlers.HandleAdminUsersCallback(bot, database, cb)
+		handlers.HandleAdminUsersCallback(ctx, bot, database, cb)
 		return
 	}
 	if strings.HasPrefix(data, "catalog_") ||
 		data == "catalog_back" || data == "catalog_cancel" {
-		handlers.HandleCatalogCallback(bot, database, cb)
+		handlers.HandleCatalogCallback(ctx, bot, database, cb)
 		return
 	}
 	if strings.HasPrefix(data, "exp_users_") {
-		user, _ := db.GetUserByTelegramID(database, chatID)
+		user, _ := db.GetUserByTelegramID(ctx, database, chatID)
 
 		isAdmin := *user.Role == models.Admin || *user.Role == models.Administration
 		switch data {
@@ -424,17 +438,17 @@ func HandleCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.Callbac
 			handlers.StartExportUsers(bot, database, cb.Message, isAdmin)
 		case "exp_users_toggle", "exp_users_gen", "exp_users_cancel", "exp_users_back":
 			// обработать кнопки внутри экрана
-			handlers.HandleExportUsersCallback(bot, database, cb, isAdmin)
+			handlers.HandleExportUsersCallback(ctx, bot, database, cb, isAdmin)
 		}
 		return
 	}
 	// Периоды (админ): список и редактирование
 	if data == "peradm_edit_end" || data == "peradm_edit_both" || data == "peradm_save" {
-		handlers.HandleAdminPeriodsEditCallback(bot, database, cb)
+		handlers.HandleAdminPeriodsEditCallback(ctx, bot, database, cb)
 		return
 	}
 	if strings.HasPrefix(data, "peradm_") {
-		handlers.HandleAdminPeriodsCallback(bot, database, cb)
+		handlers.HandleAdminPeriodsCallback(ctx, bot, database, cb)
 		return
 	}
 
