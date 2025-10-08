@@ -107,6 +107,7 @@ func GetPendingScores(database *sql.DB) ([]models.Score, error) {
 func AddScoreInstantContext(ctx context.Context, database *sql.DB, score models.Score, approvedBy int64, approvedAt time.Time) error {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
+
 	if score.Type != "add" {
 		return fmt.Errorf("AddScoreInstant: поддерживается только type='add'")
 	}
@@ -115,7 +116,7 @@ func AddScoreInstantContext(ctx context.Context, database *sql.DB, score models.
 	}
 
 	// 1) Обязателен активный период
-	period, err := GetActivePeriod(database)
+	period, err := GetActivePeriodContext(ctx, database)
 	if err != nil {
 		return fmt.Errorf("получение активного периода: %w", err)
 	}
@@ -123,7 +124,7 @@ func AddScoreInstantContext(ctx context.Context, database *sql.DB, score models.
 		return fmt.Errorf("нет активного периода")
 	}
 
-	tx, err := database.Begin()
+	tx, err := database.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return err
 	}
@@ -167,7 +168,7 @@ func AddScoreInstant(database *sql.DB, score models.Score, approvedBy int64, app
 func ApproveScoreContext(ctx context.Context, database *sql.DB, scoreID int64, adminID int64, approvedAt time.Time) error {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
-	tx, err := database.Begin()
+	tx, err := database.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return err
 	}
@@ -183,7 +184,7 @@ func ApproveScoreContext(ctx context.Context, database *sql.DB, scoreID int64, a
 	}
 
 	// Получаем активный период
-	activePeriod, err := GetActivePeriod(database)
+	activePeriod, err := GetActivePeriodContext(ctx, database)
 	var periodID *int64
 	if err == nil && activePeriod != nil {
 		periodID = &activePeriod.ID

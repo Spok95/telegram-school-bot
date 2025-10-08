@@ -32,7 +32,7 @@ func GetActivePeriod(database *sql.DB) (*models.Period, error) {
 func SetActivePeriodContext(ctx context.Context, database *sql.DB) error {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
-	tx, err := database.Begin()
+	tx, err := database.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return err
 	}

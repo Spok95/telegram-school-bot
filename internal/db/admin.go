@@ -1,9 +1,11 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"log"
 
+	"github.com/Spok95/telegram-school-bot/internal/ctxutil"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	"github.com/Spok95/telegram-school-bot/internal/models"
 	"github.com/Spok95/telegram-school-bot/internal/tg"
@@ -12,13 +14,16 @@ import (
 
 var UserFSMRole = make(map[int64]string)
 
-func EnsureAdmin(chatID int64, database *sql.DB, text string, bot *tgbotapi.BotAPI) {
+func EnsureAdminContext(ctx context.Context, chatID int64, database *sql.DB, text string, bot *tgbotapi.BotAPI) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
+
 	if IsAdminID(chatID) && text == "/start" {
 		SetUserFSMRole(chatID, "admin")
 
 		// Проверяем, существует ли админ в базе
 		var exists bool
-		err := database.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE telegram_id = $1)`, chatID).Scan(&exists)
+		err := database.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE telegram_id = $1)`, chatID).Scan(&exists)
 		if err != nil {
 			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Ошибка авторизации админа.")); err != nil {
 				metrics.HandlerErrors.Inc()
@@ -27,7 +32,7 @@ func EnsureAdmin(chatID int64, database *sql.DB, text string, bot *tgbotapi.BotA
 		}
 
 		if !exists {
-			_, err := database.Exec(`INSERT INTO users (telegram_id, name, role, confirmed, is_active) VALUES ($1, $2, $3, TRUE, TRUE) ON CONFLICT DO NOTHING`,
+			_, err := database.ExecContext(ctx, `INSERT INTO users (telegram_id, name, role, confirmed, is_active) VALUES ($1, $2, $3, TRUE, TRUE) ON CONFLICT DO NOTHING`,
 				chatID, "Админ", models.Admin)
 			if err != nil {
 				if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Ошибка авторизации админа.")); err != nil {
@@ -40,7 +45,7 @@ func EnsureAdmin(chatID int64, database *sql.DB, text string, bot *tgbotapi.BotA
 			if err != nil || user == nil {
 				log.Println("❌ Не удалось получить admin user:", err)
 			} else {
-				if _, err = database.Exec(`
+				if _, err = database.ExecContext(ctx, `
         			INSERT INTO role_changes (user_id, old_role, new_role, changed_by, changed_at)
         			VALUES (
             			(SELECT id FROM users WHERE telegram_id = $1),
@@ -56,6 +61,10 @@ func EnsureAdmin(chatID int64, database *sql.DB, text string, bot *tgbotapi.BotA
 			metrics.HandlerErrors.Inc()
 		}
 	}
+}
+
+func EnsureAdmin(chatID int64, database *sql.DB, text string, bot *tgbotapi.BotAPI) {
+	EnsureAdminContext(context.Background(), chatID, database, text, bot)
 }
 
 func SetUserFSMRole(chatID int64, role string) {
