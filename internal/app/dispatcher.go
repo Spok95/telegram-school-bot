@@ -19,15 +19,8 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
+var updGuard = NewUpdateGuard()
 var chatLimiter = NewChatLimiter()
-
-// + под импортами (пакетные синглтоны лимитера и дидупа)
-var (
-	// окно дидупа — 2 минуты (подходит для повторных delivery Telegram)
-	dupeGuard = NewDupeGuard(2 * time.Minute)
-	// рейт-лимит по чату: 6 событий/сек с небольшим бурстом
-	rateLimiter = NewRateLimiter(6, 3)
-)
 
 func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
@@ -38,12 +31,7 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 	)
 	text := msg.Text
 	// --- ранний отсев флуда/дублей
-	if !rateLimiter.Allow(chatID) {
-		metrics.UpdateDropsRateLimit.Inc()
-		return
-	}
-	if !dupeGuard.AllowMessage(chatID, msg.MessageID) {
-		metrics.UpdateDropsDedup.Inc()
+	if !updGuard.Allow(&tgbotapi.Update{Message: msg}) {
 		return
 	}
 	db.EnsureAdmin(ctx, chatID, database, text, bot)
@@ -275,21 +263,17 @@ func HandleCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB,
 	}
 	data := cb.Data
 	chatID := cb.Message.Chat.ID
-	// --- ранний отсев флуда/дублей + мгновенный ACK «часиков»
-	if !rateLimiter.Allow(chatID) {
-		metrics.UpdateDropsRateLimit.Inc() // <--- см. имена счётчиков ниже
-		// чисто на всякий случай — ACK, чтобы не висели «часики»
+
+	// --- ранний отсев флуда/дублей
+	if !updGuard.Allow(&tgbotapi.Update{CallbackQuery: cb}) {
+		// мгновенный ACK, чтобы не висели «часики» даже если дропнули
 		_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, ""))
 		return
 	}
-	msgID := 0
-	if cb.Message != nil {
-		msgID = cb.Message.MessageID
-	}
-	if !dupeGuard.AllowCallback(chatID, msgID, cb.Data) {
-		metrics.UpdateDropsDedup.Inc()
-		_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, ""))
-		return
+
+	// обычный быстрый ACK перед основной логикой
+	if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "")); err != nil {
+		metrics.HandlerErrors.Inc()
 	}
 
 	ctx = ctxutil.WithChatID(

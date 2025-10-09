@@ -23,18 +23,14 @@ var (
 )
 
 var (
-	UpdateDropsRateLimit = promauto.NewCounter(
-		prometheus.CounterOpts{
-			Name: "tg_updates_dropped_ratelimit_total",
-			Help: "Updates dropped by per-chat rate limiter",
-		},
-	)
-	UpdateDropsDedup = promauto.NewCounter(
-		prometheus.CounterOpts{
-			Name: "tg_updates_dropped_dedup_total",
-			Help: "Updates dropped by dedup guard",
-		},
-	)
+	TgUpdatesDroppedDedup = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "tg_updates_dropped_dedup_total",
+		Help: "Updates dropped by dedup guard",
+	})
+	TgUpdatesDroppedRateLimit = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "tg_updates_dropped_ratelimit_total",
+		Help: "Updates dropped by per-chat rate limiter",
+	})
 )
 
 func init() {
