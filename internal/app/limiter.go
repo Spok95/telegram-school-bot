@@ -82,6 +82,7 @@ func envInt(name string, def int) int {
 	}
 	return def
 }
+
 func envDurMs(name string, defMs int) time.Duration {
 	if v := os.Getenv(name); v != "" {
 		if i, err := strconv.Atoi(v); err == nil {

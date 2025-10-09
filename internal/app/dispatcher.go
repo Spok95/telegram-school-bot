@@ -19,8 +19,10 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-var updGuard = NewUpdateGuard()
-var chatLimiter = NewChatLimiter()
+var (
+	updGuard    = NewUpdateGuard()
+	chatLimiter = NewChatLimiter()
+)
 
 func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
@@ -258,9 +260,6 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 }
 
 func HandleCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
-	if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "")); err != nil {
-		metrics.HandlerErrors.Inc()
-	}
 	data := cb.Data
 	chatID := cb.Message.Chat.ID
 
