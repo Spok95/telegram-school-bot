@@ -73,5 +73,12 @@ func WithTimeout(parent context.Context, d time.Duration) (context.Context, cont
 
 // WithDBTimeout — стандартный таймаут для БД.
 func WithDBTimeout(parent context.Context) (context.Context, context.CancelFunc) {
+	if dl, ok := parent.Deadline(); ok {
+		// если у родителя осталось меньше defaultDBTimeout — берем остаток
+		remain := time.Until(dl)
+		if remain < DefaultDBTimeout {
+			return context.WithTimeout(parent, remain)
+		}
+	}
 	return context.WithTimeout(parent, DefaultDBTimeout)
 }

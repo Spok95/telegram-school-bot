@@ -30,7 +30,7 @@ import (
 
 // HandleAdminRestoreLatest — восстанавливает БД из последнего файла в ./backups через sidecar
 func HandleAdminRestoreLatest(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
-	ctx, cancel := ctxutil.WithTimeout(ctx, 10*time.Minute)
+	ctx, cancel := ctxutil.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
 	user, _ := db.GetUserByTelegramID(ctx, database, chatID)

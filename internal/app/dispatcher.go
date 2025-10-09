@@ -85,7 +85,7 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 	// Все остальные команды требуют регистрации
 	user, err := db.GetUserByTelegramID(ctx, database, chatID)
 	registered := false
-	if err == nil || user != nil && user.Role != nil {
+	if err == nil && user != nil && user.Role != nil {
 		registered = true
 	}
 
@@ -147,16 +147,12 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 	switch text {
 	case "/add_score", "➕ Начислить баллы":
 		unlock := chatLimiter.lock(chatID)
-		go func() {
-			defer unlock()
-			handlers.StartAddScoreFSM(ctx, bot, database, msg)
-		}()
+		defer unlock()
+		handlers.StartAddScoreFSM(ctx, bot, database, msg)
 	case "/remove_score", "📉 Списать баллы":
 		unlock := chatLimiter.lock(chatID)
-		go func() {
-			defer unlock()
-			handlers.StartRemoveScoreFSM(ctx, bot, database, msg)
-		}()
+		defer unlock()
+		handlers.StartRemoveScoreFSM(ctx, bot, database, msg)
 	case "/my_score", "📊 Мой рейтинг":
 		handlers.HandleMyScore(ctx, bot, database, msg)
 	case "📜 История получения баллов":
@@ -216,18 +212,22 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 	case "/backup", "💾 Бэкап БД":
 		if user.Role != nil && (*user.Role == "admin") {
 			unlock := chatLimiter.lock(chatID)
-			go func() {
+			bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+			go func(c context.Context) {
 				defer unlock()
-				handlers.HandleAdminBackup(ctx, bot, database, chatID)
-			}()
+				defer cancel()
+				handlers.HandleAdminBackup(c, bot, database, chatID)
+			}(bg)
 		}
 	case "♻️ Восстановить БД":
 		if user.Role != nil && (*user.Role == "admin") {
 			unlock := chatLimiter.lock(chatID)
-			go func() {
+			bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+			go func(c context.Context) {
 				defer unlock()
-				handlers.HandleAdminRestoreLatest(ctx, bot, database, chatID)
-			}()
+				defer cancel()
+				handlers.HandleAdminRestoreLatest(c, bot, database, chatID)
+			}(bg)
 		}
 	case "📥 Восстановить из файла":
 		if user.Role != nil && (*user.Role == "admin") {

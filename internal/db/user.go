@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -25,8 +26,10 @@ FROM users WHERE telegram_id = $1`
 	var u models.User
 	err := row.Scan(&u.ID, &u.TelegramID, &u.Name, &u.Role, &u.ClassID, &u.ClassName, &u.ClassNumber, &u.ClassLetter, &u.ChildID, &u.Confirmed, &u.IsActive, &u.DeactivatedAt)
 	if err != nil {
-		log.Println("Пользователь не найден в users", err)
-		return nil, err
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil // действительно не найден
+		}
+		return nil, err // сюда попадает context.Canceled/DeadlineExceeded
 	}
 	return &u, nil
 }
