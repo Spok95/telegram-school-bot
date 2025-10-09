@@ -68,9 +68,6 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 			return
 		}
 
-		// положим внутр. userID в контекст (полезно для логов/метрик ниже)
-		ctx = ctxutil.WithUserID(ctx, user.ID)
-
 		// Пользователь уже зарегистрирован
 		db.SetUserFSMRole(chatID, string(*user.Role))
 		keyboard := menu.GetRoleMenu(string(*user.Role))
