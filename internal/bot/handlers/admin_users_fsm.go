@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -31,7 +32,12 @@ func GetAdminUsersState(chatID int64) *adminUsersState { return adminUsersStates
 
 // ─── ENTRY
 
-func StartAdminUsersFSM(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
+func StartAdminUsersFSM(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
 	chatID := msg.Chat.ID
 	adminUsersStates[chatID] = &adminUsersState{Step: 1}
 	edit := tgbotapi.NewMessage(chatID, "👥 Управление пользователями\nВведите имя или класс (например, 7А) для поиска:")
@@ -43,7 +49,7 @@ func StartAdminUsersFSM(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 
 // ─── TEXT HANDLER
 
-func HandleAdminUsersText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+func HandleAdminUsersText(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
 	state := adminUsersStates[chatID]
 	if state == nil {
@@ -53,7 +59,7 @@ func HandleAdminUsersText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.
 	switch state.Step {
 	case 1:
 		state.Query = strings.TrimSpace(msg.Text)
-		users, err := db.FindUsersByQuery(database, state.Query, 50)
+		users, err := db.FindUsersByQuery(ctx, database, state.Query, 50)
 		if err != nil || len(users) == 0 {
 			edit := tgbotapi.NewEditMessageText(chatID, state.MessageID, "Ничего не найдено, попробуйте другой запрос.")
 			mk := tgbotapi.NewInlineKeyboardMarkup(
@@ -117,7 +123,7 @@ func HandleAdminUsersText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.
 
 // ─── CALLBACK HANDLER
 
-func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
+func HandleAdminUsersCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
 	chatID := cb.Message.Chat.ID
 	state := adminUsersStates[chatID]
 	if state == nil {
@@ -154,7 +160,7 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 		}
 
 		// ряд управления активностью
-		u, _ := db.GetUserByID(database, uid)
+		u, _ := db.GetUserByID(ctx, database, uid)
 		var actBtn tgbotapi.InlineKeyboardButton
 		if u.IsActive {
 			actBtn = tgbotapi.NewInlineKeyboardButtonData("⛔️ Деактивировать", "admusr_deactivate")
@@ -180,7 +186,7 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 		}
 
 		now := time.Now()
-		if err := db.DeactivateUser(database, state.SelectedUserID, now); err != nil {
+		if err := db.DeactivateUser(ctx, database, state.SelectedUserID, now); err != nil {
 			log.Println("deactivate user error:", err)
 			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Не удалось деактивировать пользователя")); err != nil {
 				metrics.HandlerErrors.Inc()
@@ -188,13 +194,13 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 			return
 		}
 		// пересчитываем родителей, если это ученик (по связям; если не ученик — просто не будет строк)
-		rows, err := database.Query(`SELECT parent_id FROM parents_students WHERE student_id = $1`, state.SelectedUserID)
+		rows, err := database.QueryContext(ctx, `SELECT parent_id FROM parents_students WHERE student_id = $1`, state.SelectedUserID)
 		if err == nil {
 			defer func() { _ = rows.Close() }()
 			for rows.Next() {
 				var pid int64
 				if scanErr := rows.Scan(&pid); scanErr == nil {
-					_ = db.RefreshParentActiveFlag(database, pid)
+					_ = db.RefreshParentActiveFlag(ctx, database, pid)
 				}
 			}
 		}
@@ -204,7 +210,7 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 		}
 		// триггерим заново отрисовку выбранного
 		cb.Data = fmt.Sprintf("admusr_pick_%d", state.SelectedUserID)
-		HandleAdminUsersCallback(bot, database, cb)
+		HandleAdminUsersCallback(ctx, bot, database, cb)
 		return
 	}
 	if data == "admusr_activate" {
@@ -212,7 +218,7 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 			metrics.HandlerErrors.Inc()
 		}
 
-		if err := db.ActivateUser(database, state.SelectedUserID); err != nil {
+		if err := db.ActivateUser(ctx, database, state.SelectedUserID); err != nil {
 			log.Println("activate user error:", err)
 			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Не удалось активировать пользователя")); err != nil {
 				metrics.HandlerErrors.Inc()
@@ -220,13 +226,13 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 			return
 		}
 		// пересчитываем родителей, если это ученик
-		rows, err := database.Query(`SELECT parent_id FROM parents_students WHERE student_id = $1`, state.SelectedUserID)
+		rows, err := database.QueryContext(ctx, `SELECT parent_id FROM parents_students WHERE student_id = $1`, state.SelectedUserID)
 		if err == nil {
 			defer func() { _ = rows.Close() }()
 			for rows.Next() {
 				var pid int64
 				if scanErr := rows.Scan(&pid); scanErr == nil {
-					_ = db.RefreshParentActiveFlag(database, pid)
+					_ = db.RefreshParentActiveFlag(ctx, database, pid)
 				}
 			}
 		}
@@ -234,7 +240,7 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 			metrics.HandlerErrors.Inc()
 		}
 		cb.Data = fmt.Sprintf("admusr_pick_%d", state.SelectedUserID)
-		HandleAdminUsersCallback(bot, database, cb)
+		HandleAdminUsersCallback(ctx, bot, database, cb)
 		return
 	}
 
@@ -275,7 +281,7 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 		if role == "" {
 			role = state.PendingRole
 		}
-		admin, _ := db.GetUserByTelegramID(database, chatID)
+		admin, _ := db.GetUserByTelegramID(ctx, database, chatID)
 		if admin == nil || admin.Role == nil || (*admin.Role != "admin") {
 			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Нет прав.")); err != nil {
 				metrics.HandlerErrors.Inc()
@@ -285,9 +291,9 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 
 		var err error
 		if role == "student" || state.PendingRole == "student" {
-			err = db.ChangeRoleToStudentWithAudit(database, state.SelectedUserID, state.ClassNumber, state.ClassLetter, admin.ID)
+			err = db.ChangeRoleToStudentWithAudit(ctx, database, state.SelectedUserID, state.ClassNumber, state.ClassLetter, admin.ID)
 		} else {
-			err = db.ChangeRoleWithCleanup(database, state.SelectedUserID, role, admin.ID)
+			err = db.ChangeRoleWithCleanup(ctx, database, state.SelectedUserID, role, admin.ID)
 		}
 		if err != nil {
 			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Ошибка при смене роли: "+err.Error())); err != nil {
@@ -297,7 +303,7 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 		}
 
 		// уведомление пользователю
-		target, _ := db.GetUserByID(database, state.SelectedUserID)
+		target, _ := db.GetUserByID(ctx, database, state.SelectedUserID)
 		txt := fmt.Sprintf("Ваша роль была изменена на «%s». Нажмите /start, чтобы обновить меню.", humanRole(role))
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(target.TelegramID, txt)); err != nil {
 			metrics.HandlerErrors.Inc()
@@ -306,19 +312,19 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 		// ── РЕТРОСПЕКТИВА/АВТО-ДЕАКТИВАЦИЯ РОДИТЕЛЕЙ ─────────────────────────────
 		// Если назначили роль родителя — пересчитать его активность
 		if role == "parent" {
-			if err := db.RefreshParentActiveFlag(database, state.SelectedUserID); err != nil {
+			if err := db.RefreshParentActiveFlag(ctx, database, state.SelectedUserID); err != nil {
 				log.Println("refresh parent activity failed:", err)
 			}
 		}
 		// Если назначили/изменили роль ученика — пересчитать активность всех его родителей
 		if role == "student" {
-			rows, err := database.Query(`SELECT parent_id FROM parents_students WHERE student_id = $1`, state.SelectedUserID)
+			rows, err := database.QueryContext(ctx, `SELECT parent_id FROM parents_students WHERE student_id = $1`, state.SelectedUserID)
 			if err == nil {
 				defer func() { _ = rows.Close() }()
 				for rows.Next() {
 					var pid int64
 					if scanErr := rows.Scan(&pid); scanErr == nil {
-						if err := db.RefreshParentActiveFlag(database, pid); err != nil {
+						if err := db.RefreshParentActiveFlag(ctx, database, pid); err != nil {
 							log.Println("refresh parent activity failed:", err)
 						}
 					}
@@ -362,7 +368,7 @@ func HandleAdminUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbota
 	}
 	if data == "admusr_back_to_list" {
 		// восстановить список найденных по state.query
-		users, _ := db.FindUsersByQuery(database, state.Query, 50)
+		users, _ := db.FindUsersByQuery(ctx, database, state.Query, 50)
 		text := fmt.Sprintf("Найдено %d пользователей. Выберите:", len(users))
 		var rows [][]tgbotapi.InlineKeyboardButton
 		for _, u := range users {

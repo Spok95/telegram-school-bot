@@ -1,15 +1,19 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 
+	"github.com/Spok95/telegram-school-bot/internal/ctxutil"
 	"github.com/Spok95/telegram-school-bot/internal/models"
 )
 
-func GetLevelByID(database *sql.DB, levelID int) (*models.ScoreLevel, error) {
+func GetLevelByID(ctx context.Context, database *sql.DB, levelID int) (*models.ScoreLevel, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
 	var level models.ScoreLevel
-	err := database.QueryRow("SELECT id, value, label, category_id FROM score_levels WHERE id = $1", levelID).Scan(&level.ID, &level.Value, &level.Label, &level.CategoryID)
+	err := database.QueryRowContext(ctx, "SELECT id, value, label, category_id FROM score_levels WHERE id = $1", levelID).Scan(&level.ID, &level.Value, &level.Label, &level.CategoryID)
 	if err != nil {
 		return nil, err
 	}
@@ -17,14 +21,16 @@ func GetLevelByID(database *sql.DB, levelID int) (*models.ScoreLevel, error) {
 }
 
 // GetCategories список (includeInactive=true — вернём и скрытые)
-func GetCategories(database *sql.DB, includeInactive bool) ([]models.Category, error) {
+func GetCategories(ctx context.Context, database *sql.DB, includeInactive bool) ([]models.Category, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
 	query := "SELECT id, name, label, is_active FROM categories"
 	if !includeInactive {
 		query += " WHERE is_active = TRUE"
 	}
 	query += " ORDER BY id"
 
-	rows, err := database.Query(query)
+	rows, err := database.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -43,9 +49,11 @@ func GetCategories(database *sql.DB, includeInactive bool) ([]models.Category, e
 }
 
 // GetCategoryByID по id
-func GetCategoryByID(database *sql.DB, id int64) (*models.Category, error) {
+func GetCategoryByID(ctx context.Context, database *sql.DB, id int64) (*models.Category, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
 	var c models.Category
-	err := database.QueryRow(
+	err := database.QueryRowContext(ctx,
 		"SELECT id, name, label, is_active FROM categories WHERE id = $1",
 		id,
 	).Scan(&c.ID, &c.Name, &c.Label, &c.IsActive)
@@ -56,10 +64,12 @@ func GetCategoryByID(database *sql.DB, id int64) (*models.Category, error) {
 }
 
 // CreateCategory создать (name, label) — label уже есть в схеме
-func CreateCategory(database *sql.DB, name, label string) (int64, error) {
+func CreateCategory(ctx context.Context, database *sql.DB, name, label string) (int64, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
 	var id int64
 	err := database.
-		QueryRow(
+		QueryRowContext(ctx,
 			"INSERT INTO categories(name, label, is_active) VALUES($1,$2,TRUE) RETURNING id",
 			name, label,
 		).Scan(&id)
@@ -70,8 +80,10 @@ func CreateCategory(database *sql.DB, name, label string) (int64, error) {
 }
 
 // RenameCategory переименовать (меняем name; при желании добавь и UpdateCategoryLabel)
-func RenameCategory(database *sql.DB, id int64, name string) error {
-	res, err := database.Exec(
+func RenameCategory(ctx context.Context, database *sql.DB, id int64, name string) error {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
+	res, err := database.ExecContext(ctx,
 		"UPDATE categories SET name = $1 WHERE id = $2",
 		name, id,
 	)
@@ -86,8 +98,10 @@ func RenameCategory(database *sql.DB, id int64, name string) error {
 }
 
 // SetCategoryActive включить/выключить (is_active)
-func SetCategoryActive(database *sql.DB, id int64, active bool) error {
-	res, err := database.Exec(
+func SetCategoryActive(ctx context.Context, database *sql.DB, id int64, active bool) error {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
+	res, err := database.ExecContext(ctx,
 		"UPDATE categories SET is_active = $1 WHERE id = $2",
 		active, id,
 	)
@@ -102,14 +116,16 @@ func SetCategoryActive(database *sql.DB, id int64, active bool) error {
 }
 
 // GetLevelsByCategoryIDFull список уровней категории (includeInactive как выше)
-func GetLevelsByCategoryIDFull(database *sql.DB, catID int64, includeInactive bool) ([]models.ScoreLevel, error) {
+func GetLevelsByCategoryIDFull(ctx context.Context, database *sql.DB, catID int64, includeInactive bool) ([]models.ScoreLevel, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
 	query := "SELECT id, value, label, category_id, is_active FROM score_levels WHERE category_id = $1"
 	if !includeInactive {
 		query += " AND is_active = TRUE"
 	}
 	query += " ORDER BY value"
 
-	rows, err := database.Query(query, catID)
+	rows, err := database.QueryContext(ctx, query, catID)
 	if err != nil {
 		return nil, err
 	}
@@ -127,9 +143,11 @@ func GetLevelsByCategoryIDFull(database *sql.DB, catID int64, includeInactive bo
 	return out, nil
 }
 
-func CreateLevel(database *sql.DB, catID int64, value int, label string) (int64, error) {
+func CreateLevel(ctx context.Context, database *sql.DB, catID int64, value int, label string) (int64, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
 	var id int64
-	err := database.QueryRow(
+	err := database.QueryRowContext(ctx,
 		"INSERT INTO score_levels(value, label, category_id, is_active) VALUES($1,$2,$3,TRUE) RETURNING id",
 		value, label, catID,
 	).Scan(&id)
@@ -139,8 +157,10 @@ func CreateLevel(database *sql.DB, catID int64, value int, label string) (int64,
 	return id, nil
 }
 
-func RenameLevel(database *sql.DB, id int64, label string) error {
-	res, err := database.Exec(
+func RenameLevel(ctx context.Context, database *sql.DB, id int64, label string) error {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
+	res, err := database.ExecContext(ctx,
 		"UPDATE score_levels SET label = $1 WHERE id = $2",
 		label, id,
 	)
@@ -154,8 +174,10 @@ func RenameLevel(database *sql.DB, id int64, label string) error {
 	return nil
 }
 
-func SetLevelActive(database *sql.DB, id int64, active bool) error {
-	res, err := database.Exec(
+func SetLevelActive(ctx context.Context, database *sql.DB, id int64, active bool) error {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
+	res, err := database.ExecContext(ctx,
 		"UPDATE score_levels SET is_active = $1 WHERE id = $2",
 		active, id,
 	)
@@ -169,16 +191,20 @@ func SetLevelActive(database *sql.DB, id int64, active bool) error {
 	return nil
 }
 
-func GetCategoryIDByName(database *sql.DB, name string) int {
+func GetCategoryIDByName(ctx context.Context, database *sql.DB, name string) int {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
 	var id int
-	row := database.QueryRow(`SELECT id FROM categories WHERE name = $1`, name)
+	row := database.QueryRowContext(ctx, `SELECT id FROM categories WHERE name = $1`, name)
 	_ = row.Scan(&id)
 	return id
 }
 
-func GetCategoryNameByID(database *sql.DB, id int) string {
+func GetCategoryNameByID(ctx context.Context, database *sql.DB, id int) string {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
 	var name string
-	row := database.QueryRow(`SELECT name FROM categories WHERE id = $1`, id)
+	row := database.QueryRowContext(ctx, `SELECT name FROM categories WHERE id = $1`, id)
 	_ = row.Scan(&name)
 	return name
 }

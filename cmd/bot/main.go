@@ -11,6 +11,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/app"
 	"github.com/Spok95/telegram-school-bot/internal/bot/handlers/migrations"
 	"github.com/Spok95/telegram-school-bot/internal/config"
+	"github.com/Spok95/telegram-school-bot/internal/ctxutil"
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/jobs"
 	"github.com/Spok95/telegram-school-bot/internal/logging"
@@ -90,7 +91,7 @@ func main() {
 		lg.Sugar.Fatalw("❌ Ошибка миграций: %v", "err", err)
 	}
 
-	err = db.SetActivePeriod(database)
+	err = db.SetActivePeriod(ctx, database)
 	if err != nil {
 		log.Println("❌ Ошибка установки активного периода:", err)
 	}
@@ -101,7 +102,7 @@ func main() {
 	// Раз в час проверяем «1 сентября после 07:00».
 	// Дедуп по lastNotifiedStartYear гарантирует один пуш в год.
 	jr.Every(time.Hour, "schoolyear_notifier", func(ctx context.Context) error {
-		return app.RunSchoolYearNotifier(bot, database)
+		return app.RunSchoolYearNotifier(ctx, bot, database)
 	})
 
 	u := tgbotapi.NewUpdate(0)
@@ -115,7 +116,6 @@ func main() {
 	// === Фоновые задачи ===
 	// app.StartSchoolYearNotifier(bot, database, cfg.Location) // если функция поддерживает tz
 
-	// === MAIN LOOP ===
 	for {
 		select {
 		case <-ctx.Done():
@@ -135,12 +135,49 @@ func main() {
 					}
 				}()
 
+				// формируем per-update контекст с таймаутом и метаданными
+				baseCtx, cancel := ctxutil.WithTimeout(ctx, 15*time.Second)
+				defer cancel()
+
+				var chatID int64
+				var userID int64
+				op := "update"
+
 				if upd.CallbackQuery != nil {
-					app.HandleCallback(bot, database, upd.CallbackQuery)
+					if upd.CallbackQuery.Message != nil && upd.CallbackQuery.Message.Chat != nil {
+						chatID = upd.CallbackQuery.Message.Chat.ID
+					}
+					if upd.CallbackQuery.From != nil {
+						userID = upd.CallbackQuery.From.ID
+					}
+					op = "callback"
+				}
+				if upd.Message != nil {
+					if upd.Message.Chat != nil {
+						chatID = upd.Message.Chat.ID
+					}
+					if upd.Message.From != nil {
+						userID = upd.Message.From.ID
+					}
+					op = "message"
+				}
+
+				// Привязываем метаданные к контексту
+				updCtx := ctxutil.WithOp(baseCtx, op)
+				if chatID != 0 {
+					updCtx = ctxutil.WithChatID(updCtx, chatID)
+				}
+				if userID != 0 {
+					updCtx = ctxutil.WithUserID(updCtx, userID)
+				}
+
+				// передаём ctx в app-уровень
+				if upd.CallbackQuery != nil {
+					app.HandleCallback(updCtx, bot, database, upd.CallbackQuery)
 					return
 				}
 				if upd.Message != nil {
-					app.HandleMessage(bot, database, upd.Message)
+					app.HandleMessage(updCtx, bot, database, upd.Message)
 					return
 				}
 			}()

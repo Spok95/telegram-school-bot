@@ -1,8 +1,11 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"strings"
+
+	"github.com/Spok95/telegram-school-bot/internal/ctxutil"
 )
 
 type UserRow struct {
@@ -25,7 +28,9 @@ type ParentRow struct {
 	Classes    string // «7А, 11Б»
 }
 
-func ListAllUsers(database *sql.DB, includeInactive bool) ([]UserRow, error) {
+func ListAllUsers(ctx context.Context, database *sql.DB, includeInactive bool) ([]UserRow, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
 	var q string
 	if !includeInactive {
 		q = `
@@ -41,7 +46,7 @@ func ListAllUsers(database *sql.DB, includeInactive bool) ([]UserRow, error) {
 		ORDER BY LOWER(u.name)`
 	}
 
-	rows, err := database.Query(q)
+	rows, err := database.QueryContext(ctx, q)
 	if err != nil {
 		return nil, err
 	}
@@ -58,14 +63,16 @@ func ListAllUsers(database *sql.DB, includeInactive bool) ([]UserRow, error) {
 	return out, rows.Err()
 }
 
-func ListTeachers(database *sql.DB, includeInactive bool) ([]string, error) {
+func ListTeachers(ctx context.Context, database *sql.DB, includeInactive bool) ([]string, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
 	q := ""
 	if !includeInactive {
 		q = "SELECT u.name FROM users u WHERE u.role='teacher' AND u.confirmed=TRUE AND u.is_active=TRUE ORDER BY LOWER(u.name)"
 	} else {
 		q = "SELECT u.name FROM users u WHERE u.role='teacher' ORDER BY LOWER(u.name)"
 	}
-	rows, err := database.Query(q)
+	rows, err := database.QueryContext(ctx, q)
 	if err != nil {
 		return nil, err
 	}
@@ -81,14 +88,16 @@ func ListTeachers(database *sql.DB, includeInactive bool) ([]string, error) {
 	return res, rows.Err()
 }
 
-func ListAdministration(database *sql.DB, includeInactive bool) ([]string, error) {
+func ListAdministration(ctx context.Context, database *sql.DB, includeInactive bool) ([]string, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
 	q := ""
 	if !includeInactive {
 		q = "SELECT u.name FROM users u WHERE u.role='administration' AND u.confirmed=TRUE AND u.is_active=TRUE ORDER BY LOWER(u.name)"
 	} else {
 		q = "SELECT u.name FROM users u WHERE u.role='administration' ORDER BY LOWER(u.name)"
 	}
-	rows, err := database.Query(q)
+	rows, err := database.QueryContext(ctx, q)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +113,9 @@ func ListAdministration(database *sql.DB, includeInactive bool) ([]string, error
 	return res, rows.Err()
 }
 
-func ListStudents(database *sql.DB, includeInactive bool) ([]StudentRow, error) {
+func ListStudents(ctx context.Context, database *sql.DB, includeInactive bool) ([]StudentRow, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
 	q := `
 	SELECT
 	u.name,
@@ -128,7 +139,7 @@ func ListStudents(database *sql.DB, includeInactive bool) ([]StudentRow, error) 
 		ORDER BY COALESCE(u.class_number,0), u.class_letter, LOWER(u.name)
 	`
 	}
-	rows, err := database.Query(q)
+	rows, err := database.QueryContext(ctx, q)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +155,9 @@ func ListStudents(database *sql.DB, includeInactive bool) ([]StudentRow, error) 
 	return res, rows.Err()
 }
 
-func ListParents(database *sql.DB, includeInactive bool) ([]ParentRow, error) {
+func ListParents(ctx context.Context, database *sql.DB, includeInactive bool) ([]ParentRow, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
 	q := `
 		SELECT
 			u.name AS parent_name,
@@ -171,7 +184,7 @@ func ListParents(database *sql.DB, includeInactive bool) ([]ParentRow, error) {
 		ORDER BY LOWER(u.name)
 	`
 	}
-	rows, err := database.Query(q)
+	rows, err := database.QueryContext(ctx, q)
 	if err != nil {
 		return nil, err
 	}

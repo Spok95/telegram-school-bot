@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -43,9 +44,9 @@ type ExportFSMState struct {
 var exportStates = make(map[int64]*ExportFSMState)
 
 // StartExportFSM стартовое меню (новое сообщение)
-func StartExportFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+func StartExportFSM(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
-	u, _ := db.GetUserByTelegramID(database, chatID)
+	u, _ := db.GetUserByTelegramID(ctx, database, chatID)
 	if u == nil || !fsmutil.MustBeActiveForOps(u) {
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Доступ временно закрыт. Обратитесь к администратору.")); err != nil {
 			metrics.HandlerErrors.Inc()
@@ -76,7 +77,7 @@ func StartExportFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Messag
 	}
 }
 
-func HandleExportCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.CallbackQuery) {
+func HandleExportCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.CallbackQuery) {
 	chatID := cq.Message.Chat.ID
 	state, ok := exportStates[chatID]
 	if !ok {
@@ -160,8 +161,8 @@ func HandleExportCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 		case "export_mode_fixed":
 			state.PeriodMode = "fixed"
 			state.Step = ExportStepFixedPeriodSelect
-			_ = db.SetActivePeriod(database)
-			periods, err := db.ListPeriods(database)
+			_ = db.SetActivePeriod(ctx, database)
+			periods, err := db.ListPeriods(ctx, database)
 			if err != nil || len(periods) == 0 {
 				delete(exportStates, chatID)
 				edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "❌ Не удалось загрузить периоды.")
@@ -214,7 +215,7 @@ func HandleExportCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 				if _, err := tg.Request(bot, tgbotapi.NewCallback(cq.ID, "📥 Отчёт формируется...")); err != nil {
 					metrics.HandlerErrors.Inc()
 				}
-				generateExportReport(bot, database, chatID, state)
+				generateExportReport(ctx, bot, database, chatID, state)
 				delete(exportStates, chatID)
 				return
 			}
@@ -236,12 +237,12 @@ func HandleExportCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			if state.ReportType == "student" {
 				state.Step = ExportStepStudentSelect
 				// тут нам важно оставить тот же message_id, поэтому редактируем только клавиатуру
-				promptStudentSelectExport(bot, database, cq)
+				promptStudentSelectExport(ctx, bot, database, cq)
 			} else if state.ReportType == "class" {
 				if _, err := tg.Request(bot, tgbotapi.NewCallback(cq.ID, "📥 Отчёт формируется...")); err != nil {
 					metrics.HandlerErrors.Inc()
 				}
-				generateExportReport(bot, database, chatID, state)
+				generateExportReport(ctx, bot, database, chatID, state)
 				delete(exportStates, chatID)
 			}
 		}
@@ -261,7 +262,7 @@ func HandleExportCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			if !found {
 				state.SelectedStudentIDs = append(state.SelectedStudentIDs, id)
 			}
-			promptStudentSelectExport(bot, database, cq)
+			promptStudentSelectExport(ctx, bot, database, cq)
 			return
 		} else if data == "export_students_done" {
 			if len(state.SelectedStudentIDs) == 0 {
@@ -273,7 +274,7 @@ func HandleExportCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			if _, err := tg.Request(bot, tgbotapi.NewCallback(cq.ID, "📥 Отчёт формируется...")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
-			generateExportReport(bot, database, chatID, state)
+			generateExportReport(ctx, bot, database, chatID, state)
 			delete(exportStates, chatID)
 		}
 	case ExportStepSchoolYearSelect:
@@ -287,7 +288,7 @@ func HandleExportCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			case "student":
 				// выбираем ученика/учеников
 				state.Step = ExportStepStudentSelect
-				promptStudentSelectExport(bot, database, cq)
+				promptStudentSelectExport(ctx, bot, database, cq)
 				return
 			case "class":
 				// выбираем класс
@@ -299,7 +300,7 @@ func HandleExportCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 				if _, err := tg.Request(bot, tgbotapi.NewCallback(cq.ID, "📥 Отчёт формируется...")); err != nil {
 					metrics.HandlerErrors.Inc()
 				}
-				generateExportReport(bot, database, chatID, state)
+				generateExportReport(ctx, bot, database, chatID, state)
 				delete(exportStates, chatID)
 				return
 			}
@@ -307,7 +308,7 @@ func HandleExportCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 	}
 }
 
-func HandleExportText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+func HandleExportText(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
 	state := exportStates[chatID]
 	if state == nil {
@@ -369,7 +370,7 @@ func HandleExportText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "📥 Отчёт формируется...")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
-			generateExportReport(bot, database, chatID, state)
+			generateExportReport(ctx, bot, database, chatID, state)
 			delete(exportStates, chatID)
 			return
 		}
@@ -447,10 +448,10 @@ func editMenu(bot *tgbotapi.BotAPI, chatID int64, messageID int, text string, ro
 }
 
 // Выбор студентов — редактируем только клавиатуру у текущего сообщения
-func promptStudentSelectExport(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.CallbackQuery) {
+func promptStudentSelectExport(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.CallbackQuery) {
 	chatID := cq.Message.Chat.ID
 	state := exportStates[chatID]
-	students, err := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
+	students, err := db.GetStudentsByClass(ctx, database, state.ClassNumber, state.ClassLetter)
 	if err != nil {
 		edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "❌ Не удалось получить список учеников.")
 		if _, err := tg.Send(bot, edit); err != nil {
@@ -483,7 +484,7 @@ func promptStudentSelectExport(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbot
 	}
 }
 
-func generateExportReport(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, state *ExportFSMState) {
+func generateExportReport(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, state *ExportFSMState) {
 	// защита от двойного запуска
 	key := fmt.Sprintf("export:%d:%s", chatID, state.ReportType)
 	if !fsmutil.SetPending(chatID, key) {
@@ -497,7 +498,9 @@ func generateExportReport(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 	if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⏳ Формирую Excel-файл...")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
-	go func() {
+	taskCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+	go func(c context.Context) {
+		defer cancel()
 		var scores []models.ScoreWithUser
 		var err error
 		var periodLabel string
@@ -510,7 +513,7 @@ func generateExportReport(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 				}
 				return
 			}
-			p, errP := db.GetPeriodByID(database, int(*state.PeriodID))
+			p, errP := db.GetPeriodByID(c, database, int(*state.PeriodID))
 			if errP != nil || p == nil {
 				if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Период не найден.")); err != nil {
 					metrics.HandlerErrors.Inc()
@@ -521,19 +524,19 @@ func generateExportReport(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 			switch state.ReportType {
 			case "student":
 				for _, id := range state.SelectedStudentIDs {
-					part, err := db.GetScoresByStudentAndPeriod(database, id, int(*state.PeriodID))
+					part, err := db.GetScoresByStudentAndPeriod(c, database, id, int(*state.PeriodID))
 					if err != nil {
 						log.Println("Ошибка при получении баллов:", err)
 					}
 					scores = append(scores, part...)
 				}
 			case "class":
-				scores, err = db.GetScoresByClassAndPeriod(database, state.ClassNumber, state.ClassLetter, *state.PeriodID)
+				scores, err = db.GetScoresByClassAndPeriod(c, database, state.ClassNumber, state.ClassLetter, *state.PeriodID)
 				if err != nil {
 					log.Println("Ошибка при получении баллов:", err)
 				}
 			case "school":
-				scores, err = db.GetScoresByPeriod(database, int(*state.PeriodID))
+				scores, err = db.GetScoresByPeriod(c, database, int(*state.PeriodID))
 				if err != nil {
 					log.Println("Ошибка при получении баллов:", err)
 				}
@@ -550,19 +553,19 @@ func generateExportReport(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 			switch state.ReportType {
 			case "student":
 				for _, id := range state.SelectedStudentIDs {
-					part, err := db.GetScoresByStudentAndDateRange(database, id, *state.FromDate, *state.ToDate)
+					part, err := db.GetScoresByStudentAndDateRange(c, database, id, *state.FromDate, *state.ToDate)
 					if err != nil {
 						log.Println("Ошибка при получении баллов:", err)
 					}
 					scores = append(scores, part...)
 				}
 			case "class":
-				scores, err = db.GetScoresByClassAndDateRange(database, int(state.ClassNumber), state.ClassLetter, *state.FromDate, *state.ToDate)
+				scores, err = db.GetScoresByClassAndDateRange(c, database, int(state.ClassNumber), state.ClassLetter, *state.FromDate, *state.ToDate)
 				if err != nil {
 					log.Println("Ошибка при получении баллов:", err)
 				}
 			case "school":
-				scores, err = db.GetScoresByDateRange(database, *state.FromDate, *state.ToDate)
+				scores, err = db.GetScoresByDateRange(c, database, *state.FromDate, *state.ToDate)
 				if err != nil {
 					log.Println("Ошибка при получении баллов:", err)
 				}
@@ -583,11 +586,11 @@ func generateExportReport(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 		// --- Вычисляем коллективный рейтинг ---
 		// Для отчёта по классу
 		if state.ReportType == "class" && len(scores) > 0 {
-			collective, className = report(state, database)
+			collective, className = report(c, state, database)
 		}
 		// Для отчёта по ученику — класс берём из выбранного состояния (учеников выбираем внутри класса)
 		if state.ReportType == "student" && len(scores) > 0 {
-			collective, className = report(state, database)
+			collective, className = report(c, state, database)
 		}
 		switch state.ReportType {
 		case "student":
@@ -609,7 +612,7 @@ func generateExportReport(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 		if _, err := tg.Send(bot, doc); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
-	}()
+	}(taskCtx)
 }
 
 func GetExportState(userID int64) *ExportFSMState {
@@ -635,11 +638,11 @@ func schoolYearRows(prefix string) [][]tgbotapi.InlineKeyboardButton {
 	return rows
 }
 
-func report(state *ExportFSMState, database *sql.DB) (collective int64, className string) {
+func report(ctx context.Context, state *ExportFSMState, database *sql.DB) (collective int64, className string) {
 	className = fmt.Sprintf("%d%s", int(state.ClassNumber), state.ClassLetter)
-	auctionID := db.GetCategoryIDByName(database, "Аукцион")
+	auctionID := db.GetCategoryIDByName(ctx, database, "Аукцион")
 	if state.PeriodID != nil {
-		if classScores, err2 := db.GetScoresByClassAndPeriod(database, state.ClassNumber, state.ClassLetter, *state.PeriodID); err2 == nil {
+		if classScores, err2 := db.GetScoresByClassAndPeriod(ctx, database, state.ClassNumber, state.ClassLetter, *state.PeriodID); err2 == nil {
 			stu := map[int64]int{}
 			for _, sc := range classScores {
 				if sc.CategoryID == int64(auctionID) {
@@ -652,7 +655,7 @@ func report(state *ExportFSMState, database *sql.DB) (collective int64, classNam
 			}
 		}
 	} else if state.FromDate != nil && state.ToDate != nil {
-		if classScores, err2 := db.GetScoresByClassAndDateRange(database, int(state.ClassNumber), state.ClassLetter, *state.FromDate, *state.ToDate); err2 == nil {
+		if classScores, err2 := db.GetScoresByClassAndDateRange(ctx, database, int(state.ClassNumber), state.ClassLetter, *state.FromDate, *state.ToDate); err2 == nil {
 			stu := map[int64]int{}
 			for _, sc := range classScores {
 				if sc.CategoryID == int64(auctionID) {

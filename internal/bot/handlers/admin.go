@@ -18,14 +18,14 @@ import (
 
 var notifiedAdmins = make(map[int64]bool)
 
-func ShowPendingUsers(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
+func ShowPendingUsers(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
 	var adminID int64
 	if db.IsAdminID(chatID) {
 		adminID = chatID
 	}
 
 	var count int
-	err := database.QueryRow(`SELECT COUNT(*) FROM users WHERE confirmed = FALSE AND role != 'admin'`).Scan(&count)
+	err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE confirmed = FALSE AND role != 'admin'`).Scan(&count)
 	if err != nil {
 		log.Println("Ошибка при подсчете заявок:", err)
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Ошибка при проверке заявок.")); err != nil {
@@ -41,7 +41,7 @@ func ShowPendingUsers(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
 		return
 	}
 
-	rows, err := database.Query(`
+	rows, err := database.QueryContext(ctx, `
 		SELECT id, name, role, telegram_id FROM users WHERE confirmed = FALSE AND role != 'admin'
 	`)
 	if err != nil {
@@ -66,7 +66,7 @@ func ShowPendingUsers(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
 		switch role {
 		case "student":
 			var classNumber, classLetter sql.NullString
-			err := database.QueryRow(`SELECT class_number, class_letter FROM users WHERE id = $1`, id).Scan(&classNumber, &classLetter)
+			err := database.QueryRowContext(ctx, `SELECT class_number, class_letter FROM users WHERE id = $1`, id).Scan(&classNumber, &classLetter)
 			if err != nil {
 				log.Println("Ошибка при получении класса ученика:", err)
 				continue
@@ -81,7 +81,7 @@ func ShowPendingUsers(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
 			var studentName, studentClassNumber, studentClassLetter sql.NullString
 
 			// получаем имя родителя (Telegram username или имя из Telegram профиля, если есть)
-			err := database.QueryRow(`
+			err := database.QueryRowContext(ctx, `
 			SELECT u.name, u.class_number, u.class_letter
 			FROM users u
 			JOIN parents_students ps ON ps.student_id = u.id
@@ -114,7 +114,7 @@ func ShowPendingUsers(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
 	}
 }
 
-func HandleAdminCallback(callback *tgbotapi.CallbackQuery, database *sql.DB, bot *tgbotapi.BotAPI, adminID int64) {
+func HandleAdminCallback(ctx context.Context, callback *tgbotapi.CallbackQuery, database *sql.DB, bot *tgbotapi.BotAPI, adminID int64) {
 	data := callback.Data
 	messageID := callback.Message.MessageID
 	chatID := callback.Message.Chat.ID
@@ -123,7 +123,7 @@ func HandleAdminCallback(callback *tgbotapi.CallbackQuery, database *sql.DB, bot
 	if strings.HasPrefix(data, "confirm_") {
 		idStr := strings.TrimPrefix(data, "confirm_")
 
-		err := ConfirmUser(database, bot, idStr, adminID)
+		err := ConfirmUser(ctx, database, bot, idStr, adminID)
 		if err != nil {
 			if _, err := tg.Send(bot, tgbotapi.NewMessage(adminID, "❌ Ошибка подтверждения заявки.")); err != nil {
 				metrics.HandlerErrors.Inc()
@@ -139,7 +139,7 @@ func HandleAdminCallback(callback *tgbotapi.CallbackQuery, database *sql.DB, bot
 	} else if strings.HasPrefix(data, "reject_") {
 		idStr := strings.TrimPrefix(data, "reject_")
 
-		err := RejectUser(database, bot, idStr)
+		err := RejectUser(ctx, database, bot, idStr)
 		if err != nil {
 			if _, err := tg.Send(bot, tgbotapi.NewMessage(adminID, "❌ Ошибка отклонения заявки.")); err != nil {
 				metrics.HandlerErrors.Inc()
@@ -158,8 +158,8 @@ func HandleAdminCallback(callback *tgbotapi.CallbackQuery, database *sql.DB, bot
 	}
 }
 
-func ConfirmUser(database *sql.DB, bot *tgbotapi.BotAPI, name string, adminTG int64) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func ConfirmUser(ctx context.Context, database *sql.DB, bot *tgbotapi.BotAPI, name string, adminTG int64) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	tx, err := database.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
@@ -175,7 +175,7 @@ func ConfirmUser(database *sql.DB, bot *tgbotapi.BotAPI, name string, adminTG in
 
 	// Получаем текущую роль (до подтверждения)
 	var role string
-	err = tx.QueryRow(`SELECT role FROM users WHERE id = $1 AND confirmed = FALSE`, name).Scan(&role)
+	err = tx.QueryRowContext(ctx, `SELECT role FROM users WHERE id = $1 AND confirmed = FALSE`, name).Scan(&role)
 	if err != nil {
 		// либо уже подтверждён, либо не найден
 		return fmt.Errorf("заявка не найдена или уже обработана")
@@ -192,13 +192,13 @@ func ConfirmUser(database *sql.DB, bot *tgbotapi.BotAPI, name string, adminTG in
 	}
 
 	var adminID int64
-	if err := tx.QueryRow(`SELECT id FROM users WHERE telegram_id = $1 AND role = 'admin'`, adminTG).Scan(&adminID); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM users WHERE telegram_id = $1 AND role = 'admin'`, adminTG).Scan(&adminID); err != nil {
 		// если вдруг админ не заведен в users — можно записать NULL/0 или убрать FK, но лучше завести админа
 		return fmt.Errorf("администратор не найден в users: %w", err)
 	}
 
 	// Фиксируем в истории
-	_, err = tx.Exec(`
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO role_changes (user_id, old_role, new_role, changed_by, changed_at)
 		VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
 	`, name, "unconfirmed", role, adminID)
@@ -219,14 +219,14 @@ func ConfirmUser(database *sql.DB, bot *tgbotapi.BotAPI, name string, adminTG in
 	return nil
 }
 
-func RejectUser(database *sql.DB, bot *tgbotapi.BotAPI, name string) error {
+func RejectUser(ctx context.Context, database *sql.DB, bot *tgbotapi.BotAPI, name string) error {
 	var telegramID int64
-	err := database.QueryRow(`SELECT telegram_id FROM users WHERE id = $1`, name).Scan(&telegramID)
+	err := database.QueryRowContext(ctx, `SELECT telegram_id FROM users WHERE id = $1`, name).Scan(&telegramID)
 	if err != nil {
 		return err
 	}
 
-	_, err = database.Exec(`DELETE FROM users WHERE id = $1`, name)
+	_, err = database.ExecContext(ctx, `DELETE FROM users WHERE id = $1`, name)
 	if err != nil {
 		return err
 	}
@@ -238,14 +238,14 @@ func RejectUser(database *sql.DB, bot *tgbotapi.BotAPI, name string) error {
 }
 
 // NotifyAdminsAboutNewUser уведомление админам о новой заявке на авторизацию пользователя
-func NotifyAdminsAboutNewUser(bot *tgbotapi.BotAPI, database *sql.DB, userID int64) {
+func NotifyAdminsAboutNewUser(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, userID int64) {
 	// читаем профиль со всем, что нужно для карточки
 	var (
 		name, role         string
 		tgID               int64
 		classNum, classLet sql.NullString
 	)
-	if err := database.QueryRow(`
+	if err := database.QueryRowContext(ctx, `
 		SELECT name, role, telegram_id, class_number, class_letter
 		FROM users
 		WHERE id = $1
@@ -267,7 +267,7 @@ func NotifyAdminsAboutNewUser(bot *tgbotapi.BotAPI, database *sql.DB, userID int
 	markup := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(btnYes, btnNo))
 
 	// уведомляем всех админов
-	rows, err := database.Query(`SELECT telegram_id FROM users WHERE role = 'admin' AND confirmed = TRUE AND is_active = TRUE`)
+	rows, err := database.QueryContext(ctx, `SELECT telegram_id FROM users WHERE role = 'admin' AND confirmed = TRUE AND is_active = TRUE`)
 	if err != nil {
 		return
 	}
@@ -286,14 +286,14 @@ func NotifyAdminsAboutNewUser(bot *tgbotapi.BotAPI, database *sql.DB, userID int
 	}
 }
 
-func NotifyAdminsAboutScoreRequest(bot *tgbotapi.BotAPI, database *sql.DB, score models.Score) {
+func NotifyAdminsAboutScoreRequest(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, score models.Score) {
 	action := "начисления"
 	if score.Type == "remove" {
 		action = "списания"
 	}
 
 	// 📢 Получаем всех админов и администрацию
-	rows, err := database.Query(`SELECT telegram_id FROM users WHERE role IN ('admin', 'administration') AND confirmed = TRUE AND is_active = TRUE`)
+	rows, err := database.QueryContext(ctx, `SELECT telegram_id FROM users WHERE role IN ('admin', 'administration') AND confirmed = TRUE AND is_active = TRUE`)
 	if err != nil {
 		log.Println("❌ Ошибка при получении списка админов:", err)
 		return
@@ -319,8 +319,8 @@ func NotifyAdminsAboutScoreRequest(bot *tgbotapi.BotAPI, database *sql.DB, score
 }
 
 // ShowPendingParentLinks показывает заявки на привязку "родитель ⇄ ребёнок"
-func ShowPendingParentLinks(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
-	rows, err := database.Query(`
+func ShowPendingParentLinks(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
+	rows, err := database.QueryContext(ctx, `
         SELECT r.id, p.name as parent_name, s.name as student_name, s.class_number, s.class_letter
         FROM parent_link_requests r
         JOIN users p ON p.id = r.parent_id
@@ -368,14 +368,14 @@ func ShowPendingParentLinks(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64
 }
 
 // HandleParentLinkApprovalCallback обработка коллбеков по заявкам на привязку
-func HandleParentLinkApprovalCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, database *sql.DB) {
+func HandleParentLinkApprovalCallback(ctx context.Context, cb *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, database *sql.DB) {
 	data := cb.Data
 	chatID := cb.Message.Chat.ID
 	msgID := cb.Message.MessageID
 	adminUsername := cb.From.UserName
 
 	getIDs := func(reqID string) (parentID, studentID int64, err error) {
-		err = database.QueryRow(`SELECT parent_id, student_id FROM parent_link_requests WHERE id = $1`, reqID).
+		err = database.QueryRowContext(ctx, `SELECT parent_id, student_id FROM parent_link_requests WHERE id = $1`, reqID).
 			Scan(&parentID, &studentID)
 		return parentID, studentID, err
 	}
@@ -390,21 +390,21 @@ func HandleParentLinkApprovalCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.
 			return
 		}
 
-		tx, err := database.Begin()
+		tx, err := database.BeginTx(ctx, &sql.TxOptions{})
 		if err != nil {
 			return
 		}
 		defer func() { _ = tx.Rollback() }()
 
 		// Создаём связь (id в users, не telegram_id!)
-		if _, err = tx.Exec(`
+		if _, err = tx.ExecContext(ctx, `
 			INSERT INTO parents_students(parent_id, student_id)
 			VALUES($1,$2)
 			ON CONFLICT (parent_id, student_id) DO NOTHING
 			`, parentID, studentID); err != nil {
 			return
 		}
-		if _, err = tx.Exec(`DELETE FROM parent_link_requests WHERE id = $1`, reqID); err != nil {
+		if _, err = tx.ExecContext(ctx, `DELETE FROM parent_link_requests WHERE id = $1`, reqID); err != nil {
 			return
 		}
 		if err = tx.Commit(); err != nil {
@@ -413,7 +413,7 @@ func HandleParentLinkApprovalCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.
 
 		// ⤵️ После успешного создания связи пересчитываем активность родителя:
 		// если у него теперь есть активные дети — он станет активным; если нет — останется неактивным.
-		if err := db.RefreshParentActiveFlag(database, parentID); err != nil {
+		if err := db.RefreshParentActiveFlag(ctx, database, parentID); err != nil {
 			log.Printf("не удалось обновить активность родителя: %v", err)
 		}
 
@@ -421,7 +421,7 @@ func HandleParentLinkApprovalCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.
 		// раскомментировать блок ниже. Сейчас мы допускаем привязку и просто корректно считаем статус родителя.
 		/*
 			var active bool
-			if err := database.QueryRow(`SELECT is_active FROM users WHERE id = $1`, studentID).Scan(&active); err == nil && !active {
+			if err := database.QueryRowContext(ctx, `SELECT is_active FROM users WHERE id = $1`, studentID).Scan(&active); err == nil && !active {
 			// Можно отправить инфо-заметку админу
 				tg.Send(bot, tgbotapi.NewMessage(chatID, "ℹ️ Внимание: привязанный ребёнок неактивен. Родитель останется неактивным до появления активных детей."))
 			}
@@ -429,8 +429,8 @@ func HandleParentLinkApprovalCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.
 
 		// Уведомления
 		var pTG, sTG int64
-		_ = database.QueryRow(`SELECT telegram_id FROM users WHERE id = $1`, parentID).Scan(&pTG)
-		_ = database.QueryRow(`SELECT telegram_id FROM users WHERE id = $1`, studentID).Scan(&sTG)
+		_ = database.QueryRowContext(ctx, `SELECT telegram_id FROM users WHERE id = $1`, parentID).Scan(&pTG)
+		_ = database.QueryRowContext(ctx, `SELECT telegram_id FROM users WHERE id = $1`, studentID).Scan(&sTG)
 		if pTG != 0 {
 			if _, err := tg.Send(bot, tgbotapi.NewMessage(pTG, "✅ Привязка к ребёнку подтверждена администратором.")); err != nil {
 				metrics.HandlerErrors.Inc()
@@ -455,13 +455,13 @@ func HandleParentLinkApprovalCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.
 	if strings.HasPrefix(data, "link_reject_") {
 		reqID := strings.TrimPrefix(data, "link_reject_")
 		var parentID int64
-		_ = database.QueryRow(`SELECT parent_id FROM parent_link_requests WHERE id = $1`, reqID).Scan(&parentID)
-		_, _ = database.Exec(`DELETE FROM parent_link_requests WHERE id = $1`, reqID)
+		_ = database.QueryRowContext(ctx, `SELECT parent_id FROM parent_link_requests WHERE id = $1`, reqID).Scan(&parentID)
+		_, _ = database.ExecContext(ctx, `DELETE FROM parent_link_requests WHERE id = $1`, reqID)
 
 		// Уведомим родителя
 		if parentID != 0 {
 			var pTG int64
-			_ = database.QueryRow(`SELECT telegram_id FROM users WHERE id = $1`, parentID).Scan(&pTG)
+			_ = database.QueryRowContext(ctx, `SELECT telegram_id FROM users WHERE id = $1`, parentID).Scan(&pTG)
 			if pTG != 0 {
 				if _, err := tg.Send(bot, tgbotapi.NewMessage(pTG, "❌ Заявка на привязку отклонена администратором.")); err != nil {
 					metrics.HandlerErrors.Inc()
@@ -481,8 +481,8 @@ func HandleParentLinkApprovalCallback(cb *tgbotapi.CallbackQuery, bot *tgbotapi.
 }
 
 // NotifyAdminsAboutParentLink уведомление админам о новой заявке на привязку
-func NotifyAdminsAboutParentLink(bot *tgbotapi.BotAPI, database *sql.DB) {
-	rows, err := database.Query(`SELECT telegram_id FROM users WHERE role = 'admin' AND confirmed = TRUE AND is_active = TRUE`)
+func NotifyAdminsAboutParentLink(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB) {
+	rows, err := database.QueryContext(ctx, `SELECT telegram_id FROM users WHERE role = 'admin' AND confirmed = TRUE AND is_active = TRUE`)
 	if err != nil {
 		return
 	}

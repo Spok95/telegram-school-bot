@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/Spok95/telegram-school-bot/internal/bot/shared/fsmutil"
 	"github.com/Spok95/telegram-school-bot/internal/db"
@@ -28,7 +30,12 @@ const (
 	cbEUBack     = "exp_users_back" // = cancel -> в меню экспорта
 )
 
-func StartExportUsers(bot *tgbotapi.BotAPI, _ *sql.DB, msg *tgbotapi.Message, isAdmin bool) {
+func StartExportUsers(ctx context.Context, bot *tgbotapi.BotAPI, _ *sql.DB, msg *tgbotapi.Message, isAdmin bool) {
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
 	chatID := msg.Chat.ID
 	st := &exportUsersState{IncludeInactive: false, Step: 1}
 	expUsers[chatID] = st
@@ -52,7 +59,7 @@ func StartExportUsers(bot *tgbotapi.BotAPI, _ *sql.DB, msg *tgbotapi.Message, is
 	st.MessageID = sent.MessageID
 }
 
-func HandleExportUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery, isAdmin bool) {
+func HandleExportUsersCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery, isAdmin bool) {
 	chatID := cb.Message.Chat.ID
 	state := expUsers[chatID]
 	if state == nil {
@@ -81,7 +88,7 @@ func HandleExportUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbot
 			metrics.HandlerErrors.Inc()
 		}
 		delete(expUsers, chatID)
-		StartExportFSM(bot, database, cb.Message)
+		StartExportFSM(ctx, bot, database, cb.Message)
 		return
 	case cbEUToggle:
 		if !isAdmin {
@@ -118,31 +125,33 @@ func HandleExportUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbot
 		}
 		includeInactive := state.IncludeInactive
 
-		go func() {
+		taskCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+		go func(c context.Context) {
+			defer cancel()
 			defer fsmutil.ClearPending(chatID, key)
 			defer delete(expUsers, chatID)
 
-			all, err := db.ListAllUsers(database, state.IncludeInactive)
+			all, err := db.ListAllUsers(c, database, state.IncludeInactive)
 			if err != nil {
 				fail(bot, chatID, state, err)
 				return
 			}
-			teachers, err := db.ListTeachers(database, state.IncludeInactive)
+			teachers, err := db.ListTeachers(c, database, state.IncludeInactive)
 			if err != nil {
 				fail(bot, chatID, state, err)
 				return
 			}
-			admins, err := db.ListAdministration(database, state.IncludeInactive)
+			admins, err := db.ListAdministration(c, database, state.IncludeInactive)
 			if err != nil {
 				fail(bot, chatID, state, err)
 				return
 			}
-			students, err := db.ListStudents(database, state.IncludeInactive)
+			students, err := db.ListStudents(c, database, state.IncludeInactive)
 			if err != nil {
 				fail(bot, chatID, state, err)
 				return
 			}
-			parents, err := db.ListParents(database, state.IncludeInactive)
+			parents, err := db.ListParents(c, database, state.IncludeInactive)
 			if err != nil {
 				fail(bot, chatID, state, err)
 				return
@@ -212,7 +221,7 @@ func HandleExportUsersCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbot
 				}
 				return
 			}
-		}()
+		}(taskCtx)
 		return
 	}
 }

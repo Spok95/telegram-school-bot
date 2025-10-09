@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"database/sql"
 	"strings"
 
@@ -22,14 +23,19 @@ var (
 	staffData = make(map[int64]string)
 )
 
-func StartStaffRegistration(chatID int64, bot *tgbotapi.BotAPI) {
+func StartStaffRegistration(ctx context.Context, chatID int64, bot *tgbotapi.BotAPI) {
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
 	staffFSM[chatID] = StateStaffName
 	if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Введите ваше ФИО:")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }
 
-func HandleStaffFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *sql.DB, role string) {
+func HandleStaffFSM(ctx context.Context, chatID int64, msg string, bot *tgbotapi.BotAPI, database *sql.DB, role string) {
 	trimmed := strings.TrimSpace(msg)
 	if strings.EqualFold(trimmed, "отмена") || strings.EqualFold(trimmed, "/cancel") {
 		delete(staffFSM, chatID)
@@ -46,7 +52,7 @@ func HandleStaffFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *sq
 		staffData[chatID] = msg
 		staffFSM[chatID] = StateStaffWait
 
-		id, err := SaveStaffRequest(database, chatID, msg, role)
+		id, err := SaveStaffRequest(ctx, database, chatID, msg, role)
 		if err != nil {
 			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Ошибка при сохранении заявки. Попробуйте позже.")); err != nil {
 				metrics.HandlerErrors.Inc()
@@ -58,16 +64,16 @@ func HandleStaffFSM(chatID int64, msg string, bot *tgbotapi.BotAPI, database *sq
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Заявка на регистрацию отправлена администратору. Ожидайте подтверждения.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
-		handlers.NotifyAdminsAboutNewUser(bot, database, id)
+		handlers.NotifyAdminsAboutNewUser(ctx, bot, database, id)
 
 		delete(staffFSM, chatID)
 		delete(staffData, chatID)
 	}
 }
 
-func SaveStaffRequest(database *sql.DB, telegramID int64, name, role string) (int64, error) {
+func SaveStaffRequest(ctx context.Context, database *sql.DB, telegramID int64, name, role string) (int64, error) {
 	var id int64
-	err := database.QueryRow(`
+	err := database.QueryRowContext(ctx, `
 		INSERT INTO users (telegram_id, name, role, confirmed)
 		VALUES ($1,$2,$3,FALSE)
 		RETURNING id

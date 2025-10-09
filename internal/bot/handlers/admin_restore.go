@@ -19,6 +19,7 @@ import (
 
 	"github.com/Spok95/telegram-school-bot/internal/backupclient"
 	"github.com/Spok95/telegram-school-bot/internal/bot/handlers/migrations"
+	"github.com/Spok95/telegram-school-bot/internal/ctxutil"
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	"github.com/Spok95/telegram-school-bot/internal/observability"
@@ -28,8 +29,11 @@ import (
 )
 
 // HandleAdminRestoreLatest — восстанавливает БД из последнего файла в ./backups через sidecar
-func HandleAdminRestoreLatest(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
-	user, _ := db.GetUserByTelegramID(database, chatID)
+func HandleAdminRestoreLatest(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
+	ctx, cancel := ctxutil.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	user, _ := db.GetUserByTelegramID(ctx, database, chatID)
 	if user == nil || user.Role == nil || *user.Role != "admin" {
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Только для администратора")); err != nil {
 			metrics.HandlerErrors.Inc()
@@ -42,9 +46,6 @@ func HandleAdminRestoreLatest(bot *tgbotapi.BotAPI, database *sql.DB, chatID int
 		metrics.HandlerErrors.Inc()
 		observability.CaptureErr(err)
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
 
 	path, err := backupclient.RestoreLatest(ctx)
 	if err != nil {
@@ -62,8 +63,8 @@ var restoreWaiting = map[int64]bool{}
 
 func AdminRestoreFSMActive(chatID int64) bool { return restoreWaiting[chatID] }
 
-func HandleAdminRestoreStart(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
-	user, _ := db.GetUserByTelegramID(database, chatID)
+func HandleAdminRestoreStart(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, chatID int64) {
+	user, _ := db.GetUserByTelegramID(ctx, database, chatID)
 	if user == nil || user.Role == nil || *user.Role != "admin" {
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Только для администратора")); err != nil {
 			metrics.HandlerErrors.Inc()
@@ -86,7 +87,12 @@ func HandleAdminRestoreStart(bot *tgbotapi.BotAPI, database *sql.DB, chatID int6
 	}
 }
 
-func HandleAdminRestoreCallback(bot *tgbotapi.BotAPI, cb *tgbotapi.CallbackQuery) {
+func HandleAdminRestoreCallback(ctx context.Context, bot *tgbotapi.BotAPI, cb *tgbotapi.CallbackQuery) {
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
 	chatID := cb.Message.Chat.ID
 	if cb.Data == "restore_cancel" {
 		delete(restoreWaiting, chatID)
@@ -100,7 +106,9 @@ func HandleAdminRestoreCallback(bot *tgbotapi.BotAPI, cb *tgbotapi.CallbackQuery
 	}
 }
 
-func HandleAdminRestoreMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+func HandleAdminRestoreMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+	ctx, cancel := ctxutil.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
 	chatID := msg.Chat.ID
 	if !AdminRestoreFSMActive(chatID) {
 		return
@@ -114,7 +122,7 @@ func HandleAdminRestoreMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbo
 	defer func() { delete(restoreWaiting, chatID) }()
 
 	// качаем файл из Telegram
-	path, err := downloadTelegramFile(bot, msg.Document.FileID)
+	path, err := downloadTelegramFile(ctx, bot, msg.Document.FileID)
 	if err != nil {
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Не удалось скачать файл: %v", err))); err != nil {
 			metrics.HandlerErrors.Inc()
@@ -126,7 +134,8 @@ func HandleAdminRestoreMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbo
 	if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⌛ Восстанавливаю БД из бэкапа…")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
-	if err := restoreFromZip(database, path); err != nil {
+
+	if err := restoreFromZip(ctx, database, path); err != nil {
 		log.Println("restore error:", err)
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Ошибка восстановления: %v", err))); err != nil {
 			metrics.HandlerErrors.Inc()
@@ -138,7 +147,7 @@ func HandleAdminRestoreMessage(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbo
 	}
 }
 
-func downloadTelegramFile(bot *tgbotapi.BotAPI, fileID string) (string, error) {
+func downloadTelegramFile(ctx context.Context, bot *tgbotapi.BotAPI, fileID string) (string, error) {
 	f, err := bot.GetFile(tgbotapi.FileConfig{FileID: fileID})
 	if err != nil {
 		return "", err
@@ -148,7 +157,11 @@ func downloadTelegramFile(bot *tgbotapi.BotAPI, fileID string) (string, error) {
 		return "", errors.New("BOT_TOKEN не задан")
 	}
 	url := fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", token, f.FilePath)
-	resp, err := http.Get(url)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -168,7 +181,7 @@ func downloadTelegramFile(bot *tgbotapi.BotAPI, fileID string) (string, error) {
 	return tmp, nil
 }
 
-func restoreFromZip(database *sql.DB, zipPath string) error {
+func restoreFromZip(ctx context.Context, database *sql.DB, zipPath string) error {
 	zr, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return err
@@ -176,7 +189,7 @@ func restoreFromZip(database *sql.DB, zipPath string) error {
 	defer func() { _ = zr.Close() }()
 
 	// Если таблиц нет — создадим схему миграциями
-	if err := ensureSchema(database); err != nil {
+	if err := ensureSchemaContext(ctx, database); err != nil {
 		return fmt.Errorf("ensure schema: %w", err)
 	}
 
@@ -222,9 +235,9 @@ func restoreFromZip(database *sql.DB, zipPath string) error {
 		index[d.name] = d
 	}
 
-	tx, err := database.BeginTx(context.Background(), &sql.TxOptions{})
+	tx, err := database.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
-		return err
+		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -234,21 +247,21 @@ func restoreFromZip(database *sql.DB, zipPath string) error {
 		if !ok {
 			continue
 		}
-		exists, err := tableExists(tx, t)
+		exists, err := tableExistsContext(ctx, tx, t)
 		if err != nil {
 			return err
 		}
 		if exists {
-			if _, err := tx.Exec(`TRUNCATE ` + quoteIdent(t) + ` CASCADE`); err != nil {
+			if _, err := tx.ExecContext(ctx, `TRUNCATE `+quoteIdent(t)+` CASCADE`); err != nil {
 				return fmt.Errorf("truncate %s: %w", t, err)
 			}
 		} else {
 			log.Println("info: skip truncate — table not exists:", t)
 		}
-		if err := loadCSV(tx, t, d.csv); err != nil {
+		if err := loadCSVContext(ctx, tx, t, d.csv); err != nil {
 			return fmt.Errorf("load %s: %w", t, err)
 		}
-		if err := resetSequence(tx, t); err != nil {
+		if err := resetSequenceContext(ctx, tx, t); err != nil {
 			return fmt.Errorf("reset seq %s: %w", t, err)
 		}
 	}
@@ -264,7 +277,7 @@ func restoreFromZip(database *sql.DB, zipPath string) error {
 		if skip {
 			continue
 		}
-		exists, err := tableExists(tx, d.name)
+		exists, err := tableExistsContext(ctx, tx, d.name)
 		if err != nil {
 			return err
 		}
@@ -272,13 +285,13 @@ func restoreFromZip(database *sql.DB, zipPath string) error {
 			log.Println("info: skip restore — table not exists in DB:", d.name)
 			continue
 		}
-		if _, err := tx.Exec(`TRUNCATE ` + quoteIdent(d.name) + ` CASCADE`); err != nil {
+		if _, err := tx.ExecContext(ctx, `TRUNCATE `+quoteIdent(d.name)+` CASCADE`); err != nil {
 			return fmt.Errorf("truncate %s: %w", d.name, err)
 		}
-		if err := loadCSV(tx, d.name, d.csv); err != nil {
+		if err := loadCSVContext(ctx, tx, d.name, d.csv); err != nil {
 			return fmt.Errorf("load %s: %w", d.name, err)
 		}
-		if err := resetSequence(tx, d.name); err != nil {
+		if err := resetSequenceContext(ctx, tx, d.name); err != nil {
 			return fmt.Errorf("reset seq %s: %w", d.name, err)
 		}
 	}
@@ -289,10 +302,10 @@ func restoreFromZip(database *sql.DB, zipPath string) error {
 	return nil
 }
 
-func ensureSchema(database *sql.DB) error {
+func ensureSchemaContext(ctx context.Context, database *sql.DB) error {
 	// проверим наличие таблиц
 	var n int
-	if err := database.QueryRow(`SELECT count(*) FROM information_schema.tables WHERE table_schema='public'`).Scan(&n); err != nil {
+	if err := database.QueryRowContext(ctx, `SELECT count(*) FROM information_schema.tables WHERE table_schema='public'`).Scan(&n); err != nil {
 		return err
 	}
 	if n > 0 {
@@ -303,13 +316,13 @@ func ensureSchema(database *sql.DB) error {
 	return goose.Up(database, ".")
 }
 
-func loadCSV(tx *sql.Tx, table string, r *csv.Reader) error {
+func loadCSVContext(ctx context.Context, tx *sql.Tx, table string, r *csv.Reader) error {
 	cols, err := r.Read()
 	if err != nil {
 		return err
 	}
 	// узнаём типы колонок из information_schema (нужно для корректного парсинга дат/времен)
-	colTypes, err := getColumnTypes(tx, table)
+	colTypes, err := getColumnTypesContext(ctx, tx, table)
 	if err != nil {
 		return err
 	}
@@ -364,7 +377,7 @@ func loadCSV(tx *sql.Tx, table string, r *csv.Reader) error {
 				args[i] = s
 			}
 		}
-		if _, err := tx.Exec(stmt, args...); err != nil {
+		if _, err := tx.ExecContext(ctx, stmt, args...); err != nil {
 			return err
 		}
 	}
@@ -372,8 +385,8 @@ func loadCSV(tx *sql.Tx, table string, r *csv.Reader) error {
 }
 
 // Получаем map[column_name]data_type для таблицы
-func getColumnTypes(tx *sql.Tx, table string) (map[string]string, error) {
-	rows, err := tx.Query(`
+func getColumnTypesContext(ctx context.Context, tx *sql.Tx, table string) (map[string]string, error) {
+	rows, err := tx.QueryContext(ctx, `
         SELECT column_name, data_type
         FROM information_schema.columns
         WHERE table_schema='public' AND table_name = $1
@@ -415,10 +428,10 @@ func parseTimeFlex(s string) (time.Time, error) {
 	return time.Time{}, lastErr
 }
 
-func resetSequence(tx *sql.Tx, table string) error {
+func resetSequenceContext(ctx context.Context, tx *sql.Tx, table string) error {
 	// 1) Есть ли вообще колонка id?
 	var hasID bool
-	if err := tx.QueryRow(`
+	if err := tx.QueryRowContext(ctx, `
 		SELECT EXISTS (
 		  SELECT 1 FROM information_schema.columns
 		  WHERE table_schema='public' AND table_name=$1 AND column_name='id'
@@ -431,7 +444,7 @@ func resetSequence(tx *sql.Tx, table string) error {
 
 	// 2) Есть ли последовательность у id?
 	var seq sql.NullString
-	if err := tx.QueryRow(`SELECT pg_get_serial_sequence($1,'id')`, table).Scan(&seq); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT pg_get_serial_sequence($1,'id')`, table).Scan(&seq); err != nil {
 		return err
 	}
 	if !seq.Valid || seq.String == "" {
@@ -441,7 +454,7 @@ func resetSequence(tx *sql.Tx, table string) error {
 	// 3) Вычисляем MAX(id); если строк нет — ставим value=1, is_called=false
 	qTable := quoteIdent(table)
 	var maxID sql.NullInt64
-	if err := tx.QueryRow("SELECT MAX(id) FROM " + qTable).Scan(&maxID); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT MAX(id) FROM "+qTable).Scan(&maxID); err != nil {
 		return err
 	}
 	var value int64 = 1
@@ -456,14 +469,14 @@ func resetSequence(tx *sql.Tx, table string) error {
 		}
 	}
 	// 4) setval по найденной последовательности
-	_, err := tx.Exec(`SELECT setval($1::regclass, $2, $3)`, seq.String, value, isCalled)
+	_, err := tx.ExecContext(ctx, `SELECT setval($1::regclass, $2, $3)`, seq.String, value, isCalled)
 	return err
 }
 
 // tableExists — проверка существования таблицы в public
-func tableExists(tx *sql.Tx, table string) (bool, error) {
+func tableExistsContext(ctx context.Context, tx *sql.Tx, table string) (bool, error) {
 	var exists bool
-	err := tx.QueryRow(`
+	err := tx.QueryRowContext(ctx, `
 		SELECT EXISTS (
 		  SELECT 1 FROM information_schema.tables
 		  WHERE table_schema='public' AND table_name=$1

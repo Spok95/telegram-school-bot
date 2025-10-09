@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -16,9 +17,9 @@ import (
 )
 
 // ShowPendingScores показывает администратору все заявки с status = 'pending'
-func ShowPendingScores(bot *tgbotapi.BotAPI, database *sql.DB, adminID int64) {
+func ShowPendingScores(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, adminID int64) {
 	// запрет неактивным
-	admin, err := db.GetUserByID(database, adminID)
+	admin, err := db.GetUserByID(ctx, database, adminID)
 	if err == nil {
 		if !fsmutil.MustBeActiveForOps(&admin) {
 			if _, err := tg.Send(bot, tgbotapi.NewMessage(adminID, "🚫 Доступ временно закрыт. Обратитесь к администратору.")); err != nil {
@@ -27,7 +28,7 @@ func ShowPendingScores(bot *tgbotapi.BotAPI, database *sql.DB, adminID int64) {
 			return
 		}
 	}
-	scores, err := db.GetPendingScores(database)
+	scores, err := db.GetPendingScores(ctx, database)
 	if err != nil {
 		log.Println("ошибка при получении заявок на баллы:", err)
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(adminID, "Ошибка при получении заявок на баллы.")); err != nil {
@@ -43,8 +44,8 @@ func ShowPendingScores(bot *tgbotapi.BotAPI, database *sql.DB, adminID int64) {
 	}
 
 	for _, s := range scores {
-		student, err1 := db.GetUserByID(database, s.StudentID)
-		creator, err2 := db.GetUserByID(database, s.CreatedBy)
+		student, err1 := db.GetUserByID(ctx, database, s.StudentID)
+		creator, err2 := db.GetUserByID(ctx, database, s.CreatedBy)
 
 		if err1 != nil || err2 != nil {
 			log.Println("Ошибка получения данных пользователя:", err1, err2)
@@ -72,7 +73,7 @@ func ShowPendingScores(bot *tgbotapi.BotAPI, database *sql.DB, adminID int64) {
 }
 
 // HandleScoreApprovalCallback обрабатывает нажатия на кнопки подтверждения/отклонения заявок
-func HandleScoreApprovalCallback(callback *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, database *sql.DB, userID int64) {
+func HandleScoreApprovalCallback(ctx context.Context, callback *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, database *sql.DB, userID int64) {
 	data := callback.Data
 	var action, idStr string
 
@@ -94,11 +95,11 @@ func HandleScoreApprovalCallback(callback *tgbotapi.CallbackQuery, bot *tgbotapi
 
 	chatID := callback.Message.Chat.ID
 	messageID := callback.Message.MessageID
-	user, _ := db.GetUserByTelegramID(database, userID)
+	user, _ := db.GetUserByTelegramID(ctx, database, userID)
 
 	var resultText string
 	// Проверяем текущий статус
-	currentStatus, err := db.GetScoreStatusByID(database, scoreID)
+	currentStatus, err := db.GetScoreStatusByID(ctx, database, scoreID)
 	switch {
 	case err != nil:
 		log.Println("ошибка получения статуса заявки:", err)
@@ -106,7 +107,7 @@ func HandleScoreApprovalCallback(callback *tgbotapi.CallbackQuery, bot *tgbotapi
 	case currentStatus != "pending":
 		resultText = "⏳ Заявка уже обработана ранее."
 	case action == "approve":
-		err = db.ApproveScore(database, scoreID, user.ID, time.Now())
+		err = db.ApproveScore(ctx, database, scoreID, user.ID, time.Now())
 		if err == nil {
 			resultText = fmt.Sprintf("✅ Заявка подтверждена.\nПодтвердил: @%s", user.Name)
 		} else {
@@ -114,7 +115,7 @@ func HandleScoreApprovalCallback(callback *tgbotapi.CallbackQuery, bot *tgbotapi
 			resultText = "❌ Ошибка при подтверждении заявки."
 		}
 	default:
-		err = db.RejectScore(database, scoreID, user.ID, time.Now())
+		err = db.RejectScore(ctx, database, scoreID, user.ID, time.Now())
 		if err == nil {
 			resultText = fmt.Sprintf("❌ Заявка отклонена.\nОтклонил: @%s", user.Name)
 		} else {

@@ -1,14 +1,18 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 
+	"github.com/Spok95/telegram-school-bot/internal/ctxutil"
 	"github.com/Spok95/telegram-school-bot/internal/models"
 )
 
-func GetActivePeriod(database *sql.DB) (*models.Period, error) {
-	row := database.QueryRow(`
+func GetActivePeriod(ctx context.Context, database *sql.DB) (*models.Period, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
+	row := database.QueryRowContext(ctx, `
 		SELECT id, name, start_date, end_date, is_active
 		FROM periods
 		WHERE is_active = TRUE 
@@ -21,8 +25,10 @@ func GetActivePeriod(database *sql.DB) (*models.Period, error) {
 	return &p, nil
 }
 
-func SetActivePeriod(database *sql.DB) error {
-	tx, err := database.Begin()
+func SetActivePeriod(ctx context.Context, database *sql.DB) error {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
+	tx, err := database.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return err
 	}
@@ -32,11 +38,11 @@ func SetActivePeriod(database *sql.DB) error {
 		}
 	}()
 
-	if _, err = tx.Exec(`UPDATE periods SET is_active = FALSE`); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE periods SET is_active = FALSE`); err != nil {
 		return err
 	}
 
-	if _, err = tx.Exec(`
+	if _, err = tx.ExecContext(ctx, `
 		UPDATE periods SET is_active = TRUE
 		WHERE start_date <= CURRENT_DATE AND end_date >= CURRENT_DATE`); err != nil {
 		return err
@@ -45,12 +51,14 @@ func SetActivePeriod(database *sql.DB) error {
 	return tx.Commit()
 }
 
-func CreatePeriod(database *sql.DB, p models.Period) (int64, error) {
+func CreatePeriod(ctx context.Context, database *sql.DB, p models.Period) (int64, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
 	if p.StartDate.After(p.EndDate) {
 		return 0, fmt.Errorf("дата окончания не может быть раньше даты начала")
 	}
 	var id int64
-	err := database.QueryRow(`
+	err := database.QueryRowContext(ctx, `
 		INSERT INTO periods (name, start_date, end_date, is_active)
 		VALUES ($1, $2, $3, FALSE)
 		RETURNING id
@@ -58,19 +66,23 @@ func CreatePeriod(database *sql.DB, p models.Period) (int64, error) {
 	return id, err
 }
 
-func UpdatePeriod(database *sql.DB, p models.Period) error {
+func UpdatePeriod(ctx context.Context, database *sql.DB, p models.Period) error {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
 	if p.StartDate.After(p.EndDate) {
 		return fmt.Errorf("дата окончания не может быть раньше даты начала")
 	}
-	_, err := database.Exec(`
+	_, err := database.ExecContext(ctx, `
 		UPDATE periods SET name = $1, start_date = $2, end_date = $3
 		WHERE id = $4
 	`, p.Name, p.StartDate, p.EndDate, p.ID)
 	return err
 }
 
-func ListPeriods(database *sql.DB) ([]models.Period, error) {
-	rows, err := database.Query(`
+func ListPeriods(ctx context.Context, database *sql.DB) ([]models.Period, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
+	rows, err := database.QueryContext(ctx, `
 		SELECT id, name, start_date, end_date, is_active
 		FROM periods
 		ORDER BY start_date`)
@@ -90,8 +102,10 @@ func ListPeriods(database *sql.DB) ([]models.Period, error) {
 	return result, nil
 }
 
-func GetPeriodByID(database *sql.DB, id int) (*models.Period, error) {
-	row := database.QueryRow(`
+func GetPeriodByID(ctx context.Context, database *sql.DB, id int) (*models.Period, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
+	row := database.QueryRowContext(ctx, `
 		SELECT id, name, start_date, end_date, is_active
 		FROM periods
 		WHERE id = $1`, id)

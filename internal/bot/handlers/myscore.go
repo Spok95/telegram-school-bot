@@ -14,9 +14,9 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-func HandleMyScore(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+func HandleMyScore(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
-	user, err := db.GetUserByTelegramID(database, chatID)
+	user, err := db.GetUserByTelegramID(ctx, database, chatID)
 	if err != nil {
 		log.Println("Пользователь найден:", err)
 	}
@@ -32,7 +32,7 @@ func HandleMyScore(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 	// Если родитель — ищем telegram_id ребёнка
 	if *user.Role == models.Parent {
 		var studentInternalID int64
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		err := database.QueryRowContext(ctx, `
 			SELECT student_id FROM parents_students WHERE parent_id = $1
@@ -93,7 +93,7 @@ func HandleMyScore(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 	}
 
 	// Получаем все начисления/списания
-	history, err := db.GetScoresByStudentAndDateRange(database, targetID, from, to)
+	history, err := db.GetScoresByStudentAndDateRange(ctx, database, targetID, from, to)
 	if err != nil {
 		log.Println("ошибка при получении истории:", err)
 	} else {
@@ -142,8 +142,8 @@ func abs(n int) int {
 	return n
 }
 
-func HandleParentRatingRequest(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, parentID int64) {
-	children, err := db.GetChildrenByParentID(database, parentID)
+func HandleParentRatingRequest(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, parentID int64) {
+	children, err := db.GetChildrenByParentID(ctx, database, parentID)
 	if err != nil || len(children) == 0 {
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "У вас нет привязанных детей.")); err != nil {
 			metrics.HandlerErrors.Inc()
@@ -152,7 +152,7 @@ func HandleParentRatingRequest(bot *tgbotapi.BotAPI, database *sql.DB, chatID in
 	}
 
 	if len(children) == 1 {
-		ShowStudentRating(bot, database, chatID, children[0].ID)
+		ShowStudentRating(ctx, bot, database, chatID, children[0].ID)
 		return
 	}
 
@@ -173,7 +173,7 @@ func HandleParentRatingRequest(bot *tgbotapi.BotAPI, database *sql.DB, chatID in
 	}
 }
 
-func ShowStudentRating(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, studentID int64) {
+func ShowStudentRating(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, studentID int64) {
 	// Границы текущего учебного года
 	now := time.Now()
 	from, to := db.SchoolYearBounds(now)
@@ -181,12 +181,12 @@ func ShowStudentRating(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, stu
 
 	// ФИО ребёнка для заголовка
 	childName := ""
-	if u, err := db.GetUserByID(database, studentID); err == nil && u.Name != "" {
+	if u, err := db.GetUserByID(ctx, database, studentID); err == nil && u.Name != "" {
 		childName = u.Name
 	}
 
 	// Суммы только за текущий учебный год
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	rows, err := database.QueryContext(ctx, `
 		SELECT c.label, SUM(s.points) AS total
@@ -229,7 +229,7 @@ func ShowStudentRating(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, stu
 		text += fmt.Sprintf("▫️ %s: %d\n", label, val)
 	}
 
-	history, err := db.GetScoresByStudentAndDateRange(database, studentID, from, to)
+	history, err := db.GetScoresByStudentAndDateRange(ctx, database, studentID, from, to)
 	if err == nil && len(history) > 0 {
 		text += "\n\n📖 История:\n"
 		count := 0

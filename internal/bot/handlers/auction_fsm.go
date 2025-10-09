@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -43,9 +44,9 @@ func auctionBackCancelRow() []tgbotapi.InlineKeyboardButton {
 
 // ——— start ———
 
-func StartAuctionFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+func StartAuctionFSM(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
-	u, _ := db.GetUserByTelegramID(database, chatID)
+	u, _ := db.GetUserByTelegramID(ctx, database, chatID)
 	if u == nil || !fsmutil.MustBeActiveForOps(u) {
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Доступ временно закрыт. Обратитесь к администратору.")); err != nil {
 			metrics.HandlerErrors.Inc()
@@ -73,7 +74,7 @@ func StartAuctionFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Messa
 
 // ——— callbacks ———
 
-func HandleAuctionCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.CallbackQuery) {
+func HandleAuctionCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.CallbackQuery) {
 	chatID := cq.Message.Chat.ID
 	state := auctionStates[chatID]
 	if state == nil {
@@ -124,7 +125,7 @@ func HandleAuctionCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 		case AuctionStepPoints: // назад к предыдущему выбору
 			if state.Mode == "students" {
 				state.Step = AuctionStepStudentSelect
-				promptStudentSelect(cq, bot, database)
+				promptStudentSelect(ctx, cq, bot, database)
 			} else {
 				state.Step = AuctionStepClassLetter
 				promptClassLetter(cq, bot, "auction_class_letter_")
@@ -160,9 +161,9 @@ func HandleAuctionCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 		state.ClassLetter = letter
 		if state.Mode == "students" {
 			state.Step = AuctionStepStudentSelect
-			promptStudentSelect(cq, bot, database)
+			promptStudentSelect(ctx, cq, bot, database)
 		} else if state.Mode == "class" {
-			students, _ := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
+			students, _ := db.GetStudentsByClass(ctx, database, state.ClassNumber, state.ClassLetter)
 			if len(students) == 0 { // стоп, идти дальше не к кому
 				edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "❌ В этом классе нет учеников.")
 				if _, err := tg.Send(bot, edit); err != nil {
@@ -193,7 +194,7 @@ func HandleAuctionCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 		if !found {
 			state.SelectedStudentIDs = append(state.SelectedStudentIDs, id)
 		}
-		promptStudentSelect(cq, bot, database)
+		promptStudentSelect(ctx, cq, bot, database)
 
 	case data == "auction_students_done":
 		if len(state.SelectedStudentIDs) == 0 {
@@ -209,7 +210,7 @@ func HandleAuctionCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.
 
 // ——— text step ———
 
-func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+func HandleAuctionText(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
 	state := auctionStates[chatID]
 	if state == nil || state.Step != AuctionStepPoints {
@@ -247,14 +248,14 @@ func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 	var inactive []string
 	eligible := make([]int64, 0, len(state.SelectedStudentIDs))
 	for _, studentID := range state.SelectedStudentIDs {
-		u, _ := db.GetUserByID(database, studentID)
+		u, _ := db.GetUserByID(ctx, database, studentID)
 		if u.ID == 0 || !u.IsActive {
 			if u.ID != 0 && strings.TrimSpace(u.Name) != "" {
 				inactive = append(inactive, u.Name)
 			}
 			continue
 		}
-		total, err := db.GetApprovedScoreSum(database, studentID)
+		total, err := db.GetApprovedScoreSum(ctx, database, studentID)
 		if err != nil {
 			log.Println("❌ Ошибка при получении баллов:", err)
 			continue
@@ -288,13 +289,13 @@ func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 		delete(auctionStates, chatID)
 		return
 	}
-	user, err := db.GetUserByTelegramID(database, chatID)
+	user, err := db.GetUserByTelegramID(ctx, database, chatID)
 	if err != nil {
 		log.Println("❌ Ошибка получения пользователя:", err)
 		return
 	}
-	_ = db.SetActivePeriod(database)
-	period, err := db.GetActivePeriod(database)
+	_ = db.SetActivePeriod(ctx, database)
+	period, err := db.GetActivePeriod(ctx, database)
 	if err != nil || period == nil {
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Не удалось определить активный период.")); err != nil {
 			metrics.HandlerErrors.Inc()
@@ -303,9 +304,9 @@ func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 	}
 
 	comment := "Аукцион"
-	catID := db.GetCategoryIDByName(database, "Аукцион")
+	catID := db.GetCategoryIDByName(ctx, database, "Аукцион")
 	for _, studentID := range eligible {
-		u, _ := db.GetUserByID(database, studentID)
+		u, _ := db.GetUserByID(ctx, database, studentID)
 		if u.ID == 0 || !u.IsActive {
 			continue // пропускаем неактивных
 		}
@@ -320,9 +321,9 @@ func HandleAuctionText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mes
 			CreatedAt:  time.Now(),
 			PeriodID:   &period.ID,
 		}
-		_ = db.AddScore(database, score)
+		_ = db.AddScore(ctx, database, score)
 
-		NotifyAdminsAboutScoreRequest(bot, database, score)
+		NotifyAdminsAboutScoreRequest(ctx, bot, database, score)
 	}
 
 	msgOut := "✅ Заявка на аукцион создана и ожидает подтверждения."
@@ -365,10 +366,10 @@ func promptClassLetter(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, prefix 
 	}
 }
 
-func promptStudentSelect(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, database *sql.DB) {
+func promptStudentSelect(ctx context.Context, cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, database *sql.DB) {
 	chatID := cq.Message.Chat.ID
 	state := auctionStates[chatID]
-	students, _ := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
+	students, _ := db.GetStudentsByClass(ctx, database, state.ClassNumber, state.ClassLetter)
 
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for _, student := range students {

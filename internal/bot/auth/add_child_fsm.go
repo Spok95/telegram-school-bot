@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strconv"
@@ -67,7 +68,12 @@ func addChildEditMenu(bot *tgbotapi.BotAPI, chatID int64, messageID int, text st
 
 // ===== Старт/текстовые шаги =====
 
-func StartAddChild(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+func StartAddChild(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
 	chatID := msg.Chat.ID
 	addChildFSM[chatID] = StateAddChildName
 	addChildData[chatID] = &ParentRegisterData{}
@@ -76,7 +82,7 @@ func StartAddChild(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message
 	}
 }
 
-func HandleAddChildText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+func HandleAddChildText(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
 	state := GetAddChildFSMState(chatID)
 
@@ -129,7 +135,7 @@ func HandleAddChildText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Me
 			}
 			return
 		}
-		handleAddChildFinish(bot, database, chatID, msg.MessageID, letter)
+		handleAddChildFinish(ctx, bot, database, chatID, msg.MessageID, letter)
 	}
 }
 
@@ -139,7 +145,7 @@ func GetAddChildFSMState(chatID int64) string {
 
 // ===== Коллбеки (ЕДИНАЯ точка) =====
 
-func HandleAddChildCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
+func HandleAddChildCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
 	chatID := cb.Message.Chat.ID
 	messageID := cb.Message.MessageID
 	data := cb.Data
@@ -199,19 +205,19 @@ func HandleAddChildCallback(bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi
 	// Выбор буквы
 	if strings.HasPrefix(data, "parent_class_letter_") && state == StateAddChildClassLetter {
 		letter := strings.TrimPrefix(data, "parent_class_letter_")
-		handleAddChildFinish(bot, database, chatID, messageID, letter)
+		handleAddChildFinish(ctx, bot, database, chatID, messageID, letter)
 		return
 	}
 }
 
 // ===== Завершение: создаём заявку на привязку, а не сразу связь =====
 
-func handleAddChildFinish(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, messageID int, letter string) {
+func handleAddChildFinish(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, messageID int, letter string) {
 	addChildData[chatID].ClassLetter = letter
 	addChildFSM[chatID] = StateAddChildWaiting
 
 	// Находим ученика
-	studentID, err := FindStudentID(database, &ParentRegisterData{
+	studentID, err := FindStudentID(ctx, database, &ParentRegisterData{
 		StudentName: addChildData[chatID].StudentName,
 		ClassNumber: addChildData[chatID].ClassNumber,
 		ClassLetter: addChildData[chatID].ClassLetter,
@@ -226,7 +232,7 @@ func handleAddChildFinish(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 	}
 
 	// Создаём заявку на привязку (ожидает подтверждения админом)
-	_, err = CreateParentLinkRequest(database, chatID, studentID)
+	_, err = CreateParentLinkRequest(ctx, database, chatID, studentID)
 	if err != nil {
 		fsmutil.DisableMarkup(bot, chatID, messageID)
 		if _, err := tg.Send(bot, tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ошибка при создании заявки. Попробуйте позже.")); err != nil {
@@ -238,7 +244,7 @@ func handleAddChildFinish(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 	}
 
 	// Уведомляем админов о новой заявке (отдельные кнопки подтверждения/отклонения)
-	handlers.NotifyAdminsAboutParentLink(bot, database)
+	handlers.NotifyAdminsAboutParentLink(ctx, bot, database)
 
 	fsmutil.DisableMarkup(bot, chatID, messageID)
 	if _, err := tg.Send(bot, tgbotapi.NewEditMessageText(chatID, messageID, "📨 Заявка на добавление ребёнка отправлена администратору. Ожидайте подтверждения.")); err != nil {
@@ -252,17 +258,17 @@ func handleAddChildFinish(bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, 
 
 // CreateParentLinkRequest создаёт запись-заявку на привязку родителя и ребёнка.
 // Требуется таблица parent_link_requests(id, parent_id, student_id, created_at) с автоинкрементом.
-func CreateParentLinkRequest(database *sql.DB, parentTelegramID int64, studentID int) (int64, error) {
+func CreateParentLinkRequest(ctx context.Context, database *sql.DB, parentTelegramID int64, studentID int) (int64, error) {
 	// находим parent_id по telegram_id
 	var parentID int64
-	err := database.QueryRow(`SELECT id FROM users WHERE telegram_id = $1 AND role = 'parent' AND confirmed = TRUE`, parentTelegramID).Scan(&parentID)
+	err := database.QueryRowContext(ctx, `SELECT id FROM users WHERE telegram_id = $1 AND role = 'parent' AND confirmed = TRUE`, parentTelegramID).Scan(&parentID)
 	if err != nil {
 		return 0, fmt.Errorf("родитель не найден/не подтверждён: %w", err)
 	}
 
 	// создаём заявку
 	var reqID int64
-	err = database.QueryRow(`
+	err = database.QueryRowContext(ctx, `
 		INSERT INTO parent_link_requests (parent_id, student_id, created_at)
 		VALUES ($1,$2,NOW())
 		RETURNING id

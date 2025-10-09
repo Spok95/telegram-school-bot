@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strconv"
@@ -53,10 +54,10 @@ func containsInt64(slice []int64, v int64) bool {
 
 // ===== start
 
-func StartRemoveScoreFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+func StartRemoveScoreFSM(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
 	// запрет неактивным
-	u, _ := db.GetUserByTelegramID(database, chatID)
+	u, _ := db.GetUserByTelegramID(ctx, database, chatID)
 	if u == nil || !fsmutil.MustBeActiveForOps(u) {
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Доступ временно закрыт. Обратитесь к администратору.")); err != nil {
 			metrics.HandlerErrors.Inc()
@@ -78,7 +79,7 @@ func StartRemoveScoreFSM(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.M
 
 // ===== callbacks
 
-func HandleRemoveCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.CallbackQuery) {
+func HandleRemoveCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.CallbackQuery) {
 	chatID := cq.From.ID
 	state, ok := removeStates[chatID]
 	if !ok {
@@ -110,7 +111,7 @@ func HandleRemoveCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			return
 		case 4: // назад к ученикам
 			state.Step = 3
-			students, _ := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
+			students, _ := db.GetStudentsByClass(ctx, database, state.ClassNumber, state.ClassLetter)
 			var rows [][]tgbotapi.InlineKeyboardButton
 			for _, s := range students {
 				label := s.Name
@@ -130,8 +131,8 @@ func HandleRemoveCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			return
 		case 5: // назад к категориям
 			state.Step = 4
-			user, _ := db.GetUserByTelegramID(database, chatID)
-			cats, _ := db.GetCategories(database, false)
+			user, _ := db.GetUserByTelegramID(ctx, database, chatID)
+			cats, _ := db.GetCategories(ctx, database, false)
 			categories := make([]models.Category, 0, len(cats))
 			role := string(*user.Role)
 			for _, c := range cats {
@@ -152,7 +153,7 @@ func HandleRemoveCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			return
 		case 6: // текстовый комментарий → назад к уровням
 			state.Step = 5
-			levels, _ := db.GetLevelsByCategoryIDFull(database, int64(state.CategoryID), false)
+			levels, _ := db.GetLevelsByCategoryIDFull(ctx, database, int64(state.CategoryID), false)
 			var rows [][]tgbotapi.InlineKeyboardButton
 			for _, l := range levels {
 				cb := fmt.Sprintf("remove_level_%d", l.ID)
@@ -189,7 +190,7 @@ func HandleRemoveCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 		state.ClassLetter = strings.TrimPrefix(data, "remove_class_letter_")
 		state.Step = 3
 
-		students, _ := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
+		students, _ := db.GetStudentsByClass(ctx, database, state.ClassNumber, state.ClassLetter)
 		if len(students) == 0 {
 			delete(removeStates, chatID)
 			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
@@ -234,7 +235,7 @@ func HandleRemoveCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 			}
 		} else {
 			// выбрать всех
-			students, _ := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
+			students, _ := db.GetStudentsByClass(ctx, database, state.ClassNumber, state.ClassLetter)
 			for _, s := range students {
 				found := false
 				for _, sid := range state.SelectedStudentIDs {
@@ -250,7 +251,7 @@ func HandleRemoveCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 		}
 
 		// пересоберём список
-		students, _ := db.GetStudentsByClass(database, state.ClassNumber, state.ClassLetter)
+		students, _ := db.GetStudentsByClass(ctx, database, state.ClassNumber, state.ClassLetter)
 		var rows [][]tgbotapi.InlineKeyboardButton
 		for _, s := range students {
 			label := s.Name
@@ -277,8 +278,8 @@ func HandleRemoveCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 
 	if data == "remove_students_done" {
 		state.Step = 4
-		user, _ := db.GetUserByTelegramID(database, chatID)
-		cats, _ := db.GetCategories(database, false) // только активные
+		user, _ := db.GetUserByTelegramID(ctx, database, chatID)
+		cats, _ := db.GetCategories(ctx, database, false) // только активные
 		categories := make([]models.Category, 0, len(cats))
 		role := string(*user.Role)
 		for _, c := range cats {
@@ -304,7 +305,7 @@ func HandleRemoveCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 		state.CategoryID = catID
 		state.Step = 5
 
-		levels, _ := db.GetLevelsByCategoryIDFull(database, int64(state.CategoryID), false)
+		levels, _ := db.GetLevelsByCategoryIDFull(ctx, database, int64(state.CategoryID), false)
 		var rows [][]tgbotapi.InlineKeyboardButton
 		for _, l := range levels {
 			cb := fmt.Sprintf("remove_level_%d", l.ID)
@@ -331,7 +332,7 @@ func HandleRemoveCallback(bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.C
 
 // ===== text step
 
-func HandleRemoveText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
+func HandleRemoveText(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
 	state, ok := removeStates[chatID]
 	if !ok || state.Step != 6 {
@@ -370,13 +371,13 @@ func HandleRemoveText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 	}
 	defer fsmutil.ClearPending(chatID, key)
 
-	level, _ := db.GetLevelByID(database, state.LevelID)
-	user, _ := db.GetUserByTelegramID(database, chatID)
+	level, _ := db.GetLevelByID(ctx, database, state.LevelID)
+	user, _ := db.GetUserByTelegramID(ctx, database, chatID)
 	createdBy := user.ID
 	comment := state.Comment
 
-	_ = db.SetActivePeriod(database)
-	period, err := db.GetActivePeriod(database)
+	_ = db.SetActivePeriod(ctx, database)
+	period, err := db.GetActivePeriod(ctx, database)
 	if err != nil || period == nil {
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Не удалось определить активный период.")); err != nil {
 			metrics.HandlerErrors.Inc()
@@ -387,7 +388,7 @@ func HandleRemoveText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 
 	var skipped []string
 	for _, sid := range state.SelectedStudentIDs {
-		u, _ := db.GetUserByID(database, sid)
+		u, _ := db.GetUserByID(ctx, database, sid)
 		if u.ID == 0 || !u.IsActive {
 			if u.ID != 0 && strings.TrimSpace(u.Name) != "" {
 				skipped = append(skipped, u.Name)
@@ -405,8 +406,8 @@ func HandleRemoveText(bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Mess
 			CreatedAt:  time.Now(),
 			PeriodID:   &period.ID,
 		}
-		_ = db.AddScore(database, score)
-		NotifyAdminsAboutScoreRequest(bot, database, score)
+		_ = db.AddScore(ctx, database, score)
+		NotifyAdminsAboutScoreRequest(ctx, bot, database, score)
 	}
 
 	msgText := "Заявки на списание баллов отправлены на подтверждение."

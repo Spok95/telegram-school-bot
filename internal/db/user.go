@@ -1,34 +1,43 @@
 package db
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
 	"time"
 	"unicode"
 
+	"github.com/Spok95/telegram-school-bot/internal/ctxutil"
 	"github.com/Spok95/telegram-school-bot/internal/models"
 )
 
-func GetUserByTelegramID(database *sql.DB, telegramID int64) (*models.User, error) {
+func GetUserByTelegramID(ctx context.Context, database *sql.DB, telegramID int64) (*models.User, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
 	query := `
 SELECT id, telegram_id, name, role, class_id, class_name, class_number, class_letter, child_id, confirmed, is_active, deactivated_at
 FROM users WHERE telegram_id = $1`
 
-	row := database.QueryRow(query, telegramID)
+	row := database.QueryRowContext(ctx, query, telegramID)
 
 	var u models.User
 	err := row.Scan(&u.ID, &u.TelegramID, &u.Name, &u.Role, &u.ClassID, &u.ClassName, &u.ClassNumber, &u.ClassLetter, &u.ChildID, &u.Confirmed, &u.IsActive, &u.DeactivatedAt)
 	if err != nil {
-		log.Println("Пользователь не найден в users", err)
-		return nil, err
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil // действительно не найден
+		}
+		return nil, err // сюда попадает context.Canceled/DeadlineExceeded
 	}
 	return &u, nil
 }
 
-func GetStudentsByClass(database *sql.DB, number int64, letter string) ([]models.User, error) {
-	rows, err := database.Query(`
+func GetStudentsByClass(ctx context.Context, database *sql.DB, number int64, letter string) ([]models.User, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
+	rows, err := database.QueryContext(ctx, `
         SELECT id, name
         FROM users
         WHERE role = 'student'
@@ -54,8 +63,10 @@ func GetStudentsByClass(database *sql.DB, number int64, letter string) ([]models
 	return students, nil
 }
 
-func GetChildrenByParentID(database *sql.DB, parentID int64) ([]models.User, error) {
-	rows, err := database.Query(`
+func GetChildrenByParentID(ctx context.Context, database *sql.DB, parentID int64) ([]models.User, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
+	rows, err := database.QueryContext(ctx, `
 		SELECT u.id, u.name, u.class_number, u.class_letter
 		FROM users u
 		JOIN parents_students ps ON ps.student_id = u.id
@@ -77,14 +88,16 @@ func GetChildrenByParentID(database *sql.DB, parentID int64) ([]models.User, err
 	return students, nil
 }
 
-func GetUserByID(database *sql.DB, id int64) (models.User, error) {
+func GetUserByID(ctx context.Context, database *sql.DB, id int64) (models.User, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
 	var user models.User
 	query := `
 		SELECT id, telegram_id, name, role, class_id, class_name, class_number, class_letter, child_id, confirmed, is_active, deactivated_at
 		FROM users
 		WHERE id = $1
 	`
-	err := database.QueryRow(query, id).Scan(
+	err := database.QueryRowContext(ctx, query, id).Scan(
 		&user.ID,
 		&user.TelegramID,
 		&user.Name,
@@ -101,10 +114,12 @@ func GetUserByID(database *sql.DB, id int64) (models.User, error) {
 	return user, err
 }
 
-func ClassIDByNumberAndLetter(database *sql.DB, number int64, letter string) (int64, error) {
+func ClassIDByNumberAndLetter(ctx context.Context, database *sql.DB, number int64, letter string) (int64, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
 	var classID int64
 	query := `SELECT id FROM classes WHERE number = $1 AND letter = $2`
-	err := database.QueryRow(query, number, letter).Scan(&classID)
+	err := database.QueryRowContext(ctx, query, number, letter).Scan(&classID)
 	if err != nil {
 		log.Println("Ошибка при поиске class_id:", err)
 		return 0, err
@@ -113,7 +128,10 @@ func ClassIDByNumberAndLetter(database *sql.DB, number int64, letter string) (in
 }
 
 // FindUsersByQuery returns users matching name substring or class like "7А".
-func FindUsersByQuery(database *sql.DB, q string, limit int) ([]models.User, error) {
+func FindUsersByQuery(ctx context.Context, database *sql.DB, q string, limit int) ([]models.User, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
+
 	if limit <= 0 {
 		limit = 50
 	}
@@ -137,7 +155,7 @@ WHERE name LIKE $1              -- TitleCase
 ORDER BY name ASC
 LIMIT $5`
 
-	rows, err := database.Query(
+	rows, err := database.QueryContext(ctx,
 		query,
 		"%"+qTitle+"%",
 		"%"+qUpper+"%",
@@ -191,15 +209,17 @@ func normalizeClassQuery(q string) string {
 }
 
 // ChangeRoleWithCleanup меняет роль и делает уборку (чистит класс/родительские связи) + аудит.
-func ChangeRoleWithCleanup(database *sql.DB, targetUserID int64, newRole string, changedBy int64) error {
-	tx, err := database.Begin()
+func ChangeRoleWithCleanup(ctx context.Context, database *sql.DB, targetUserID int64, newRole string, changedBy int64) error {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
+	tx, err := database.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	var oldRole string
-	if err = tx.QueryRow(`SELECT role FROM users WHERE id=$1`, targetUserID).Scan(&oldRole); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT role FROM users WHERE id=$1`, targetUserID).Scan(&oldRole); err != nil {
 		return err
 	}
 	if newRole == "student" {
@@ -209,7 +229,7 @@ func ChangeRoleWithCleanup(database *sql.DB, targetUserID int64, newRole string,
 	now := time.Now()
 
 	// 1) Применяем новую роль и чистим школьные поля (для любого newRole ≠ student)
-	if _, err = tx.Exec(`
+	if _, err = tx.ExecContext(ctx, `
 		UPDATE users
 		SET role=$1, class_id=NULL, class_name=NULL, class_number=NULL, class_letter=NULL
 		WHERE id=$2
@@ -221,7 +241,7 @@ func ChangeRoleWithCleanup(database *sql.DB, targetUserID int64, newRole string,
 	if oldRole == "student" && newRole != string(models.Student) {
 		// Собираем всех родителей до удаления, чтобы потом пересчитать их активность
 		parentIDs := []int64{}
-		rows, err := tx.Query(`SELECT DISTINCT parent_id FROM parents_students WHERE student_id=$1`, targetUserID)
+		rows, err := tx.QueryContext(ctx, `SELECT DISTINCT parent_id FROM parents_students WHERE student_id=$1`, targetUserID)
 		if err != nil {
 			return err
 		}
@@ -235,16 +255,16 @@ func ChangeRoleWithCleanup(database *sql.DB, targetUserID int64, newRole string,
 		}
 		_ = rows.Close()
 
-		if _, err = tx.Exec(`DELETE FROM parents_students WHERE student_id=$1`, targetUserID); err != nil {
+		if _, err = tx.ExecContext(ctx, `DELETE FROM parents_students WHERE student_id=$1`, targetUserID); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(`DELETE FROM parent_link_requests WHERE student_id=$1`, targetUserID); err != nil {
+		if _, err = tx.ExecContext(ctx, `DELETE FROM parent_link_requests WHERE student_id=$1`, targetUserID); err != nil {
 			return err
 		}
 		// Пересчёт активности родителей внутри транзакции
 		for _, pid := range parentIDs {
 			var n int
-			if err := tx.QueryRow(`
+			if err := tx.QueryRowContext(ctx, `
 				SELECT COUNT(*)
 				FROM parents_students ps
 				JOIN users s ON s.id=ps.student_id
@@ -253,11 +273,11 @@ func ChangeRoleWithCleanup(database *sql.DB, targetUserID int64, newRole string,
 				return err
 			}
 			if n == 0 {
-				if _, err := tx.Exec(`UPDATE users SET is_active=FALSE, deactivated_at=COALESCE(deactivated_at,$2) WHERE id=$1`, pid, now); err != nil {
+				if _, err := tx.ExecContext(ctx, `UPDATE users SET is_active=FALSE, deactivated_at=COALESCE(deactivated_at,$2) WHERE id=$1`, pid, now); err != nil {
 					return err
 				}
 			} else {
-				if _, err := tx.Exec(`UPDATE users SET is_active=TRUE WHERE id=$1`, pid); err != nil {
+				if _, err := tx.ExecContext(ctx, `UPDATE users SET is_active=TRUE WHERE id=$1`, pid); err != nil {
 					return err
 				}
 			}
@@ -266,20 +286,20 @@ func ChangeRoleWithCleanup(database *sql.DB, targetUserID int64, newRole string,
 
 	// 3) Был PARENT → стал НЕ-parent: чистим связи/заявки и деактивируем
 	if oldRole == "parent" && newRole != "parent" {
-		if _, err = tx.Exec(`DELETE FROM parents_students WHERE parent_id=$1`, targetUserID); err != nil {
+		if _, err = tx.ExecContext(ctx, `DELETE FROM parents_students WHERE parent_id=$1`, targetUserID); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(`DELETE FROM parent_link_requests WHERE parent_id=$1`, targetUserID); err != nil {
+		if _, err = tx.ExecContext(ctx, `DELETE FROM parent_link_requests WHERE parent_id=$1`, targetUserID); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(`UPDATE users SET is_active=FALSE, deactivated_at=COALESCE(deactivated_at,$2) WHERE id=$1`,
+		if _, err = tx.ExecContext(ctx, `UPDATE users SET is_active=FALSE, deactivated_at=COALESCE(deactivated_at,$2) WHERE id=$1`,
 			targetUserID, now); err != nil {
 			return err
 		}
 	}
 
 	// 4) Аудит
-	if _, err = tx.Exec(`
+	if _, err = tx.ExecContext(ctx, `
 		INSERT INTO role_changes (user_id, old_role, new_role, changed_by, changed_at)
 		VALUES ($1,$2,$3,$4,$5)
 	`, targetUserID, oldRole, newRole, changedBy, now); err != nil {
@@ -290,33 +310,35 @@ func ChangeRoleWithCleanup(database *sql.DB, targetUserID int64, newRole string,
 }
 
 // ChangeRoleToStudentWithAudit переводим в student + ставим класс и аудит.
-func ChangeRoleToStudentWithAudit(database *sql.DB, targetUserID int64, classNumber int64, classLetter string, changedBy int64) error {
-	tx, err := database.Begin()
+func ChangeRoleToStudentWithAudit(ctx context.Context, database *sql.DB, targetUserID int64, classNumber int64, classLetter string, changedBy int64) error {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
+	tx, err := database.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	var oldRole string
-	if err = tx.QueryRow(`SELECT role FROM users WHERE id = $1`, targetUserID).Scan(&oldRole); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT role FROM users WHERE id = $1`, targetUserID).Scan(&oldRole); err != nil {
 		return err
 	}
 
 	// Если был родителем — убрать родительские связи/заявки и деактивировать
 	if oldRole == "parent" {
-		if _, err = tx.Exec(`DELETE FROM parents_students WHERE parent_id=$1`, targetUserID); err != nil {
+		if _, err = tx.ExecContext(ctx, `DELETE FROM parents_students WHERE parent_id=$1`, targetUserID); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(`DELETE FROM parent_link_requests WHERE parent_id=$1`, targetUserID); err != nil {
+		if _, err = tx.ExecContext(ctx, `DELETE FROM parent_link_requests WHERE parent_id=$1`, targetUserID); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(`UPDATE users SET is_active=FALSE, deactivated_at=COALESCE(deactivated_at, NOW()) WHERE id=$1`, targetUserID); err != nil {
+		if _, err = tx.ExecContext(ctx, `UPDATE users SET is_active=FALSE, deactivated_at=COALESCE(deactivated_at, NOW()) WHERE id=$1`, targetUserID); err != nil {
 			return err
 		}
 	}
 
 	// Назначаем роль student и класс
-	if _, err = tx.Exec(`
+	if _, err = tx.ExecContext(ctx, `
 		UPDATE users
 		SET role='student', class_number=$1, class_letter=$2, class_name=NULL, class_id=NULL
 		WHERE id=$3
@@ -326,7 +348,7 @@ func ChangeRoleToStudentWithAudit(database *sql.DB, targetUserID int64, classNum
 
 	// Аудит
 	now := time.Now()
-	if _, err = tx.Exec(`
+	if _, err = tx.ExecContext(ctx, `
 		INSERT INTO role_changes (user_id, old_role, new_role, changed_by, changed_at)
 		VALUES ($1,$2,$3,$4,$5)
 	`, targetUserID, oldRole, "student", changedBy, now); err != nil {
@@ -361,21 +383,27 @@ func toUpperRU(s string) string {
 }
 
 // DeactivateUser ставит is_active=false и фиксирует деактивацию
-func DeactivateUser(database *sql.DB, userID int64, at time.Time) error {
-	_, err := database.Exec(`UPDATE users SET is_active=FALSE, deactivated_at=COALESCE(deactivated_at, $2) WHERE id=$1`, userID, at)
+func DeactivateUser(ctx context.Context, database *sql.DB, userID int64, at time.Time) error {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
+	_, err := database.ExecContext(ctx, `UPDATE users SET is_active=FALSE, deactivated_at=COALESCE(deactivated_at, $2) WHERE id=$1`, userID, at)
 	return err
 }
 
 // ActivateUser возвращает доступ (is_active=true), но deactivated_at не трогаем
-func ActivateUser(database *sql.DB, userID int64) error {
-	_, err := database.Exec(`UPDATE users SET is_active=TRUE WHERE id=$1`, userID)
+func ActivateUser(ctx context.Context, database *sql.DB, userID int64) error {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
+	_, err := database.ExecContext(ctx, `UPDATE users SET is_active=TRUE WHERE id=$1`, userID)
 	return err
 }
 
 // RefreshParentActiveFlag если нет активных детей — родитель становится неактивным
-func RefreshParentActiveFlag(database *sql.DB, parentID int64) error {
+func RefreshParentActiveFlag(ctx context.Context, database *sql.DB, parentID int64) error {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
 	var n int
-	err := database.QueryRow(`
+	err := database.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM parents_students ps
 		JOIN users s ON s.id = ps.student_id
@@ -386,16 +414,18 @@ func RefreshParentActiveFlag(database *sql.DB, parentID int64) error {
 	}
 
 	if n == 0 {
-		_, err = database.Exec(`UPDATE users SET is_active=FALSE, deactivated_at=COALESCE(deactivated_at, NOW()) WHERE id=$1`, parentID)
+		_, err = database.ExecContext(ctx, `UPDATE users SET is_active=FALSE, deactivated_at=COALESCE(deactivated_at, NOW()) WHERE id=$1`, parentID)
 	} else {
-		_, err = database.Exec(`UPDATE users SET is_active=TRUE WHERE id=$1`, parentID) // при наличии активных детей оживляем
+		_, err = database.ExecContext(ctx, `UPDATE users SET is_active=TRUE WHERE id=$1`, parentID) // при наличии активных детей оживляем
 	}
 	return err
 }
 
 // GetAdminTelegramIDs — chat_id админов (admin + administration), только активные.
-func GetAdminTelegramIDs(database *sql.DB) ([]int64, error) {
-	rows, err := database.Query(`
+func GetAdminTelegramIDs(ctx context.Context, database *sql.DB) ([]int64, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
+	rows, err := database.QueryContext(ctx, `
 		SELECT telegram_id
 		FROM users
 		WHERE role IN ('admin','administration')

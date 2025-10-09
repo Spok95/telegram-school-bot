@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -16,7 +17,7 @@ var lastNotifiedStartYear int
 // RunSchoolYearNotifier выполняет ОДНУ проверку и, если сегодня 1 сентября
 // и уже позже 07:00 локального времени — шлёт уведомление админам.
 // Возвращает первую системную ошибку отправки/БД (для метрики job_errors).
-func RunSchoolYearNotifier(bot *tgbotapi.BotAPI, database *sql.DB) error {
+func RunSchoolYearNotifier(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB) error {
 	now := time.Now()
 	// 1 сентября после 07:00 локального времени
 	if now.Month() == time.September && now.Day() == 1 && now.Hour() >= 7 {
@@ -25,7 +26,7 @@ func RunSchoolYearNotifier(bot *tgbotapi.BotAPI, database *sql.DB) error {
 			return nil // уже уведомляли в этом году
 		}
 
-		ids, err := db.GetAdminTelegramIDs(database)
+		ids, err := db.GetAdminTelegramIDs(ctx, database)
 		if err != nil {
 			return err
 		}
