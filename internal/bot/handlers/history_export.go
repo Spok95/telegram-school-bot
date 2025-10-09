@@ -7,6 +7,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
@@ -38,7 +39,11 @@ func StartStudentHistoryExcel(ctx context.Context, bot *tgbotapi.BotAPI, databas
 		}
 		return
 	}
-	go generateAndSendStudentHistoryExcel(ctx, bot, database, chatID, u.ID, int(*u.ClassNumber), *u.ClassLetter, act.ID, act.Name)
+	c, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+	go func() {
+		defer cancel()
+		generateAndSendStudentHistoryExcel(c, bot, database, chatID, u.ID, int(*u.ClassNumber), *u.ClassLetter, act.ID, act.Name)
+	}()
 }
 
 // StartParentHistoryExcel Родитель → один ребёнок: сразу отчёт; несколько — выбор ребёнка
@@ -60,8 +65,12 @@ func StartParentHistoryExcel(ctx context.Context, bot *tgbotapi.BotAPI, database
 	}
 	if len(children) == 1 {
 		if act, _ := db.GetActivePeriod(ctx, database); act != nil {
-			c := children[0]
-			go generateAndSendStudentHistoryExcel(ctx, bot, database, chatID, c.ID, int(*c.ClassNumber), *c.ClassLetter, act.ID, act.Name)
+			child := children[0]
+			c, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+			go func() {
+				defer cancel()
+				generateAndSendStudentHistoryExcel(c, bot, database, chatID, child.ID, int(*child.ClassNumber), *child.ClassLetter, act.ID, act.Name)
+			}()
 			return
 		}
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Активный период не найден.")); err != nil {
@@ -109,7 +118,11 @@ func HandleHistoryExcelCallback(ctx context.Context, bot *tgbotapi.BotAPI, datab
 			return
 		}
 		if act, _ := db.GetActivePeriod(ctx, database); act != nil {
-			go generateAndSendStudentHistoryExcel(ctx, bot, database, chatID, stuID, int(*u.ClassNumber), *u.ClassLetter, act.ID, act.Name)
+			c, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+			go func() {
+				defer cancel()
+				generateAndSendStudentHistoryExcel(c, bot, database, chatID, stuID, int(*u.ClassNumber), *u.ClassLetter, act.ID, act.Name)
+			}()
 			return
 		}
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Активный период не найден.")); err != nil {

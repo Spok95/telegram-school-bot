@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/Spok95/telegram-school-bot/internal/bot/shared/fsmutil"
 	"github.com/Spok95/telegram-school-bot/internal/db"
@@ -124,31 +125,33 @@ func HandleExportUsersCallback(ctx context.Context, bot *tgbotapi.BotAPI, databa
 		}
 		includeInactive := state.IncludeInactive
 
-		go func() {
+		taskCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+		go func(c context.Context) {
+			defer cancel()
 			defer fsmutil.ClearPending(chatID, key)
 			defer delete(expUsers, chatID)
 
-			all, err := db.ListAllUsers(ctx, database, state.IncludeInactive)
+			all, err := db.ListAllUsers(c, database, state.IncludeInactive)
 			if err != nil {
 				fail(bot, chatID, state, err)
 				return
 			}
-			teachers, err := db.ListTeachers(ctx, database, state.IncludeInactive)
+			teachers, err := db.ListTeachers(c, database, state.IncludeInactive)
 			if err != nil {
 				fail(bot, chatID, state, err)
 				return
 			}
-			admins, err := db.ListAdministration(ctx, database, state.IncludeInactive)
+			admins, err := db.ListAdministration(c, database, state.IncludeInactive)
 			if err != nil {
 				fail(bot, chatID, state, err)
 				return
 			}
-			students, err := db.ListStudents(ctx, database, state.IncludeInactive)
+			students, err := db.ListStudents(c, database, state.IncludeInactive)
 			if err != nil {
 				fail(bot, chatID, state, err)
 				return
 			}
-			parents, err := db.ListParents(ctx, database, state.IncludeInactive)
+			parents, err := db.ListParents(c, database, state.IncludeInactive)
 			if err != nil {
 				fail(bot, chatID, state, err)
 				return
@@ -218,7 +221,7 @@ func HandleExportUsersCallback(ctx context.Context, bot *tgbotapi.BotAPI, databa
 				}
 				return
 			}
-		}()
+		}(taskCtx)
 		return
 	}
 }

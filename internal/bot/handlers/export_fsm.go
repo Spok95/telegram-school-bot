@@ -498,7 +498,9 @@ func generateExportReport(ctx context.Context, bot *tgbotapi.BotAPI, database *s
 	if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⏳ Формирую Excel-файл...")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
-	go func() {
+	taskCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+	go func(c context.Context) {
+		defer cancel()
 		var scores []models.ScoreWithUser
 		var err error
 		var periodLabel string
@@ -511,7 +513,7 @@ func generateExportReport(ctx context.Context, bot *tgbotapi.BotAPI, database *s
 				}
 				return
 			}
-			p, errP := db.GetPeriodByID(ctx, database, int(*state.PeriodID))
+			p, errP := db.GetPeriodByID(c, database, int(*state.PeriodID))
 			if errP != nil || p == nil {
 				if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Период не найден.")); err != nil {
 					metrics.HandlerErrors.Inc()
@@ -522,19 +524,19 @@ func generateExportReport(ctx context.Context, bot *tgbotapi.BotAPI, database *s
 			switch state.ReportType {
 			case "student":
 				for _, id := range state.SelectedStudentIDs {
-					part, err := db.GetScoresByStudentAndPeriod(ctx, database, id, int(*state.PeriodID))
+					part, err := db.GetScoresByStudentAndPeriod(c, database, id, int(*state.PeriodID))
 					if err != nil {
 						log.Println("Ошибка при получении баллов:", err)
 					}
 					scores = append(scores, part...)
 				}
 			case "class":
-				scores, err = db.GetScoresByClassAndPeriod(ctx, database, state.ClassNumber, state.ClassLetter, *state.PeriodID)
+				scores, err = db.GetScoresByClassAndPeriod(c, database, state.ClassNumber, state.ClassLetter, *state.PeriodID)
 				if err != nil {
 					log.Println("Ошибка при получении баллов:", err)
 				}
 			case "school":
-				scores, err = db.GetScoresByPeriod(ctx, database, int(*state.PeriodID))
+				scores, err = db.GetScoresByPeriod(c, database, int(*state.PeriodID))
 				if err != nil {
 					log.Println("Ошибка при получении баллов:", err)
 				}
@@ -551,19 +553,19 @@ func generateExportReport(ctx context.Context, bot *tgbotapi.BotAPI, database *s
 			switch state.ReportType {
 			case "student":
 				for _, id := range state.SelectedStudentIDs {
-					part, err := db.GetScoresByStudentAndDateRange(ctx, database, id, *state.FromDate, *state.ToDate)
+					part, err := db.GetScoresByStudentAndDateRange(c, database, id, *state.FromDate, *state.ToDate)
 					if err != nil {
 						log.Println("Ошибка при получении баллов:", err)
 					}
 					scores = append(scores, part...)
 				}
 			case "class":
-				scores, err = db.GetScoresByClassAndDateRange(ctx, database, int(state.ClassNumber), state.ClassLetter, *state.FromDate, *state.ToDate)
+				scores, err = db.GetScoresByClassAndDateRange(c, database, int(state.ClassNumber), state.ClassLetter, *state.FromDate, *state.ToDate)
 				if err != nil {
 					log.Println("Ошибка при получении баллов:", err)
 				}
 			case "school":
-				scores, err = db.GetScoresByDateRange(ctx, database, *state.FromDate, *state.ToDate)
+				scores, err = db.GetScoresByDateRange(c, database, *state.FromDate, *state.ToDate)
 				if err != nil {
 					log.Println("Ошибка при получении баллов:", err)
 				}
@@ -584,11 +586,11 @@ func generateExportReport(ctx context.Context, bot *tgbotapi.BotAPI, database *s
 		// --- Вычисляем коллективный рейтинг ---
 		// Для отчёта по классу
 		if state.ReportType == "class" && len(scores) > 0 {
-			collective, className = report(ctx, state, database)
+			collective, className = report(c, state, database)
 		}
 		// Для отчёта по ученику — класс берём из выбранного состояния (учеников выбираем внутри класса)
 		if state.ReportType == "student" && len(scores) > 0 {
-			collective, className = report(ctx, state, database)
+			collective, className = report(c, state, database)
 		}
 		switch state.ReportType {
 		case "student":
@@ -610,7 +612,7 @@ func generateExportReport(ctx context.Context, bot *tgbotapi.BotAPI, database *s
 		if _, err := tg.Send(bot, doc); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
-	}()
+	}(taskCtx)
 }
 
 func GetExportState(userID int64) *ExportFSMState {

@@ -6,6 +6,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Spok95/telegram-school-bot/internal/bot/auth"
 	"github.com/Spok95/telegram-school-bot/internal/bot/handlers"
@@ -157,7 +158,7 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 			handlers.StartRemoveScoreFSM(ctx, bot, database, msg)
 		}()
 	case "/my_score", "📊 Мой рейтинг":
-		go handlers.HandleMyScore(ctx, bot, database, msg)
+		handlers.HandleMyScore(ctx, bot, database, msg)
 	case "📜 История получения баллов":
 		if user.Role != nil {
 			switch *user.Role {
@@ -172,43 +173,45 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 			}
 		}
 	case "➕ Добавить ребёнка":
-		go auth.StartAddChild(ctx, bot, msg)
+		auth.StartAddChild(ctx, bot, msg)
 	case "📊 Рейтинг ребёнка":
 		if *user.Role == models.Parent {
-			go handlers.HandleParentRatingRequest(ctx, bot, database, chatID, user.ID)
+			handlers.HandleParentRatingRequest(ctx, bot, database, chatID, user.ID)
 		}
 	case "/approvals", "📥 Заявки на баллы":
 		if *user.Role == "admin" || *user.Role == "administration" {
-			go handlers.ShowPendingScores(ctx, bot, database, chatID)
+			handlers.ShowPendingScores(ctx, bot, database, chatID)
 		}
 	case "📥 Заявки на авторизацию":
 		if db.IsAdminID(chatID) {
-			go handlers.ShowPendingUsers(ctx, bot, database, chatID)
-			go handlers.ShowPendingParentLinks(ctx, bot, database, chatID)
+			handlers.ShowPendingUsers(ctx, bot, database, chatID)
+			handlers.ShowPendingParentLinks(ctx, bot, database, chatID)
 		}
 	case "/periods", "📅 Периоды":
 		if *user.Role == "admin" {
-			go handlers.StartAdminPeriods(ctx, bot, database, msg)
+			handlers.StartAdminPeriods(ctx, bot, database, msg)
 		}
 	case "/export", "📥 Экспорт отчёта":
 		if *user.Role == "admin" || *user.Role == "administration" {
 			unlock := chatLimiter.lock(chatID)
-			go func() {
+			bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+			go func(c context.Context) {
 				defer unlock()
-				handlers.StartExportFSM(ctx, bot, database, msg)
-			}()
+				defer cancel()
+				handlers.StartExportFSM(c, bot, database, msg)
+			}(bg)
 		}
 	case "👥 Пользователи":
 		if *user.Role == "admin" {
-			go handlers.StartAdminUsersFSM(ctx, bot, msg)
+			handlers.StartAdminUsersFSM(ctx, bot, msg)
 		}
 	case "/auction", "🎯 Аукцион":
 		if *user.Role == "admin" || *user.Role == "administration" {
-			go handlers.StartAuctionFSM(ctx, bot, database, msg)
+			handlers.StartAuctionFSM(ctx, bot, database, msg)
 		}
 	case "🗂 Справочники":
 		if *user.Role == "admin" {
-			go handlers.StartCatalogFSM(ctx, bot, database, msg)
+			handlers.StartCatalogFSM(ctx, bot, database, msg)
 		}
 	case "/backup", "💾 Бэкап БД":
 		if user.Role != nil && (*user.Role == "admin") {
@@ -229,10 +232,12 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 	case "📥 Восстановить из файла":
 		if user.Role != nil && (*user.Role == "admin") {
 			unlock := chatLimiter.lock(chatID)
-			go func() {
+			bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+			go func(c context.Context) {
 				defer unlock()
-				handlers.HandleAdminRestoreStart(ctx, bot, database, chatID)
-			}()
+				defer cancel()
+				handlers.HandleAdminRestoreStart(c, bot, database, chatID)
+			}(bg)
 		}
 	default:
 		role := getUserFSMRole(chatID)
