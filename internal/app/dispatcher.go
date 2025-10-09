@@ -19,7 +19,10 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-var chatLimiter = NewChatLimiter()
+var (
+	updGuard    = NewUpdateGuard()
+	chatLimiter = NewChatLimiter()
+)
 
 func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
@@ -29,6 +32,10 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 		chatID,
 	)
 	text := msg.Text
+	// --- ранний отсев флуда/дублей
+	if !updGuard.Allow(&tgbotapi.Update{Message: msg}) {
+		return
+	}
 	db.EnsureAdmin(ctx, chatID, database, text, bot)
 
 	// 🔁 Если активен FSM восстановления БД — делегируем туда любой апдейт (текст/документ)
@@ -253,11 +260,21 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 }
 
 func HandleCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
+	data := cb.Data
+	chatID := cb.Message.Chat.ID
+
+	// --- ранний отсев флуда/дублей
+	if !updGuard.Allow(&tgbotapi.Update{CallbackQuery: cb}) {
+		// мгновенный ACK, чтобы не висели «часики» даже если дропнули
+		_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, ""))
+		return
+	}
+
+	// обычный быстрый ACK перед основной логикой
 	if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
-	data := cb.Data
-	chatID := cb.Message.Chat.ID
+
 	ctx = ctxutil.WithChatID(
 		ctxutil.WithOp(ctx, "tg.callback:"+cb.Data),
 		chatID,
