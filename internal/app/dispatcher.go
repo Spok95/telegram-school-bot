@@ -21,6 +21,14 @@ import (
 
 var chatLimiter = NewChatLimiter()
 
+// + под импортами (пакетные синглтоны лимитера и дидупа)
+var (
+	// окно дидупа — 2 минуты (подходит для повторных delivery Telegram)
+	dupeGuard = NewDupeGuard(2 * time.Minute)
+	// рейт-лимит по чату: 6 событий/сек с небольшим бурстом
+	rateLimiter = NewRateLimiter(6, 3)
+)
+
 func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	chatID := msg.Chat.ID
 	// базовый контекст для обработки входящего сообщения
@@ -29,6 +37,15 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 		chatID,
 	)
 	text := msg.Text
+	// --- ранний отсев флуда/дублей
+	if !rateLimiter.Allow(chatID) {
+		metrics.UpdateDropsRateLimit.Inc()
+		return
+	}
+	if !dupeGuard.AllowMessage(chatID, msg.MessageID) {
+		metrics.UpdateDropsDedup.Inc()
+		return
+	}
 	db.EnsureAdmin(ctx, chatID, database, text, bot)
 
 	// 🔁 Если активен FSM восстановления БД — делегируем туда любой апдейт (текст/документ)
@@ -258,6 +275,23 @@ func HandleCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB,
 	}
 	data := cb.Data
 	chatID := cb.Message.Chat.ID
+	// --- ранний отсев флуда/дублей + мгновенный ACK «часиков»
+	if !rateLimiter.Allow(chatID) {
+		metrics.UpdateDropsRateLimit.Inc() // <--- см. имена счётчиков ниже
+		// чисто на всякий случай — ACK, чтобы не висели «часики»
+		_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, ""))
+		return
+	}
+	msgID := 0
+	if cb.Message != nil {
+		msgID = cb.Message.MessageID
+	}
+	if !dupeGuard.AllowCallback(chatID, msgID, cb.Data) {
+		metrics.UpdateDropsDedup.Inc()
+		_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, ""))
+		return
+	}
+
 	ctx = ctxutil.WithChatID(
 		ctxutil.WithOp(ctx, "tg.callback:"+cb.Data),
 		chatID,

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -19,6 +20,21 @@ var (
 		Namespace: "schoolbot", Name: "db_ping_seconds", Help: "DB ping latency",
 		Buckets: prometheus.DefBuckets,
 	})
+)
+
+var (
+	UpdateDropsRateLimit = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "tg_updates_dropped_ratelimit_total",
+			Help: "Updates dropped by per-chat rate limiter",
+		},
+	)
+	UpdateDropsDedup = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "tg_updates_dropped_dedup_total",
+			Help: "Updates dropped by dedup guard",
+		},
+	)
 )
 
 func init() {
