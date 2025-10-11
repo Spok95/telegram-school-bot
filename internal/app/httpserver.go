@@ -105,7 +105,7 @@ func StartHTTP(ctx context.Context, addr string, db *sql.DB) *HTTPServer {
 			_, _ = w.Write([]byte("query error"))
 			return
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 
 		cw := csv.NewWriter(w)
 		_ = cw.Write([]string{"start", "end", "teacher", "class", "status", "parent"})

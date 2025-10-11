@@ -81,7 +81,7 @@ func handleParentFree(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.D
 	for _, s := range free {
 		start := s.StartAt.In(loc).Format("15:04")
 		end := s.EndAt.In(loc).Format("15:04")
-		fmt.Fprintf(&b, "• #%d %s–%s (class_id=%d)\n", s.ID, start, end, s.ClassID)
+		_, _ = fmt.Fprintf(&b, "• #%d %s–%s (class_id=%d)\n", s.ID, start, end, s.ClassID)
 	}
 	reply(bot, chatID, b.String())
 	return true
