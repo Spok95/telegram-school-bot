@@ -8,7 +8,7 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-func StartRegistration(ctx context.Context, chatID int64, role string, bot *tgbotapi.BotAPI, database *sql.DB) {
+func StartRegistration(ctx context.Context, chatID int64, role string, bot *tgbotapi.BotAPI) {
 	select {
 	case <-ctx.Done():
 		return

@@ -360,7 +360,7 @@ func HandleCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB,
 		if role == "parent" {
 			auth.StartParentRegistration(ctx, chatID, cb.From, bot)
 		} else {
-			auth.StartRegistration(ctx, chatID, role, bot, database)
+			auth.StartRegistration(ctx, chatID, role, bot)
 		}
 		return
 	}
@@ -375,6 +375,12 @@ func HandleCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB,
 	}
 	// Учитель: управление слотами (удалить/отменить)
 	if TryHandleTeacherManageCallback(ctx, bot, database, cb) {
+		return
+	}
+	if TryHandleParentPickTeacher(ctx, bot, cb) {
+		return
+	}
+	if TryHandleParentPickDate(ctx, bot, database, cb) {
 		return
 	}
 

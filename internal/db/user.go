@@ -446,3 +446,31 @@ func GetAdminTelegramIDs(ctx context.Context, database *sql.DB) ([]int64, error)
 	}
 	return ids, rows.Err()
 }
+
+type TeacherLite struct {
+	ID   int64
+	Name string
+}
+
+func ListTeachersByClass(ctx context.Context, database *sql.DB, classID int64, limit int) ([]TeacherLite, error) {
+	rows, err := database.QueryContext(ctx, `
+		SELECT id, name FROM users
+		WHERE role = 'teacher' AND class_id = $1
+		ORDER BY name
+		LIMIT $2
+	`, classID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var res []TeacherLite
+	for rows.Next() {
+		var t TeacherLite
+		if err := rows.Scan(&t.ID, &t.Name); err != nil {
+			return nil, err
+		}
+		res = append(res, t)
+	}
+	return res, rows.Err()
+}

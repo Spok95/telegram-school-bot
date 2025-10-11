@@ -40,7 +40,7 @@ func clearTeacherFSM(chatID int64)                    { teacherFSM.Delete(chatID
 
 // ====== ENTRY POINTS ======
 
-// Команда запуска FSM
+// TryHandleTeacherSlotsCommand Команда запуска FSM
 func TryHandleTeacherSlotsCommand(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) bool {
 	if msg == nil || msg.Text == "" {
 		return false
@@ -61,8 +61,13 @@ func TryHandleTeacherSlotsCommand(ctx context.Context, bot *tgbotapi.BotAPI, dat
 	return true
 }
 
-// Обработка нажатий кнопок FSM учителя
-func TryHandleTeacherSlotsCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) bool {
+// TryHandleTeacherSlotsCallback Обработка нажатий кнопок FSM учителя
+func TryHandleTeacherSlotsCallback(ctx context.Context, bot *tgbotapi.BotAPI, cb *tgbotapi.CallbackQuery) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	default:
+	}
 	if cb == nil || cb.Data == "" {
 		return false
 	}
@@ -99,7 +104,7 @@ func TryHandleTeacherSlotsCallback(ctx context.Context, bot *tgbotapi.BotAPI, da
 	}
 }
 
-// Обработка текстовых шагов FSM учителя (после выбора дня)
+// TryHandleTeacherSlotsText Обработка текстовых шагов FSM учителя (после выбора дня)
 func TryHandleTeacherSlotsText(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) bool {
 	st, ok := getTeacherFSM(msg.Chat.ID)
 	if !ok {
@@ -178,7 +183,7 @@ func sendWeekdayMenu(bot *tgbotapi.BotAPI, chatID int64) {
 func wdBtn(title string, wd time.Weekday) tgbotapi.InlineKeyboardButton {
 	return tgbotapi.NewInlineKeyboardButtonData(title, fmt.Sprintf("t_slots:day:%d", int(wd)))
 }
-func row(btns ...tgbotapi.InlineKeyboardButton) tgbotapi.InlineKeyboardRow {
+func row(btns ...tgbotapi.InlineKeyboardButton) []tgbotapi.InlineKeyboardButton {
 	return tgbotapi.NewInlineKeyboardRow(btns...)
 }
 func editText(bot *tgbotapi.BotAPI, cb *tgbotapi.CallbackQuery, text string) {

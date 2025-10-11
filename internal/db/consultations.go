@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/lib/pq"
@@ -49,46 +48,6 @@ func CreateSlots(ctx context.Context, database *sql.DB, teacherID, classID int64
 		return 0, err
 	}
 	return inserted, nil
-}
-
-// ListFreeSlots — свободные слоты (фильтры по классу/учителю опциональны), в окне [from, to).
-func ListFreeSlots(ctx context.Context, database *sql.DB, classID, teacherID *int64, from, to time.Time, limit int) ([]ConsultSlot, error) {
-	q := `
-		SELECT id, teacher_id, class_id, start_at, end_at, booked_by_id
-		FROM consult_slots
-		WHERE booked_by_id IS NULL
-		  AND start_at >= $1 AND start_at < $2
-	`
-	args := []any{from, to}
-	idx := 3
-	if classID != nil {
-		q += fmt.Sprintf(" AND class_id = $%d", idx)
-		args = append(args, *classID)
-		idx++
-	}
-	if teacherID != nil {
-		q += fmt.Sprintf(" AND teacher_id = $%d", idx)
-		args = append(args, *teacherID)
-		idx++
-	}
-	q += fmt.Sprintf(" ORDER BY start_at LIMIT $%d", idx)
-	args = append(args, limit)
-
-	rows, err := database.QueryContext(ctx, q, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	out := make([]ConsultSlot, 0, limit)
-	for rows.Next() {
-		var s ConsultSlot
-		if err := rows.Scan(&s.ID, &s.TeacherID, &s.ClassID, &s.StartAt, &s.EndAt, &s.BookedByID); err != nil {
-			return nil, err
-		}
-		out = append(out, s)
-	}
-	return out, rows.Err()
 }
 
 // TryBookSlot — атомарное бронирование: ставит booked_by_id, если слота ещё никто не занял.
