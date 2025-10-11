@@ -9,6 +9,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/Spok95/telegram-school-bot/internal/metrics"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
 	"github.com/Spok95/telegram-school-bot/internal/db"
@@ -109,7 +111,9 @@ func usageAddSlots() string {
 }
 
 func reply(bot *tgbotapi.BotAPI, chatID int64, text string) {
-	_, _ = bot.Send(tgbotapi.NewMessage(chatID, text))
+	if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, text)); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 }
 
 func splitArgs(s string) []string {

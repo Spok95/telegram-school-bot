@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Spok95/telegram-school-bot/internal/metrics"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
 	"github.com/Spok95/telegram-school-bot/internal/db"
@@ -19,17 +21,23 @@ import (
 func StartParentConsultFlow(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
 	u, err := db.GetUserByTelegramID(ctx, database, msg.Chat.ID)
 	if err != nil || u == nil || u.Role == nil || *u.Role != models.Parent {
-		_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "Недоступно. Только для родителей."))
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(msg.Chat.ID, "Недоступно. Только для родителей.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 	children, err := db.ListChildrenForParent(ctx, database, u.ID)
 	if err != nil {
 		observability.CaptureErr(err)
-		_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "Ошибка при получении списка детей."))
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(msg.Chat.ID, "Ошибка при получении списка детей.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 	if len(children) == 0 {
-		_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "В системе не найден ни один ребёнок, привязанный к вашему профилю."))
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(msg.Chat.ID, "В системе не найден ни один ребёнок, привязанный к вашему профилю.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 	var rows [][]tgbotapi.InlineKeyboardButton
@@ -48,7 +56,9 @@ func StartParentConsultFlow(ctx context.Context, bot *tgbotapi.BotAPI, database 
 	kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
 	out := tgbotapi.NewMessage(msg.Chat.ID, "Выберите ребёнка:")
 	out.ReplyMarkup = kb
-	_, _ = bot.Send(out)
+	if _, err := tg.Send(bot, out); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 }
 
 func TryHandleParentFlowCallbacks(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) bool {
@@ -59,7 +69,9 @@ func TryHandleParentFlowCallbacks(ctx context.Context, bot *tgbotapi.BotAPI, dat
 	switch {
 	case strings.HasPrefix(cb.Data, "p_flow:cancel"):
 		edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, "Отменено.")
-		_, _ = bot.Send(edit)
+		if _, err := tg.Send(bot, edit); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return true
 
 	case strings.HasPrefix(cb.Data, "p_back:teachers"):
@@ -73,18 +85,24 @@ func TryHandleParentFlowCallbacks(ctx context.Context, bot *tgbotapi.BotAPI, dat
 		childID, _ := strconv.ParseInt(strings.TrimPrefix(cb.Data, "p_pick_child:"), 10, 64)
 		ch, err := db.GetUserByID(ctx, database, childID)
 		if err != nil || ch.ID == 0 || ch.ClassID == nil {
-			_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "У ребёнка не указан класс"))
+			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "У ребёнка не указан класс")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return true
 		}
 		teachers, err := db.ListTeachersWithFutureSlotsByClass(ctx, database, *ch.ClassID, 50)
 		if err != nil {
 			observability.CaptureErr(err)
-			_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "Ошибка учителей"))
+			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Ошибка учителей")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return true
 		}
 		if len(teachers) == 0 {
 			edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, "В этом классе консультации не запланированы.")
-			_, _ = bot.Send(edit)
+			if _, err := tg.Send(bot, edit); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return true
 		}
 		var rows [][]tgbotapi.InlineKeyboardButton
@@ -100,7 +118,9 @@ func TryHandleParentFlowCallbacks(ctx context.Context, bot *tgbotapi.BotAPI, dat
 		kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
 		edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, "Выберите учителя:")
 		edit.ReplyMarkup = &kb
-		_, _ = bot.Send(edit)
+		if _, err := tg.Send(bot, edit); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return true
 
 	case strings.HasPrefix(cb.Data, "p_pick_teacher:"):
@@ -112,7 +132,9 @@ func TryHandleParentFlowCallbacks(ctx context.Context, bot *tgbotapi.BotAPI, dat
 		childID, _ := strconv.ParseInt(parts[2], 10, 64)
 		ch, err := db.GetUserByID(ctx, database, childID)
 		if err != nil || ch.ID == 0 || ch.ClassID == nil {
-			_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "Нет класса у ребёнка"))
+			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Нет класса у ребёнка")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return true
 		}
 
@@ -135,7 +157,9 @@ func TryHandleParentFlowCallbacks(ctx context.Context, bot *tgbotapi.BotAPI, dat
 		kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
 		edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, "Выберите дату:")
 		edit.ReplyMarkup = &kb
-		_, _ = bot.Send(edit)
+		if _, err := tg.Send(bot, edit); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return true
 
 	case strings.HasPrefix(cb.Data, "p_pick_date:"):
@@ -151,11 +175,15 @@ func TryHandleParentFlowCallbacks(ctx context.Context, bot *tgbotapi.BotAPI, dat
 		free, err := db.ListFreeSlotsByTeacherOnDate(ctx, database, teacherID, day, loc, 50)
 		if err != nil {
 			observability.CaptureErr(err)
-			_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "Ошибка слотов"))
+			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Ошибка слотов")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return true
 		}
 		if len(free) == 0 {
-			_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "Нет свободных на эту дату"))
+			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Нет свободных на эту дату")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return true
 		}
 		var rows [][]tgbotapi.InlineKeyboardButton
@@ -174,7 +202,9 @@ func TryHandleParentFlowCallbacks(ctx context.Context, bot *tgbotapi.BotAPI, dat
 		kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
 		edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, "Свободные слоты:")
 		edit.ReplyMarkup = &kb
-		_, _ = bot.Send(edit)
+		if _, err := tg.Send(bot, edit); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return true
 	}
 	return false

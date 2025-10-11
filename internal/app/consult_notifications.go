@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	"github.com/Spok95/telegram-school-bot/internal/models"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
 	"github.com/Spok95/telegram-school-bot/internal/db"
@@ -53,11 +55,11 @@ func SendConsultReminder(ctx context.Context, bot *tgbotapi.BotAPI, database *sq
 	textParent := fmt.Sprintf("%s: консультация у учителя %s.", prefix, timeWindow)
 	textTeacher := fmt.Sprintf("%s: консультация с родителем %s.", prefix, timeWindow)
 
-	if _, err := bot.Send(tgbotapi.NewMessage(parentChat, textParent)); err != nil {
-		return err
+	if _, err := tg.Send(bot, tgbotapi.NewMessage(parentChat, textParent)); err != nil {
+		metrics.HandlerErrors.Inc()
 	}
-	if _, err := bot.Send(tgbotapi.NewMessage(teacherChat, textTeacher)); err != nil {
-		return err
+	if _, err := tg.Send(bot, tgbotapi.NewMessage(teacherChat, textTeacher)); err != nil {
+		metrics.HandlerErrors.Inc()
 	}
 	return nil
 }
@@ -89,11 +91,11 @@ func SendConsultBookedNotification(ctx context.Context, bot *tgbotapi.BotAPI, da
 	textParent := fmt.Sprintf("Запись подтверждена: консультация у учителя %s.", win)
 	textTeacher := fmt.Sprintf("Новая запись: консультация с родителем %s.", win)
 
-	if _, err := bot.Send(tgbotapi.NewMessage(parentChat, textParent)); err != nil {
-		return err
+	if _, err := tg.Send(bot, tgbotapi.NewMessage(parentChat, textParent)); err != nil {
+		metrics.HandlerErrors.Inc()
 	}
-	if _, err := bot.Send(tgbotapi.NewMessage(teacherChat, textTeacher)); err != nil {
-		return err
+	if _, err := tg.Send(bot, tgbotapi.NewMessage(teacherChat, textTeacher)); err != nil {
+		metrics.HandlerErrors.Inc()
 	}
 	return nil
 }
@@ -113,7 +115,9 @@ func SendTeacherCancelNotification(ctx context.Context, bot *tgbotapi.BotAPI, da
 		slot.EndAt.In(loc).Format("15:04"),
 	)
 	text := fmt.Sprintf("Запись на консультацию %s была отменена учителем.", win)
-	_, err = bot.Send(tgbotapi.NewMessage(parent.TelegramID, text))
+	if _, err := tg.Send(bot, tgbotapi.NewMessage(parent.TelegramID, text)); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 	return err
 }
 
@@ -140,7 +144,9 @@ func SendConsultBookedCard(ctx context.Context, bot *tgbotapi.BotAPI, database *
 		when, teacher.Name, className,
 	)
 	if parent.TelegramID != 0 {
-		_, _ = bot.Send(tgbotapi.NewMessage(parent.TelegramID, textParent))
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(parent.TelegramID, textParent)); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 	}
 	// учителю
 	textTeacher := fmt.Sprintf(
@@ -148,7 +154,9 @@ func SendConsultBookedCard(ctx context.Context, bot *tgbotapi.BotAPI, database *
 		when, parent.Name, child.Name, className,
 	)
 	if teacher.TelegramID != 0 {
-		_, _ = bot.Send(tgbotapi.NewMessage(teacher.TelegramID, textTeacher))
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(teacher.TelegramID, textTeacher)); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 	}
 	return nil
 }

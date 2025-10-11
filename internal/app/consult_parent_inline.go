@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Spok95/telegram-school-bot/internal/metrics"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
 	"github.com/Spok95/telegram-school-bot/internal/db"
@@ -27,21 +29,29 @@ func TryHandleParentSlotsCommand(ctx context.Context, bot *tgbotapi.BotAPI, data
 
 	u, err := db.GetUserByTelegramID(ctx, database, msg.Chat.ID)
 	if err != nil || u == nil || u.Role == nil || *u.Role != models.Parent {
-		_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "Команда доступна только родителям."))
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(msg.Chat.ID, "Команда доступна только родителям.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return true
 	}
 	if len(parts) < 3 {
-		_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "Использование: /p_slots <teacher_id> <YYYY-MM-DD>"))
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(msg.Chat.ID, "Использование: /p_slots <teacher_id> <YYYY-MM-DD>")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return true
 	}
 	teacherID, err := strconv.ParseInt(parts[1], 10, 64)
 	if err != nil || teacherID <= 0 {
-		_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "teacher_id должен быть положительным числом."))
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(msg.Chat.ID, "teacher_id должен быть положительным числом.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return true
 	}
 	day, err := time.Parse("2006-01-02", parts[2])
 	if err != nil {
-		_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "Дата в формате YYYY-MM-DD."))
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(msg.Chat.ID, "Дата в формате YYYY-MM-DD.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return true
 	}
 
@@ -49,11 +59,15 @@ func TryHandleParentSlotsCommand(ctx context.Context, bot *tgbotapi.BotAPI, data
 	free, err := db.ListFreeSlotsByTeacherOnDate(ctx, database, teacherID, day, loc, 30)
 	if err != nil {
 		observability.CaptureErr(err)
-		_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "Ошибка при получении слотов."))
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(msg.Chat.ID, "Ошибка при получении слотов.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return true
 	}
 	if len(free) == 0 {
-		_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "На выбранный день свободных слотов нет."))
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(msg.Chat.ID, "На выбранный день свободных слотов нет.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return true
 	}
 
@@ -67,7 +81,9 @@ func TryHandleParentSlotsCommand(ctx context.Context, bot *tgbotapi.BotAPI, data
 	kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
 	msgOut := tgbotapi.NewMessage(msg.Chat.ID, "Свободные слоты:")
 	msgOut.ReplyMarkup = kb
-	_, _ = bot.Send(msgOut)
+	if _, err := tg.Send(bot, msgOut); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 	return true
 }
 
@@ -86,18 +102,24 @@ func TryHandleParentBookCallback(ctx context.Context, bot *tgbotapi.BotAPI, data
 	chatID := cb.Message.Chat.ID
 	u, err := db.GetUserByTelegramID(ctx, database, chatID)
 	if err != nil || u == nil || u.Role == nil || *u.Role != models.Parent {
-		_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "Только для родителей"))
+		if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Только для родителей")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return true
 	}
 
 	slot, err := db.GetSlotByID(ctx, database, slotID)
 	if err != nil || slot == nil || slot.BookedByID.Valid {
-		_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "Слот недоступен"))
+		if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Слот недоступен")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return true
 	}
 	child, _ := db.GetUserByID(ctx, database, childID) // значение, не указатель
 	if child.ID == 0 || child.ClassID == nil || *child.ClassID != slot.ClassID {
-		_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "Неверный класс"))
+		if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Неверный класс")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return true
 	}
 
@@ -118,8 +140,12 @@ func TryHandleParentBookCallback(ctx context.Context, bot *tgbotapi.BotAPI, data
 	_ = SendConsultBookedCard(ctx, bot, database, *slot, *u, child, time.Local)
 
 	edit := tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "Запись оформлена.")
-	_, _ = bot.Send(edit)
-	_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "Готово"))
+	if _, err := tg.Send(bot, edit); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
+	if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Готово")); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 	return true
 }
 

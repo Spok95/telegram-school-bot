@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Spok95/telegram-school-bot/internal/metrics"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
 	"github.com/Spok95/telegram-school-bot/internal/db"
@@ -56,7 +58,9 @@ func upsertStepMsg(bot *tgbotapi.BotAPI, chatID int64, st *teacherFSMState, text
 	if kb != nil {
 		edit.ReplyMarkup = kb
 	}
-	_, _ = bot.Send(edit)
+	if _, err := tg.Send(bot, edit); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 }
 
 func kbRow(btns ...tgbotapi.InlineKeyboardButton) []tgbotapi.InlineKeyboardButton {
@@ -75,7 +79,9 @@ func TryHandleTeacherSlotsCommand(ctx context.Context, bot *tgbotapi.BotAPI, dat
 	}
 	u, _ := db.GetUserByTelegramID(ctx, database, msg.Chat.ID)
 	if u == nil || u.Role == nil || *u.Role != models.Teacher {
-		_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "Эта команда доступна только учителям."))
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(msg.Chat.ID, "Эта команда доступна только учителям.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return true
 	}
 	clearTeacherFSM(msg.Chat.ID)
@@ -110,7 +116,9 @@ func TryHandleTeacherSlotsCallback(ctx context.Context, bot *tgbotapi.BotAPI, da
 	case "cancel":
 		clearTeacherFSM(chatID)
 		edit := tgbotapi.NewEditMessageText(chatID, st.MsgID, "Отменено.")
-		_, _ = bot.Send(edit)
+		if _, err := tg.Send(bot, edit); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return true
 
 	case "day":

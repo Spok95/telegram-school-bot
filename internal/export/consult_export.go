@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/Spok95/telegram-school-bot/internal/db"
+	"github.com/Spok95/telegram-school-bot/internal/metrics"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/xuri/excelize/v2"
 )
@@ -89,6 +91,8 @@ func ExportConsultationsExcel(ctx context.Context, bot *tgbotapi.BotAPI, databas
 
 	doc := tgbotapi.NewDocument(chatID, tgbotapi.FilePath(path))
 	doc.Caption = "Расписание консультаций (по классам, за неделю)"
-	_, _ = bot.Send(doc)
+	if _, err := tg.Send(bot, doc); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 	return nil
 }

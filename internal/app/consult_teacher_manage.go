@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Spok95/telegram-school-bot/internal/metrics"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
 	"github.com/Spok95/telegram-school-bot/internal/db"
@@ -21,7 +23,9 @@ func TryHandleTeacherMySlots(ctx context.Context, bot *tgbotapi.BotAPI, database
 	}
 	u, _ := db.GetUserByTelegramID(ctx, database, msg.Chat.ID)
 	if u == nil || u.Role == nil || *u.Role != models.Teacher {
-		_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "Доступно только учителям."))
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(msg.Chat.ID, "Доступно только учителям.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return true
 	}
 	loc := time.Local
@@ -41,7 +45,9 @@ func TryHandleTeacherMySlots(ctx context.Context, bot *tgbotapi.BotAPI, database
 	kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
 	out := tgbotapi.NewMessage(msg.Chat.ID, "Выберите день недели:")
 	out.ReplyMarkup = kb
-	_, _ = bot.Send(out)
+	if _, err := tg.Send(bot, out); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 	return true
 }
 
@@ -53,7 +59,9 @@ func TryHandleTeacherManageCallback(ctx context.Context, bot *tgbotapi.BotAPI, d
 	switch {
 	case strings.HasPrefix(cb.Data, "t_ms:cancel"):
 		edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, "Отменено.")
-		_, _ = bot.Send(edit)
+		if _, err := tg.Send(bot, edit); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return true
 
 	case strings.HasPrefix(cb.Data, "t_ms:back"):
@@ -82,7 +90,9 @@ func TryHandleTeacherManageCallback(ctx context.Context, bot *tgbotapi.BotAPI, d
 		}
 		if len(slots) == 0 {
 			edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, "На выбранный день слотов нет.")
-			_, _ = bot.Send(edit)
+			if _, err := tg.Send(bot, edit); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return true
 		}
 		var rows [][]tgbotapi.InlineKeyboardButton
@@ -106,7 +116,9 @@ func TryHandleTeacherManageCallback(ctx context.Context, bot *tgbotapi.BotAPI, d
 		kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
 		edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, "Слоты на выбранный день:")
 		edit.ReplyMarkup = &kb
-		_, _ = bot.Send(edit)
+		if _, err := tg.Send(bot, edit); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return true
 	}
 
