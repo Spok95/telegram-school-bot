@@ -18,12 +18,14 @@ import (
 // ====== STATE ======
 
 type teacherFSMState struct {
-	Step    int
-	Weekday time.Weekday
-	Start   time.Time // фиктивная дата, время важно
-	End     time.Time
-	StepMin int
-	ClassID int64
+	Step       int
+	Weekday    time.Weekday
+	Start      time.Time // фиктивная дата, время важно
+	End        time.Time
+	StepMin    int
+	ClassID    int64
+	MsgID      int // последний message id, который редактируем
+	TempNumber int // выбранный номер класса (для шага выбора буквы)
 }
 
 var teacherFSM sync.Map // key: chatID(int64) -> *teacherFSMState
@@ -38,114 +40,145 @@ func getTeacherFSM(chatID int64) (*teacherFSMState, bool) {
 func setTeacherFSM(chatID int64, st *teacherFSMState) { teacherFSM.Store(chatID, st) }
 func clearTeacherFSM(chatID int64)                    { teacherFSM.Delete(chatID) }
 
-// ====== ENTRY POINTS ======
+// ====== UI helpers ======
 
-// TryHandleTeacherSlotsCommand Команда запуска FSM
+func upsertStepMsg(bot *tgbotapi.BotAPI, chatID int64, st *teacherFSMState, text string, kb *tgbotapi.InlineKeyboardMarkup) {
+	if st.MsgID == 0 {
+		msg := tgbotapi.NewMessage(chatID, text)
+		if kb != nil {
+			msg.ReplyMarkup = kb
+		}
+		out, _ := bot.Send(msg)
+		st.MsgID = out.MessageID
+		return
+	}
+	edit := tgbotapi.NewEditMessageText(chatID, st.MsgID, text)
+	if kb != nil {
+		edit.ReplyMarkup = kb
+	}
+	_, _ = bot.Send(edit)
+}
+
+func kbRow(btns ...tgbotapi.InlineKeyboardButton) []tgbotapi.InlineKeyboardButton {
+	return tgbotapi.NewInlineKeyboardRow(btns...)
+}
+
+func wdBtn(title string, wd time.Weekday) tgbotapi.InlineKeyboardButton {
+	return tgbotapi.NewInlineKeyboardButtonData(title, fmt.Sprintf("t_slots:day:%d", int(wd)))
+}
+
+// ====== ENTRY ======
+
 func TryHandleTeacherSlotsCommand(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) bool {
-	if msg == nil || msg.Text == "" {
+	if msg == nil || msg.Text == "" || !strings.HasPrefix(msg.Text, "/t_slots") {
 		return false
 	}
-	if !strings.HasPrefix(msg.Text, "/t_slots") {
-		return false
-	}
-	// проверка роли: только учитель
 	u, _ := db.GetUserByTelegramID(ctx, database, msg.Chat.ID)
 	if u == nil || u.Role == nil || *u.Role != models.Teacher {
 		_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "Эта команда доступна только учителям."))
 		return true
 	}
-	// сбрасываем состояние и показываем выбор дня недели
 	clearTeacherFSM(msg.Chat.ID)
-	setTeacherFSM(msg.Chat.ID, &teacherFSMState{Step: 1})
-	sendWeekdayMenu(bot, msg.Chat.ID)
+	st := &teacherFSMState{Step: 1}
+	setTeacherFSM(msg.Chat.ID, st)
+
+	kb := tgbotapi.NewInlineKeyboardMarkup(
+		kbRow(wdBtn("Пн", time.Monday), wdBtn("Вт", time.Tuesday), wdBtn("Ср", time.Wednesday)),
+		kbRow(wdBtn("Чт", time.Thursday), wdBtn("Пт", time.Friday), wdBtn("Сб", time.Saturday)),
+		kbRow(wdBtn("Вс", time.Sunday), tgbotapi.NewInlineKeyboardButtonData("Отмена", "t_slots:cancel")),
+	)
+	upsertStepMsg(bot, msg.Chat.ID, st, "Шаг 1/5. Выберите день недели:", &kb)
 	return true
 }
 
-// TryHandleTeacherSlotsCallback Обработка нажатий кнопок FSM учителя
-func TryHandleTeacherSlotsCallback(ctx context.Context, bot *tgbotapi.BotAPI, cb *tgbotapi.CallbackQuery) bool {
-	select {
-	case <-ctx.Done():
-		return false
-	default:
-	}
-	if cb == nil || cb.Data == "" {
+// ====== CALLBACKS ======
+
+func TryHandleTeacherSlotsCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) bool {
+	if cb == nil || cb.Data == "" || !strings.HasPrefix(cb.Data, "t_slots:") {
 		return false
 	}
-	if !strings.HasPrefix(cb.Data, "t_slots:") {
-		return false
+	chatID := cb.Message.Chat.ID
+	st, ok := getTeacherFSM(chatID)
+	if !ok {
+		st = &teacherFSMState{Step: 1}
+		setTeacherFSM(chatID, st)
 	}
+	st.MsgID = cb.Message.MessageID // редактируем текущее сообщение
+
 	parts := strings.Split(cb.Data, ":")
-	// варианты:
-	// t_slots:day:<0..6>
-	// t_slots:cancel
 	switch parts[1] {
 	case "cancel":
-		clearTeacherFSM(cb.Message.Chat.ID)
-		editText(bot, cb, "Отменено.")
+		clearTeacherFSM(chatID)
+		edit := tgbotapi.NewEditMessageText(chatID, st.MsgID, "Отменено.")
+		_, _ = bot.Send(edit)
 		return true
+
 	case "day":
-		if len(parts) < 3 {
-			answer(bot, cb, "Ошибка данных.")
-			return true
-		}
 		wdNum, _ := strconv.Atoi(parts[2])
-		st, ok := getTeacherFSM(cb.Message.Chat.ID)
-		if !ok {
-			setTeacherFSM(cb.Message.Chat.ID, &teacherFSMState{Step: 1})
-			st, _ = getTeacherFSM(cb.Message.Chat.ID)
-		}
 		st.Weekday = time.Weekday(wdNum)
 		st.Step = 2
-		setTeacherFSM(cb.Message.Chat.ID, st)
-		editText(bot, cb, "Шаг 2/4. Введите временное окно в формате HH:MM-HH:MM (например, 16:00-18:00)")
+		setTeacherFSM(chatID, st)
+		kb := tgbotapi.NewInlineKeyboardMarkup(
+			kbRow(tgbotapi.NewInlineKeyboardButtonData("Назад", "t_slots:back:1"), tgbotapi.NewInlineKeyboardButtonData("Отмена", "t_slots:cancel")),
+		)
+		upsertStepMsg(bot, chatID, st, "Шаг 2/5. Введите временное окно в формате HH:MM-HH:MM (например, 16:00-18:00)", &kb)
 		return true
-	default:
-		return false
-	}
-}
 
-// TryHandleTeacherSlotsText Обработка текстовых шагов FSM учителя (после выбора дня)
-func TryHandleTeacherSlotsText(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) bool {
-	st, ok := getTeacherFSM(msg.Chat.ID)
-	if !ok {
-		return false
-	}
-	switch st.Step {
-	case 2: // ждём HH:MM-HH:MM
-		startT, endT, ok := parseTimeWindow(strings.TrimSpace(msg.Text))
-		if !ok || !startT.Before(endT) {
-			_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "Неверный формат. Пример: 16:00-18:00"))
+	case "back":
+		step, _ := strconv.Atoi(parts[2])
+		switch step {
+		case 1:
+			st.Step = 1
+			setTeacherFSM(chatID, st)
+			kb := tgbotapi.NewInlineKeyboardMarkup(
+				kbRow(wdBtn("Пн", time.Monday), wdBtn("Вт", time.Tuesday), wdBtn("Ср", time.Wednesday)),
+				kbRow(wdBtn("Чт", time.Thursday), wdBtn("Пт", time.Friday), wdBtn("Сб", time.Saturday)),
+				kbRow(wdBtn("Вс", time.Sunday), tgbotapi.NewInlineKeyboardButtonData("Отмена", "t_slots:cancel")),
+			)
+			upsertStepMsg(bot, chatID, st, "Шаг 1/5. Выберите день недели:", &kb)
+			return true
+		case 2:
+			st.Step = 2
+			setTeacherFSM(chatID, st)
+			kb := tgbotapi.NewInlineKeyboardMarkup(
+				kbRow(tgbotapi.NewInlineKeyboardButtonData("Назад", "t_slots:back:1"), tgbotapi.NewInlineKeyboardButtonData("Отмена", "t_slots:cancel")),
+			)
+			upsertStepMsg(bot, chatID, st, "Шаг 2/5. Введите временное окно в формате HH:MM-HH:MM (например, 16:00-18:00)", &kb)
+			return true
+		case 3:
+			st.Step = 3
+			setTeacherFSM(chatID, st)
+			kb := tgbotapi.NewInlineKeyboardMarkup(
+				kbRow(tgbotapi.NewInlineKeyboardButtonData("Назад", "t_slots:back:2"), tgbotapi.NewInlineKeyboardButtonData("Отмена", "t_slots:cancel")),
+			)
+			upsertStepMsg(bot, chatID, st, "Шаг 3/5. Введите шаг в минутах (например, 20)", &kb)
+			return true
+		case 4:
+			// вернуться к выбору номера
+			st.Step = 4
+			setTeacherFSM(chatID, st)
+			showClassNumberMenu(ctx, bot, database, chatID, st)
 			return true
 		}
-		st.Start, st.End = startT, endT
-		st.Step = 3
-		setTeacherFSM(msg.Chat.ID, st)
-		_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "Шаг 3/4. Введите шаг в минутах (например, 20)"))
 		return true
-	case 3: // ждём шаг
-		stepMin, err := strconv.Atoi(strings.TrimSpace(msg.Text))
-		if err != nil || stepMin <= 0 {
-			_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "Шаг должен быть положительным числом минут."))
-			return true
-		}
-		st.StepMin = stepMin
-		st.Step = 4
-		setTeacherFSM(msg.Chat.ID, st)
-		_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "Шаг 4/4. Введите class_id (число)."))
+
+	case "cnum": // выбор номера класса
+		num, _ := strconv.Atoi(parts[2])
+		st.TempNumber = num
+		st.Step = 5
+		setTeacherFSM(chatID, st)
+		showClassLetterMenu(ctx, bot, database, chatID, st)
 		return true
-	case 4: // ждём class_id → генерим слоты
-		classID, err := strconv.ParseInt(strings.TrimSpace(msg.Text), 10, 64)
-		if err != nil || classID <= 0 {
-			_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "class_id должен быть положительным числом."))
-			return true
-		}
-		st.ClassID = classID
-		// генерация
+
+	case "csel": // выбор конкретного класса id
+		cid, _ := strconv.ParseInt(parts[2], 10, 64)
+		st.ClassID = cid
+		// готово — генерим слоты за 1 неделю
 		loc := time.Local
-		starts := generateStartsNext4Weeks(st.Weekday, st.Start, st.End, time.Duration(st.StepMin)*time.Minute, loc)
+		starts := generateStartsWeeks(st.Weekday, st.Start, st.End, time.Duration(st.StepMin)*time.Minute, 1, loc)
 		if len(starts) == 0 {
-			_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "Окно времени пустое — слоты не созданы."))
-			clearTeacherFSM(msg.Chat.ID)
+			upsertStepMsg(bot, chatID, st, "Окно времени пустое — слоты не созданы.", nil)
+			clearTeacherFSM(chatID)
 			return true
 		}
 		utc := make([]time.Time, 0, len(starts))
@@ -153,43 +186,103 @@ func TryHandleTeacherSlotsText(ctx context.Context, bot *tgbotapi.BotAPI, databa
 			utc = append(utc, lt.UTC())
 		}
 
-		u, _ := db.GetUserByTelegramID(ctx, database, msg.Chat.ID)
+		u, _ := db.GetUserByTelegramID(ctx, database, chatID)
 		inserted, err := db.CreateSlots(ctx, database, u.ID, st.ClassID, utc, time.Duration(st.StepMin)*time.Minute)
 		if err != nil {
-			_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "Ошибка при создании слотов."))
-			clearTeacherFSM(msg.Chat.ID)
+			upsertStepMsg(bot, chatID, st, "Ошибка при создании слотов.", nil)
+			clearTeacherFSM(chatID)
 			return true
 		}
-		_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, fmt.Sprintf("Готово. Создано слотов: %d (дубли проигнорированы).", inserted)))
-		clearTeacherFSM(msg.Chat.ID)
+		upsertStepMsg(bot, chatID, st, fmt.Sprintf("Готово. Создано слотов: %d (дубли проигнорированы).", inserted), nil)
+		clearTeacherFSM(chatID)
 		return true
-	default:
+	}
+	return false
+}
+
+// ====== TEXT STEPS ======
+
+func TryHandleTeacherSlotsText(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) bool {
+	st, ok := getTeacherFSM(msg.Chat.ID)
+	if !ok {
 		return false
 	}
+	switch st.Step {
+	case 2:
+		startT, endT, ok := parseTimeWindow(strings.TrimSpace(msg.Text))
+		if !ok || !startT.Before(endT) {
+			kb := tgbotapi.NewInlineKeyboardMarkup(
+				kbRow(tgbotapi.NewInlineKeyboardButtonData("Назад", "t_slots:back:1"), tgbotapi.NewInlineKeyboardButtonData("Отмена", "t_slots:cancel")),
+			)
+			upsertStepMsg(bot, msg.Chat.ID, st, "Неверный формат. Пример: 16:00-18:00", &kb)
+			return true
+		}
+		st.Start, st.End = startT, endT
+		st.Step = 3
+		setTeacherFSM(msg.Chat.ID, st)
+		kb := tgbotapi.NewInlineKeyboardMarkup(
+			kbRow(tgbotapi.NewInlineKeyboardButtonData("Назад", "t_slots:back:2"), tgbotapi.NewInlineKeyboardButtonData("Отмена", "t_slots:cancel")),
+		)
+		upsertStepMsg(bot, msg.Chat.ID, st, "Шаг 3/5. Введите шаг в минутах (например, 20)", &kb)
+		return true
+
+	case 3:
+		stepMin, err := strconv.Atoi(strings.TrimSpace(msg.Text))
+		if err != nil || stepMin <= 0 {
+			kb := tgbotapi.NewInlineKeyboardMarkup(
+				kbRow(tgbotapi.NewInlineKeyboardButtonData("Назад", "t_slots:back:2"), tgbotapi.NewInlineKeyboardButtonData("Отмена", "t_slots:cancel")),
+			)
+			upsertStepMsg(bot, msg.Chat.ID, st, "Шаг должен быть положительным числом минут.", &kb)
+			return true
+		}
+		st.StepMin = stepMin
+		st.Step = 4
+		setTeacherFSM(msg.Chat.ID, st)
+		showClassNumberMenu(ctx, bot, database, msg.Chat.ID, st)
+		return true
+	}
+	return false
 }
 
-// ====== UI helpers ======
+// ====== CLASS MENUS ======
 
-func sendWeekdayMenu(bot *tgbotapi.BotAPI, chatID int64) {
-	kb := tgbotapi.NewInlineKeyboardMarkup(
-		row(wdBtn("Пн", time.Monday), wdBtn("Вт", time.Tuesday), wdBtn("Ср", time.Wednesday)),
-		row(wdBtn("Чт", time.Thursday), wdBtn("Пт", time.Friday), wdBtn("Сб", time.Saturday)),
-		row(wdBtn("Вс", time.Sunday), tgbotapi.NewInlineKeyboardButtonData("Отмена", "t_slots:cancel")),
-	)
-	msg := tgbotapi.NewMessage(chatID, "Шаг 1/4. Выберите день недели:")
-	msg.ReplyMarkup = kb
-	_, _ = bot.Send(msg)
+func showClassNumberMenu(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, st *teacherFSMState) {
+	nums, err := db.ListClassNumbers(ctx, database)
+	if err != nil || len(nums) == 0 {
+		upsertStepMsg(bot, chatID, st, "Классы не найдены.", nil)
+		return
+	}
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, n := range nums {
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d", n), fmt.Sprintf("t_slots:cnum:%d", n)),
+		))
+	}
+	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("Назад", "t_slots:back:3"),
+		tgbotapi.NewInlineKeyboardButtonData("Отмена", "t_slots:cancel"),
+	))
+	kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
+	upsertStepMsg(bot, chatID, st, "Шаг 4/5. Выберите номер класса:", &kb)
 }
-func wdBtn(title string, wd time.Weekday) tgbotapi.InlineKeyboardButton {
-	return tgbotapi.NewInlineKeyboardButtonData(title, fmt.Sprintf("t_slots:day:%d", int(wd)))
-}
-func row(btns ...tgbotapi.InlineKeyboardButton) []tgbotapi.InlineKeyboardButton {
-	return tgbotapi.NewInlineKeyboardRow(btns...)
-}
-func editText(bot *tgbotapi.BotAPI, cb *tgbotapi.CallbackQuery, text string) {
-	edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, text)
-	_, _ = bot.Send(edit)
-}
-func answer(bot *tgbotapi.BotAPI, cb *tgbotapi.CallbackQuery, text string) {
-	_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, text))
+
+func showClassLetterMenu(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, st *teacherFSMState) {
+	cls, err := db.ListClassesByNumber(ctx, database, st.TempNumber)
+	if err != nil || len(cls) == 0 {
+		upsertStepMsg(bot, chatID, st, "Буквы для выбранного номера не найдены.", nil)
+		return
+	}
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, c := range cls {
+		title := fmt.Sprintf("%d%s", c.Number, strings.ToUpper(c.Letter))
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(title, fmt.Sprintf("t_slots:csel:%d", c.ID)),
+		))
+	}
+	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("Назад", "t_slots:back:4"),
+		tgbotapi.NewInlineKeyboardButtonData("Отмена", "t_slots:cancel"),
+	))
+	kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
+	upsertStepMsg(bot, chatID, st, "Шаг 5/5. Выберите букву класса:", &kb)
 }

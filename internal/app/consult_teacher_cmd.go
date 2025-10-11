@@ -79,7 +79,7 @@ func TryHandleTeacherAddSlots(ctx context.Context, bot *tgbotapi.BotAPI, databas
 
 	// Генерация стартов слотов на 4 недели вперёд
 	loc := time.Local // при желании подставим таймзону школы из конфига
-	starts := generateStartsNext4Weeks(weekday, startT, endT, time.Duration(stepMin)*time.Minute, loc)
+	starts := generateStartsWeeks(weekday, startT, endT, time.Duration(stepMin)*time.Minute, 1, loc)
 
 	// Конвертируем локальные времена в UTC для хранения
 	startsUTC := make([]time.Time, 0, len(starts))
@@ -162,25 +162,21 @@ func nextWeekday(base time.Time, wd time.Weekday) time.Time {
 	return base.AddDate(0, 0, offset)
 }
 
-func generateStartsNext4Weeks(wd time.Weekday, startT, endT time.Time, step time.Duration, loc *time.Location) []time.Time {
+// было generateStartsNext4Weeks — делаем универсальный
+func generateStartsWeeks(wd time.Weekday, startT, endT time.Time, step time.Duration, weeks int, loc *time.Location) []time.Time {
 	now := time.Now().In(loc)
 	firstDay := nextWeekday(now, wd)
-
 	makeDayTime := func(day time.Time, hh, mm int) time.Time {
 		return time.Date(day.Year(), day.Month(), day.Day(), hh, mm, 0, 0, loc)
 	}
-
 	if step <= 0 {
 		return nil
 	}
-
 	var starts []time.Time
-	for week := 0; week < 4; week++ {
+	for week := 0; week < weeks; week++ {
 		day := firstDay.AddDate(0, 0, 7*week)
 		startBound := makeDayTime(day, startT.Hour(), startT.Minute())
 		endBound := makeDayTime(day, endT.Hour(), endT.Minute())
-
-		// добавляем старт, пока (старт + шаг) не выходит за пределы окна
 		for tm := startBound; !tm.Add(step).After(endBound); tm = tm.Add(step) {
 			starts = append(starts, tm)
 		}
