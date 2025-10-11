@@ -23,6 +23,7 @@ lint:
 
 test:
 	GOFLAGS=-count=1 $(GO) test -race -covermode=atomic -coverprofile=coverage.out ./...
+	go test -tags testutil ./...
 
 bench:
 	$(GO) test -run '^$$' -bench . ./internal/db -benchtime=10s -benchmem
