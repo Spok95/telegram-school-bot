@@ -40,6 +40,10 @@ func teacherMenu() tgbotapi.ReplyKeyboardMarkup {
 			tgbotapi.NewKeyboardButton("➕ Начислить баллы"),
 			tgbotapi.NewKeyboardButton("📉 Списать баллы"),
 		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("🗓 Создать слоты"),
+			tgbotapi.NewKeyboardButton("📋 Мои слоты"),
+		),
 	)
 }
 
@@ -96,6 +100,9 @@ func parentMenu() tgbotapi.ReplyKeyboardMarkup {
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("📜 История получения баллов"),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("📅 Записаться на консультацию"),
 		),
 	)
 }

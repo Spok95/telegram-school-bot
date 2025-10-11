@@ -272,6 +272,33 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 			"• Родитель: /p_free <teacher_id> <YYYY-MM-DD> — свободные слоты списком.\n"+
 			"• Родитель: /p_book <slot_id> — бронирование по ID.")
 		return
+	case "🗓 Создать слоты":
+		// запускаем мастер
+		if user.Role != nil && *user.Role == models.Teacher {
+			// эмулируем /t_slots
+			msg := *msg
+			msg.Text = "/t_slots"
+			if TryHandleTeacherSlotsCommand(ctx, bot, database, &msg) {
+				return
+			}
+		}
+
+	case "📋 Мои слоты":
+		if user.Role != nil && *user.Role == models.Teacher {
+			// эмулируем /t_myslots
+			msg := *msg
+			msg.Text = "/t_myslots"
+			if TryHandleTeacherMySlots(ctx, bot, database, &msg) {
+				return
+			}
+		}
+
+	case "📅 Записаться на консультацию":
+		if user.Role != nil && *user.Role == models.Parent {
+			// стартуем parent-флоу выбора учителя/даты
+			StartParentConsultFlow(ctx, bot, database, msg)
+			return
+		}
 
 	default:
 		role := getUserFSMRole(chatID)
