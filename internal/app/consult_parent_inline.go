@@ -1,0 +1,127 @@
+package app
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+
+	"github.com/Spok95/telegram-school-bot/internal/db"
+	"github.com/Spok95/telegram-school-bot/internal/models"
+	"github.com/Spok95/telegram-school-bot/internal/observability"
+)
+
+// TryHandleParentSlotsCommand /p_slots <teacher_id> <YYYY-MM-DD>
+func TryHandleParentSlotsCommand(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) bool {
+	if msg == nil || msg.Text == "" {
+		return false
+	}
+	parts := fields(msg.Text)
+	if len(parts) == 0 || !strings.HasPrefix(parts[0], "/p_slots") {
+		return false
+	}
+
+	u, err := db.GetUserByTelegramID(ctx, database, msg.Chat.ID)
+	if err != nil || u == nil || u.Role == nil || *u.Role != models.Parent {
+		_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "Команда доступна только родителям."))
+		return true
+	}
+	if len(parts) < 3 {
+		_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "Использование: /p_slots <teacher_id> <YYYY-MM-DD>"))
+		return true
+	}
+	teacherID, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || teacherID <= 0 {
+		_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "teacher_id должен быть положительным числом."))
+		return true
+	}
+	day, err := time.Parse("2006-01-02", parts[2])
+	if err != nil {
+		_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "Дата в формате YYYY-MM-DD."))
+		return true
+	}
+
+	loc := time.Local
+	free, err := db.ListFreeSlotsByTeacherOnDate(ctx, database, teacherID, day, loc, 30)
+	if err != nil {
+		observability.CaptureErr(err)
+		_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "Ошибка при получении слотов."))
+		return true
+	}
+	if len(free) == 0 {
+		_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "На выбранный день свободных слотов нет."))
+		return true
+	}
+
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, s := range free {
+		label := fmt.Sprintf("%s–%s (#%d)", s.StartAt.In(loc).Format("15:04"), s.EndAt.In(loc).Format("15:04"), s.ID)
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(label, fmt.Sprintf("p_book:%d", s.ID)),
+		))
+	}
+	kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
+	msgOut := tgbotapi.NewMessage(msg.Chat.ID, "Свободные слоты:")
+	msgOut.ReplyMarkup = kb
+	_, _ = bot.Send(msgOut)
+	return true
+}
+
+// TryHandleParentBookCallback обработка нажатия кнопки брони: p_book:<slotID>
+func TryHandleParentBookCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) bool {
+	if cb == nil || cb.Data == "" || !strings.HasPrefix(cb.Data, "p_book:") {
+		return false
+	}
+	chatID := cb.Message.Chat.ID
+	u, err := db.GetUserByTelegramID(ctx, database, chatID)
+	if err != nil || u == nil || u.Role == nil || *u.Role != models.Parent {
+		_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "Только для родителей"))
+		return true
+	}
+	// parse id
+	idStr := strings.TrimPrefix(cb.Data, "p_book:")
+	slotID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || slotID <= 0 {
+		_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "Неверный слот"))
+		return true
+	}
+	// проверим слот и класс
+	slot, err := db.GetSlotByID(ctx, database, slotID)
+	if err != nil || slot == nil {
+		_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "Слот не найден"))
+		return true
+	}
+	if slot.BookedByID.Valid {
+		_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "Уже занят"))
+		return true
+	}
+	if u.ClassID == nil || *u.ClassID != slot.ClassID {
+		_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "Не ваш учитель"))
+		return true
+	}
+	// бронируем
+	ok, err := db.TryBookSlot(ctx, database, slotID, u.ID)
+	if err != nil {
+		observability.CaptureErr(err)
+		_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "Ошибка при бронировании"))
+		return true
+	}
+	if !ok {
+		_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "Слот уже заняли"))
+		return true
+	}
+	// перечитаем и нотификация
+	slot, _ = db.GetSlotByID(ctx, database, slotID)
+	_ = SendConsultBookedNotification(ctx, bot, database, *slot, time.Local)
+
+	// меняем текст сообщения
+	when := slot.StartAt.In(time.Local).Format("02.01.2006 15:04")
+	edit := tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "Запись оформлена на "+when+". Напоминания: 24ч и 1ч.")
+	_, _ = bot.Send(edit)
+	_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "Готово"))
+	return true
+}

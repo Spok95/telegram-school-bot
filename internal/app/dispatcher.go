@@ -160,6 +160,10 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 	if TryHandleTeacherSlotsText(ctx, bot, database, msg) {
 		return
 	}
+	// Родитель: список слотов кнопками
+	if TryHandleParentSlotsCommand(ctx, bot, database, msg) {
+		return
+	}
 
 	switch text {
 	case "/add_score", "➕ Начислить баллы":
@@ -330,6 +334,10 @@ func HandleCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB,
 
 	// Учительский FSM /t_slots (кнопки)
 	if TryHandleTeacherSlotsCallback(ctx, bot, database, cb) {
+		return
+	}
+	// Родитель: кнопка бронирования
+	if TryHandleParentBookCallback(ctx, bot, database, cb) {
 		return
 	}
 
