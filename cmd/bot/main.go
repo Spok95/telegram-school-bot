@@ -46,6 +46,7 @@ func main() {
 		log.Fatalf("logger: %v", err)
 	}
 	defer lg.Closer()
+	observability.SetLogger(lg)
 	lg.Sugar.Infow("starting bot", "env", cfg.Env)
 
 	closeSentry, err := observability.InitSentry(cfg.SentryDSN, cfg.Env, version+"-"+commit)
