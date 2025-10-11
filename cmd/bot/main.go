@@ -114,6 +114,11 @@ func main() {
 	app.StartHTTP(ctx, cfg.HTTPAddr, database)
 	lg.Sugar.Infow("http started", "addr", cfg.HTTPAddr)
 
+	// === REMINDERS ===
+	// Если есть конфиг таймзоны — подставь, иначе используем локаль сервера
+	loc := time.Local
+	jobs.StartConsultReminderLoop(ctx, bot, database, loc)
+
 	// === Фоновые задачи ===
 	// app.StartSchoolYearNotifier(bot, database, cfg.Location) // если функция поддерживает tz
 
