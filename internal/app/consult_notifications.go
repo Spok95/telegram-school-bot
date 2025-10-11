@@ -66,16 +66,17 @@ func SendConsultBookedNotification(ctx context.Context, bot *tgbotapi.BotAPI, da
 		return nil
 	}
 	parent, err := db.GetUserByID(ctx, database, slot.BookedByID.Int64)
-	if err != nil || parent == nil {
+	if err != nil {
 		return err
 	}
 	teacher, err := db.GetUserByID(ctx, database, slot.TeacherID)
-	if err != nil || teacher == nil {
+	if err != nil {
 		return err
 	}
 	parentChat := parent.TelegramID
 	teacherChat := teacher.TelegramID
 	if parentChat == 0 || teacherChat == 0 {
+		// у кого-то не привязан Telegram — тихо выходим
 		return nil
 	}
 
