@@ -30,6 +30,22 @@ func StartHTTP(ctx context.Context, addr string, db *sql.DB) *HTTPServer {
 
 	mux.Handle("/metrics", metrics.Handler())
 
+	// readiness: короткий ping БД с таймаутом
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 700*time.Millisecond)
+		defer cancel()
+
+		start := time.Now()
+		if err := db.PingContext(ctx); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("db not ready"))
+			return
+		}
+		metrics.ObserveDBPing(time.Since(start))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+
 	srv := &http.Server{Addr: addr, Handler: mux}
 
 	go func() {
