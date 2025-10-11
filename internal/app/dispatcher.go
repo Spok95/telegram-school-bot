@@ -366,7 +366,7 @@ func HandleCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB,
 	}
 
 	// Учительский FSM /t_slots (кнопки)
-	if TryHandleTeacherSlotsCallback(ctx, bot, cb) {
+	if TryHandleTeacherSlotsCallback(ctx, bot, database, cb) {
 		return
 	}
 	// Родитель: кнопка бронирования
@@ -377,10 +377,7 @@ func HandleCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB,
 	if TryHandleTeacherManageCallback(ctx, bot, database, cb) {
 		return
 	}
-	if TryHandleParentPickTeacher(ctx, bot, cb) {
-		return
-	}
-	if TryHandleParentPickDate(ctx, bot, database, cb) {
+	if TryHandleParentFlowCallbacks(ctx, bot, database, cb) {
 		return
 	}
 

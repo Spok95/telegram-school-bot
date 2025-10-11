@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/Spok95/telegram-school-bot/internal/models"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
 	"github.com/Spok95/telegram-school-bot/internal/db"
@@ -113,4 +115,40 @@ func SendTeacherCancelNotification(ctx context.Context, bot *tgbotapi.BotAPI, da
 	text := fmt.Sprintf("Запись на консультацию %s была отменена учителем.", win)
 	_, err = bot.Send(tgbotapi.NewMessage(parent.TelegramID, text))
 	return err
+}
+
+// SendConsultBookedCard карточки при брони
+func SendConsultBookedCard(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, slot db.ConsultSlot, parent models.User, child models.User, loc *time.Location) error {
+	teacher, err := db.GetUserByID(ctx, database, slot.TeacherID)
+	if err != nil {
+		return err
+	}
+	class, _ := db.GetClassByID(ctx, database, slot.ClassID)
+
+	when := fmt.Sprintf("%s — %s",
+		slot.StartAt.In(loc).Format("02.01.2006 15:04"),
+		slot.EndAt.In(loc).Format("15:04"),
+	)
+	className := ""
+	if class != nil {
+		className = fmt.Sprintf("%d%s", class.Number, strings.ToUpper(class.Letter))
+	}
+
+	// родителю
+	textParent := fmt.Sprintf(
+		"📌 Вы записаны на консультацию\nДата/время: %s\nУчитель: %s\nКласс: %s",
+		when, teacher.Name, className,
+	)
+	if parent.TelegramID != 0 {
+		_, _ = bot.Send(tgbotapi.NewMessage(parent.TelegramID, textParent))
+	}
+	// учителю
+	textTeacher := fmt.Sprintf(
+		"📌 Новая запись на консультацию\nДата/время: %s\nРодитель: %s\nРебёнок: %s\nКласс: %s",
+		when, parent.Name, child.Name, className,
+	)
+	if teacher.TelegramID != 0 {
+		_, _ = bot.Send(tgbotapi.NewMessage(teacher.TelegramID, textTeacher))
+	}
+	return nil
 }

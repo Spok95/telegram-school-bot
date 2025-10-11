@@ -71,57 +71,59 @@ func TryHandleParentSlotsCommand(ctx context.Context, bot *tgbotapi.BotAPI, data
 	return true
 }
 
-// TryHandleParentBookCallback обработка нажатия кнопки брони: p_book:<slotID>
+// TryHandleParentBookCallback обработка нажатия кнопки брони: p_book:<slotID>:<childID>
 func TryHandleParentBookCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) bool {
 	if cb == nil || cb.Data == "" || !strings.HasPrefix(cb.Data, "p_book:") {
 		return false
 	}
+	parts := strings.Split(cb.Data, ":")
+	if len(parts) != 3 {
+		return true
+	}
+	slotID, _ := strconv.ParseInt(parts[1], 10, 64)
+	childID, _ := strconv.ParseInt(parts[2], 10, 64)
+
 	chatID := cb.Message.Chat.ID
 	u, err := db.GetUserByTelegramID(ctx, database, chatID)
 	if err != nil || u == nil || u.Role == nil || *u.Role != models.Parent {
 		_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "Только для родителей"))
 		return true
 	}
-	// parse id
-	idStr := strings.TrimPrefix(cb.Data, "p_book:")
-	slotID, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil || slotID <= 0 {
-		_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "Неверный слот"))
-		return true
-	}
-	// проверим слот и класс
+
 	slot, err := db.GetSlotByID(ctx, database, slotID)
-	if err != nil || slot == nil {
-		_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "Слот не найден"))
+	if err != nil || slot == nil || slot.BookedByID.Valid {
+		_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "Слот недоступен"))
 		return true
 	}
-	if slot.BookedByID.Valid {
-		_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "Уже занят"))
+	child, _ := db.GetUserByID(ctx, database, childID) // значение, не указатель
+	if child.ID == 0 || child.ClassID == nil || *child.ClassID != slot.ClassID {
+		_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "Неверный класс"))
 		return true
 	}
-	if u.ClassID == nil || *u.ClassID != slot.ClassID {
-		_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "Не ваш учитель"))
-		return true
-	}
-	// бронируем
+
 	ok, err := db.TryBookSlot(ctx, database, slotID, u.ID)
 	if err != nil {
 		observability.CaptureErr(err)
-		_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "Ошибка при бронировании"))
+		_ = sendCb(bot, cb, "Ошибка брони")
 		return true
 	}
 	if !ok {
-		_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "Слот уже заняли"))
+		_ = sendCb(bot, cb, "Уже занято")
 		return true
 	}
-	// перечитаем и нотификация
-	slot, _ = db.GetSlotByID(ctx, database, slotID)
-	_ = SendConsultBookedNotification(ctx, bot, database, *slot, time.Local)
 
-	// меняем текст сообщения
-	when := slot.StartAt.In(time.Local).Format("02.01.2006 15:04")
-	edit := tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "Запись оформлена на "+when+". Напоминания: 24ч и 1ч.")
+	slot, _ = db.GetSlotByID(ctx, database, slotID)
+
+	// уведомления карточками (parent/child — значения)
+	_ = SendConsultBookedCard(ctx, bot, database, *slot, *u, child, time.Local)
+
+	edit := tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "Запись оформлена.")
 	_, _ = bot.Send(edit)
 	_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "Готово"))
 	return true
+}
+
+func sendCb(bot *tgbotapi.BotAPI, cb *tgbotapi.CallbackQuery, text string) error {
+	_, err := bot.Request(tgbotapi.NewCallback(cb.ID, text))
+	return err
 }
