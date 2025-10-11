@@ -13,6 +13,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/bot/menu"
 	"github.com/Spok95/telegram-school-bot/internal/ctxutil"
 	"github.com/Spok95/telegram-school-bot/internal/db"
+	"github.com/Spok95/telegram-school-bot/internal/export"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	"github.com/Spok95/telegram-school-bot/internal/models"
 	"github.com/Spok95/telegram-school-bot/internal/tg"
@@ -282,7 +283,6 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 				return
 			}
 		}
-
 	case "📋 Мои слоты":
 		if user.Role != nil && *user.Role == models.Teacher {
 			// эмулируем /t_myslots
@@ -292,11 +292,24 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 				return
 			}
 		}
-
 	case "📅 Записаться на консультацию":
 		if user.Role != nil && *user.Role == models.Parent {
 			// стартуем parent-флоу выбора учителя/даты
 			StartParentConsultFlow(ctx, bot, database, msg)
+			return
+		}
+	case "📘 Расписание консультаций":
+		if user.Role != nil && *user.Role == models.Teacher {
+			// Быстрый выбор: "Эта неделя" / "Следующая" + Отмена
+			loc := time.Local
+			now := time.Now().In(loc)
+			weekStart := now.AddDate(0, 0, -int((int(now.Weekday())+6)%7))
+			thisFrom := time.Date(weekStart.Year(), weekStart.Month(), weekStart.Day(), 0, 0, 0, 0, loc)
+			thisTo := thisFrom.AddDate(0, 0, 7)
+
+			go func() {
+				_ = export.ExportConsultationsExcel(ctx, bot, database, user.ID, thisFrom, thisTo, loc, chatID)
+			}()
 			return
 		}
 
