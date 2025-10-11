@@ -150,6 +150,9 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 	if TryHandleTeacherAddSlots(ctx, bot, database, msg) {
 		return
 	}
+	if TryHandleParentCommands(ctx, bot, database, msg) {
+		return
+	}
 
 	switch text {
 	case "/add_score", "➕ Начислить баллы":
@@ -246,6 +249,13 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 				handlers.HandleAdminRestoreStart(c, bot, database, chatID)
 			}(bg)
 		}
+	case "/consult_help":
+		reply(bot, chatID, "Команды:\n"+
+			"/t_addslots <день> <HH:MM-HH:MM> <шаг-мин> <class_id>\n"+
+			"/p_free <teacher_id> <YYYY-MM-DD>\n"+
+			"/p_book <slot_id>")
+		return
+
 	default:
 		role := getUserFSMRole(chatID)
 		if _, ok := handlers.PeriodsFSMActive(chatID); ok && user.Role != nil && (*user.Role == "admin") {

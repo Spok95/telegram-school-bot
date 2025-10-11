@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -77,7 +78,7 @@ func ListFreeSlots(ctx context.Context, database *sql.DB, classID, teacherID *in
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	out := make([]ConsultSlot, 0, limit)
 	for rows.Next() {
@@ -122,7 +123,7 @@ func DueForReminder(ctx context.Context, database *sql.DB, intervalText string, 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []ConsultSlot
 	for rows.Next() {
@@ -146,4 +147,53 @@ func MarkReminded(ctx context.Context, database *sql.DB, ids []int64, intervalTe
 		WHERE id = ANY($3)
 	`, is24h, !is24h, pq.Array(ids))
 	return err
+}
+
+// GetSlotByID — получить слот по id
+func GetSlotByID(ctx context.Context, database *sql.DB, slotID int64) (*ConsultSlot, error) {
+	row := database.QueryRowContext(ctx, `
+		SELECT id, teacher_id, class_id, start_at, end_at, booked_by_id
+		FROM consult_slots WHERE id = $1
+	`, slotID)
+	var s ConsultSlot
+	if err := row.Scan(&s.ID, &s.TeacherID, &s.ClassID, &s.StartAt, &s.EndAt, &s.BookedByID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &s, nil
+}
+
+// ListFreeSlotsByTeacherOnDate — свободные слоты учителя на конкретный день (локальная дата)
+func ListFreeSlotsByTeacherOnDate(ctx context.Context, database *sql.DB, teacherID int64, day time.Time, loc *time.Location, limit int) ([]ConsultSlot, error) {
+	// начало и конец дня в локали → переводим в UTC
+	startLocal := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
+	endLocal := startLocal.Add(24 * time.Hour)
+	from := startLocal.UTC()
+	to := endLocal.UTC()
+
+	rows, err := database.QueryContext(ctx, `
+		SELECT id, teacher_id, class_id, start_at, end_at, booked_by_id
+		FROM consult_slots
+		WHERE booked_by_id IS NULL
+		  AND teacher_id = $1
+		  AND start_at >= $2 AND start_at < $3
+		ORDER BY start_at
+		LIMIT $4
+	`, teacherID, from, to, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var res []ConsultSlot
+	for rows.Next() {
+		var s ConsultSlot
+		if err := rows.Scan(&s.ID, &s.TeacherID, &s.ClassID, &s.StartAt, &s.EndAt, &s.BookedByID); err != nil {
+			return nil, err
+		}
+		res = append(res, s)
+	}
+	return res, rows.Err()
 }

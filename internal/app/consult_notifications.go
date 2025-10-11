@@ -59,3 +59,38 @@ func SendConsultReminder(ctx context.Context, bot *tgbotapi.BotAPI, database *sq
 	}
 	return nil
 }
+
+// SendConsultBookedNotification — моментальная нотификация о записи (оба адресата)
+func SendConsultBookedNotification(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, slot db.ConsultSlot, loc *time.Location) error {
+	if !slot.BookedByID.Valid {
+		return nil
+	}
+	parent, err := db.GetUserByID(ctx, database, slot.BookedByID.Int64)
+	if err != nil || parent == nil {
+		return err
+	}
+	teacher, err := db.GetUserByID(ctx, database, slot.TeacherID)
+	if err != nil || teacher == nil {
+		return err
+	}
+	parentChat := parent.TelegramID
+	teacherChat := teacher.TelegramID
+	if parentChat == 0 || teacherChat == 0 {
+		return nil
+	}
+
+	whenStart := slot.StartAt.In(loc)
+	whenEnd := slot.EndAt.In(loc)
+	win := fmt.Sprintf("%s–%s", whenStart.Format("02.01.2006 15:04"), whenEnd.Format("15:04"))
+
+	textParent := fmt.Sprintf("Запись подтверждена: консультация у учителя %s.", win)
+	textTeacher := fmt.Sprintf("Новая запись: консультация с родителем %s.", win)
+
+	if _, err := bot.Send(tgbotapi.NewMessage(parentChat, textParent)); err != nil {
+		return err
+	}
+	if _, err := bot.Send(tgbotapi.NewMessage(teacherChat, textTeacher)); err != nil {
+		return err
+	}
+	return nil
+}
