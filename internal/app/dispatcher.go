@@ -261,10 +261,12 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 			}(bg)
 		}
 	case "/consult_help":
-		reply(bot, chatID, "Команды:\n"+
-			"/t_addslots <день> <HH:MM-HH:MM> <шаг-мин> <class_id>\n"+
-			"/p_free <teacher_id> <YYYY-MM-DD>\n"+
-			"/p_book <slot_id>")
+		reply(bot, chatID, "Консультации:\n"+
+			"• Учитель: /t_slots — пошаговое создание слотов на 4 недели.\n"+
+			"• Учитель: /t_addslots <день> <HH:MM-HH:MM> <шаг-мин> <class_id>\n"+
+			"• Родитель: /p_slots <teacher_id> <YYYY-MM-DD> — свободные слоты кнопками.\n"+
+			"• Родитель: /p_free <teacher_id> <YYYY-MM-DD> — свободные слоты списком.\n"+
+			"• Родитель: /p_book <slot_id> — бронирование по ID.")
 		return
 
 	default:
