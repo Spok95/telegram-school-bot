@@ -95,3 +95,22 @@ func SendConsultBookedNotification(ctx context.Context, bot *tgbotapi.BotAPI, da
 	}
 	return nil
 }
+
+// SendTeacherCancelNotification — учитель отменил запись: уведомляем родителя
+func SendTeacherCancelNotification(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, parentUserID int64, slot db.ConsultSlot, loc *time.Location) error {
+	parent, err := db.GetUserByID(ctx, database, parentUserID)
+	if err != nil {
+		return err
+	}
+	if parent.TelegramID == 0 {
+		return nil
+	}
+
+	win := fmt.Sprintf("%s–%s",
+		slot.StartAt.In(loc).Format("02.01.2006 15:04"),
+		slot.EndAt.In(loc).Format("15:04"),
+	)
+	text := fmt.Sprintf("Запись на консультацию %s была отменена учителем.", win)
+	_, err = bot.Send(tgbotapi.NewMessage(parent.TelegramID, text))
+	return err
+}

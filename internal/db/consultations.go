@@ -197,3 +197,63 @@ func ListFreeSlotsByTeacherOnDate(ctx context.Context, database *sql.DB, teacher
 	}
 	return res, rows.Err()
 }
+
+// ListTeacherSlotsRange — слоты учителя в интервале [from,to), свободные и занятые
+func ListTeacherSlotsRange(ctx context.Context, database *sql.DB, teacherID int64, from, to time.Time, limit int) ([]ConsultSlot, error) {
+	rows, err := database.QueryContext(ctx, `
+		SELECT id, teacher_id, class_id, start_at, end_at, booked_by_id
+		FROM consult_slots
+		WHERE teacher_id = $1 AND start_at >= $2 AND start_at < $3
+		ORDER BY start_at
+		LIMIT $4
+	`, teacherID, from.UTC(), to.UTC(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var res []ConsultSlot
+	for rows.Next() {
+		var s ConsultSlot
+		if err := rows.Scan(&s.ID, &s.TeacherID, &s.ClassID, &s.StartAt, &s.EndAt, &s.BookedByID); err != nil {
+			return nil, err
+		}
+		res = append(res, s)
+	}
+	return res, rows.Err()
+}
+
+// DeleteFreeSlot — удалить свободный слот своего учителя
+func DeleteFreeSlot(ctx context.Context, database *sql.DB, teacherID, slotID int64) (bool, error) {
+	res, err := database.ExecContext(ctx, `
+		DELETE FROM consult_slots
+		WHERE id = $1 AND teacher_id = $2 AND booked_by_id IS NULL
+	`, slotID, teacherID)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}
+
+// CancelBookedSlot — отменить занятую запись: обнуляем booked_by_id, пишем причину (опц.)
+func CancelBookedSlot(ctx context.Context, database *sql.DB, teacherID, slotID int64, reason string) (parentID *int64, ok bool, err error) {
+	var pid sql.NullInt64
+	err = database.QueryRowContext(ctx, `
+		UPDATE consult_slots
+		SET booked_by_id = NULL, booked_at = NULL, cancel_reason = $1, updated_at = now()
+		WHERE id = $2 AND teacher_id = $3 AND booked_by_id IS NOT NULL
+		RETURNING booked_by_id
+	`, reason, slotID, teacherID).Scan(&pid)
+	if err == sql.ErrNoRows {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if pid.Valid {
+		v := pid.Int64
+		return &v, true, nil
+	}
+	return nil, true, nil
+}
