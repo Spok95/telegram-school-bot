@@ -153,6 +153,13 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 	if TryHandleParentCommands(ctx, bot, database, msg) {
 		return
 	}
+	// Учительский FSM /t_slots
+	if TryHandleTeacherSlotsCommand(ctx, bot, database, msg) {
+		return
+	}
+	if TryHandleTeacherSlotsText(ctx, bot, database, msg) {
+		return
+	}
 
 	switch text {
 	case "/add_score", "➕ Начислить баллы":
@@ -318,6 +325,11 @@ func HandleCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB,
 		} else {
 			auth.StartRegistration(ctx, chatID, role, bot, database)
 		}
+		return
+	}
+
+	// Учительский FSM /t_slots (кнопки)
+	if TryHandleTeacherSlotsCallback(ctx, bot, database, cb) {
 		return
 	}
 
