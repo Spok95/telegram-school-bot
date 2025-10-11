@@ -89,7 +89,7 @@ func main() {
 		lg.Sugar.Fatalw("❌ goose dialect", "err", err)
 	}
 	if err := goose.Up(database, "."); err != nil {
-		lg.Sugar.Fatalw("❌ Ошибка миграций: %v", "err", err)
+		lg.Sugar.Fatalw("❌ Ошибка миграций", "err", err)
 	}
 
 	err = db.SetActivePeriod(ctx, database)

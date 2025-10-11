@@ -22,8 +22,7 @@ lint:
 	golangci-lint run
 
 test:
-	GOFLAGS=-count=1 $(GO) test -race -covermode=atomic -coverprofile=coverage.out ./...
-	go test -tags testutil ./...
+	GOFLAGS=-count=1 $(GO) test -tags testutil -race -covermode=atomic -coverprofile=coverage.out ./...
 
 bench:
 	$(GO) test -run '^$$' -bench . ./internal/db -benchtime=10s -benchmem
