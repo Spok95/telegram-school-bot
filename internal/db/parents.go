@@ -71,3 +71,35 @@ func ListTeachersWithFutureSlotsByClass(ctx context.Context, database *sql.DB, c
 	}
 	return res, rows.Err()
 }
+
+// ListTeachersWithFutureSlotsByClassNL Учителя, у которых есть будущие слоты для класса с указанными номером/буквой
+func ListTeachersWithFutureSlotsByClassNL(ctx context.Context, database *sql.DB, classNumber int64, classLetter string, limit int) ([]TeacherLite, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
+
+	rows, err := database.QueryContext(ctx, `
+		SELECT DISTINCT u.id, u.name
+		FROM consult_slots s
+		JOIN classes c ON c.id = s.class_id
+		JOIN users   u ON u.id = s.teacher_id
+		WHERE c.number = $1
+		  AND UPPER(c.letter) = UPPER($2)
+		  AND s.start_at >= NOW()
+		ORDER BY u.name
+		LIMIT $3
+	`, classNumber, classLetter, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var res []TeacherLite
+	for rows.Next() {
+		var t TeacherLite
+		if err := rows.Scan(&t.ID, &t.Name); err != nil {
+			return nil, err
+		}
+		res = append(res, t)
+	}
+	return res, rows.Err()
+}

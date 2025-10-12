@@ -116,7 +116,27 @@ func TryHandleParentBookCallback(ctx context.Context, bot *tgbotapi.BotAPI, data
 		return true
 	}
 	child, _ := db.GetUserByID(ctx, database, childID) // значение, не указатель
-	if child.ID == 0 || child.ClassID == nil || *child.ClassID != slot.ClassID {
+	if child.ID == 0 {
+		if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Неверный ребёнок")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
+		return true
+	}
+
+	// валидируем доступ к слоту:
+	// 1) если class_id совпал — ок
+	// 2) иначе сверяем по номеру/букве ребёнка
+	valid := false
+	if child.ClassID != nil && *child.ClassID == slot.ClassID {
+		valid = true
+	} else if child.ClassNumber != nil && child.ClassLetter != nil {
+		if cls, _ := db.GetClassByID(ctx, database, slot.ClassID); cls != nil {
+			if int64(cls.Number) == *child.ClassNumber && strings.EqualFold(cls.Letter, *child.ClassLetter) {
+				valid = true
+			}
+		}
+	}
+	if !valid {
 		if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Неверный класс")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}

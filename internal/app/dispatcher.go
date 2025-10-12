@@ -305,8 +305,6 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 			now := time.Now().In(loc)
 			from := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 			to := from.AddDate(0, 0, 7)
-
-			// используем уже существующий генератор отчётов/форматирование из вашего пакета export
 			go func() {
 				if err := export.ExportConsultationsExcel(ctx, bot, database, user.ID, from, to, loc, chatID); err != nil {
 					observability.CaptureErr(err)

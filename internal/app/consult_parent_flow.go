@@ -84,13 +84,13 @@ func TryHandleParentFlowCallbacks(ctx context.Context, bot *tgbotapi.BotAPI, dat
 	case strings.HasPrefix(cb.Data, "p_pick_child:"):
 		childID, _ := strconv.ParseInt(strings.TrimPrefix(cb.Data, "p_pick_child:"), 10, 64)
 		ch, err := db.GetUserByID(ctx, database, childID)
-		if err != nil || ch.ID == 0 || ch.ClassID == nil {
-			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "У ребёнка не указан класс")); err != nil {
-				metrics.HandlerErrors.Inc()
-			}
+		if err != nil || ch.ID == 0 || ch.ClassNumber == nil || ch.ClassLetter == nil {
+			_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, "У ребёнка не указан класс"))
 			return true
 		}
-		teachers, err := db.ListTeachersWithFutureSlotsByClass(ctx, database, *ch.ClassID, 50)
+
+		teachers, err := db.ListTeachersWithFutureSlotsByClassNL(ctx, database, *ch.ClassNumber, *ch.ClassLetter, 50)
+
 		if err != nil {
 			observability.CaptureErr(err)
 			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Ошибка учителей")); err != nil {

@@ -4,18 +4,19 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
-	"github.com/Spok95/telegram-school-bot/internal/db"
-	"github.com/Spok95/telegram-school-bot/internal/metrics"
-	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/xuri/excelize/v2"
+
+	"github.com/Spok95/telegram-school-bot/internal/db"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 )
 
 func ExportConsultationsExcel(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, teacherID int64, from, to time.Time, loc *time.Location, chatID int64) error {
-	// достанем классы, где есть слоты учителя в диапазоне
+	// собрать список class_id, где есть слоты учителя
 	rows, err := database.QueryContext(ctx, `
 		SELECT DISTINCT s.class_id
 		FROM consult_slots s
@@ -27,37 +28,52 @@ func ExportConsultationsExcel(ctx context.Context, bot *tgbotapi.BotAPI, databas
 	}
 	defer func() { _ = rows.Close() }()
 
-	classIDs := []int64{}
+	var classIDs []int64
 	for rows.Next() {
 		var id int64
-		if err := rows.Scan(&id); err == nil {
-			classIDs = append(classIDs, id)
+		if err := rows.Scan(&id); err != nil {
+			return err
 		}
+		classIDs = append(classIDs, id)
 	}
 
 	f := excelize.NewFile()
+	// убираем дефолтный лист
 	_ = f.DeleteSheet("Sheet1")
 
-	for _, cid := range classIDs {
-		class, _ := db.GetClassByID(ctx, database, cid)
-		title := fmt.Sprintf("%d%s", class.Number, strings.ToUpper(class.Letter))
-		if title == "" {
-			title = fmt.Sprintf("class_%d", cid)
-		}
+	// если данных нет — делаем один лист «Итого» с пометкой и не считаем это ошибкой
+	if len(classIDs) == 0 {
+		title := "Итого"
 		_, _ = f.NewSheet(title)
+		_ = f.SetCellValue(title, "A1", fmt.Sprintf("Расписание консультаций (%s–%s)", from.In(loc).Format("02.01.2006"), to.In(loc).Format("02.01.2006")))
+		_ = f.SetCellValue(title, "A3", "Данных за период нет")
+		tmp, err := os.CreateTemp("", fmt.Sprintf("consult_%d_*.xlsx", teacherID))
+		if err != nil {
+			return err
+		}
+		defer func() { _ = os.Remove(tmp.Name()) }()
+		if err := f.SaveAs(tmp.Name()); err != nil {
+			return err
+		}
+		_, _ = tg.Send(bot, tgbotapi.NewDocument(chatID, tgbotapi.FilePath(tmp.Name())))
+		return nil
+	}
 
-		header := fmt.Sprintf("Отчёт по классу %s с %s по %s",
-			title,
-			from.In(loc).Format("02.01.2006"),
-			to.In(loc).Format("02.01.2006"),
-		)
-		_ = f.SetCellValue(title, "A1", header)
-		_ = f.SetCellValue(title, "A3", "Дата")
-		_ = f.SetCellValue(title, "B3", "Время")
-		_ = f.SetCellValue(title, "C3", "ФИО родителя")
-		_ = f.SetCellValue(title, "D3", "ФИО ребёнка")
+	for _, cid := range classIDs {
+		cls, _ := db.GetClassByID(ctx, database, cid)
+		sheet := fmt.Sprintf("class_%d", cid)
+		if cls != nil {
+			sheet = fmt.Sprintf("%d%s", cls.Number, strings.ToUpper(cls.Letter))
+		}
+		_, _ = f.NewSheet(sheet)
 
-		// строки
+		_ = f.SetCellValue(sheet, "A1", fmt.Sprintf("Отчёт по классу %s с %s по %s",
+			sheet, from.In(loc).Format("02.01.2006"), to.In(loc).Format("02.01.2006")))
+		_ = f.SetCellValue(sheet, "A3", "Дата")
+		_ = f.SetCellValue(sheet, "B3", "Время")
+		_ = f.SetCellValue(sheet, "C3", "ФИО родителя")
+		_ = f.SetCellValue(sheet, "D3", "ФИО ребёнка")
+
 		r, err := database.QueryContext(ctx, `
 			SELECT s.start_at, s.end_at, p.name as parent_name, ch.name as child_name
 			FROM consult_slots s
@@ -70,29 +86,29 @@ func ExportConsultationsExcel(ctx context.Context, bot *tgbotapi.BotAPI, databas
 		if err != nil {
 			continue
 		}
-		rn := 4
+		row := 4
 		for r.Next() {
 			var start, end time.Time
 			var parentName, childName sql.NullString
 			_ = r.Scan(&start, &end, &parentName, &childName)
-			_ = f.SetCellValue(title, fmt.Sprintf("A%d", rn), start.In(loc).Format("02.01.2006"))
-			_ = f.SetCellValue(title, fmt.Sprintf("B%d", rn), fmt.Sprintf("%s–%s", start.In(loc).Format("15:04"), end.In(loc).Format("15:04")))
-			_ = f.SetCellValue(title, fmt.Sprintf("C%d", rn), parentName.String)
-			_ = f.SetCellValue(title, fmt.Sprintf("D%d", rn), childName.String)
-			rn++
+			_ = f.SetCellValue(sheet, fmt.Sprintf("A%d", row), start.In(loc).Format("02.01.2006"))
+			_ = f.SetCellValue(sheet, fmt.Sprintf("B%d", row), fmt.Sprintf("%s–%s", start.In(loc).Format("15:04"), end.In(loc).Format("15:04")))
+			_ = f.SetCellValue(sheet, fmt.Sprintf("C%d", row), parentName.String)
+			_ = f.SetCellValue(sheet, fmt.Sprintf("D%d", row), childName.String)
+			row++
 		}
 		_ = r.Close()
 	}
 
-	path := fmt.Sprintf("/tmp/consult_%d.xlsx", teacherID)
-	if err := f.SaveAs(path); err != nil {
+	tmp, err := os.CreateTemp("", fmt.Sprintf("consult_%d_*.xlsx", teacherID))
+	if err != nil {
 		return err
 	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
 
-	doc := tgbotapi.NewDocument(chatID, tgbotapi.FilePath(path))
-	doc.Caption = "Расписание консультаций (по классам, за неделю)"
-	if _, err := tg.Send(bot, doc); err != nil {
-		metrics.HandlerErrors.Inc()
+	if err := f.SaveAs(tmp.Name()); err != nil {
+		return err
 	}
+	_, _ = tg.Send(bot, tgbotapi.NewDocument(chatID, tgbotapi.FilePath(tmp.Name())))
 	return nil
 }
