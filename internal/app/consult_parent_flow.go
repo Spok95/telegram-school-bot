@@ -92,10 +92,14 @@ func TryHandleParentFlowCallbacks(ctx context.Context, bot *tgbotapi.BotAPI, dat
 		}
 
 		var teachers []db.TeacherLite
+		loc := time.Local
+		from := time.Now().In(loc).Truncate(24 * time.Hour)
+		to := from.AddDate(0, 0, 7)
 		if ch.ClassID != nil {
-			teachers, err = db.ListTeachersWithFutureSlotsByClass(ctx, database, *ch.ClassID, 50)
+			// существующий DAO по class_id — но в явном диапазоне
+			teachers, err = db.ListTeachersWithSlotsByClassRange(ctx, database, *ch.ClassID, from, to, 50) // см. ниже
 		} else {
-			teachers, err = db.ListTeachersWithFutureSlotsByClassNL(ctx, database, *ch.ClassNumber, *ch.ClassLetter, 50)
+			teachers, err = db.ListTeachersWithSlotsByClassNLRange(ctx, database, *ch.ClassNumber, *ch.ClassLetter, from, to, 50)
 		}
 		if err != nil {
 			observability.CaptureErr(err)

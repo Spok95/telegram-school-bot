@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"github.com/Spok95/telegram-school-bot/internal/ctxutil"
 )
@@ -43,19 +44,24 @@ func ListChildrenForParent(ctx context.Context, database *sql.DB, parentID int64
 	return out, rows.Err()
 }
 
-// ListTeachersWithFutureSlotsByClass Учителя, у которых есть будущие слоты по указанному классу
-func ListTeachersWithFutureSlotsByClass(ctx context.Context, database *sql.DB, classID int64, limit int) ([]TeacherLite, error) {
+func ListTeachersWithSlotsByClassNLRange(
+	ctx context.Context, database *sql.DB,
+	classNumber int64, classLetter string,
+	from, to time.Time, limit int,
+) ([]TeacherLite, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
-
 	rows, err := database.QueryContext(ctx, `
-		SELECT DISTINCT u.id, u.name
-		FROM consult_slots s
-		JOIN users u ON u.id = s.teacher_id
-		WHERE s.class_id = $1 AND s.start_at >= now()
-		ORDER BY u.name
-		LIMIT $2
-	`, classID, limit)
+        SELECT DISTINCT u.id, u.name
+        FROM consult_slots s
+        JOIN classes c ON c.id = s.class_id
+        JOIN users   u ON u.id = s.teacher_id
+        WHERE c.number = $1
+          AND UPPER(c.letter) = UPPER($2)
+          AND s.start_at >= $3 AND s.start_at < $4
+        ORDER BY u.name
+        LIMIT $5
+    `, classNumber, classLetter, from.UTC(), to.UTC(), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -72,27 +78,22 @@ func ListTeachersWithFutureSlotsByClass(ctx context.Context, database *sql.DB, c
 	return res, rows.Err()
 }
 
-// ListTeachersWithFutureSlotsByClassNL Учителя, у которых есть будущие слоты для класса с указанными номером/буквой
-func ListTeachersWithFutureSlotsByClassNL(ctx context.Context, database *sql.DB, classNumber int64, classLetter string, limit int) ([]TeacherLite, error) {
+func ListTeachersWithSlotsByClassRange(ctx context.Context, database *sql.DB, classID int64, from, to time.Time, limit int) ([]TeacherLite, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)
 	defer cancel()
-
 	rows, err := database.QueryContext(ctx, `
-		SELECT DISTINCT u.id, u.name
-		FROM consult_slots s
-		JOIN classes c ON c.id = s.class_id
-		JOIN users   u ON u.id = s.teacher_id
-		WHERE c.number = $1
-		  AND UPPER(c.letter) = UPPER($2)
-		  AND s.start_at >= NOW()
-		ORDER BY u.name
-		LIMIT $3
-	`, classNumber, classLetter, limit)
+        SELECT DISTINCT u.id, u.name
+        FROM consult_slots s
+        JOIN users u ON u.id = s.teacher_id
+        WHERE s.class_id = $1
+          AND s.start_at >= $2 AND s.start_at < $3
+        ORDER BY u.name
+        LIMIT $4
+    `, classID, from.UTC(), to.UTC(), limit)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-
 	var res []TeacherLite
 	for rows.Next() {
 		var t TeacherLite
