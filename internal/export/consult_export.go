@@ -30,6 +30,8 @@ func ExportConsultationsExcel(ctx context.Context, bot *tgbotapi.BotAPI, databas
 		ORDER BY s.class_id
 	`, teacherID, from.UTC(), to.UTC())
 	if err != nil {
+		observability.CaptureErr(err)
+		log.Printf("[EXPORT] classIDs query failed: %v", err)
 		return err
 	}
 	defer func() { _ = rows.Close() }()
@@ -38,6 +40,8 @@ func ExportConsultationsExcel(ctx context.Context, bot *tgbotapi.BotAPI, databas
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
+			observability.CaptureErr(err)
+			log.Printf("[EXPORT] scan class_id failed: %v", err)
 			return err
 		}
 		classIDs = append(classIDs, id)
@@ -54,6 +58,8 @@ func ExportConsultationsExcel(ctx context.Context, bot *tgbotapi.BotAPI, databas
 		_ = f.SetCellValue(sheet, "A3", "Данных за период нет")
 		tmp, err := os.CreateTemp("", fmt.Sprintf("consult_%d_*.xlsx", teacherID))
 		if err != nil {
+			observability.CaptureErr(err)
+			log.Printf("[EXPORT] create temp file failed: %v", err)
 			return err
 		}
 		defer func() { _ = os.Remove(tmp.Name()) }()
@@ -132,7 +138,7 @@ func ExportConsultationsExcel(ctx context.Context, bot *tgbotapi.BotAPI, databas
 
 	if err := f.SaveAs(tmp.Name()); err != nil {
 		observability.CaptureErr(err)
-		log.Printf("[EXPORT] save xlsx failed: %v", err)
+		log.Printf("[EXPORT] save XLSX failed: %v", err)
 		return err
 	}
 	if _, err := tg.Send(bot, tgbotapi.NewDocument(chatID, tgbotapi.FilePath(tmp.Name()))); err != nil {
