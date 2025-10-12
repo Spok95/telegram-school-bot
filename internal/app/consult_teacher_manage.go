@@ -16,6 +16,25 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/observability"
 )
 
+func ruDayShort(wd time.Weekday) string {
+	switch wd {
+	case time.Monday:
+		return "Пн"
+	case time.Tuesday:
+		return "Вт"
+	case time.Wednesday:
+		return "Ср"
+	case time.Thursday:
+		return "Чт"
+	case time.Friday:
+		return "Пт"
+	case time.Saturday:
+		return "Сб"
+	default:
+		return "Вс"
+	}
+}
+
 // TryHandleTeacherMySlots /t_myslots — сначала дни текущей недели
 func TryHandleTeacherMySlots(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) bool {
 	if msg == nil || msg.Text == "" || !strings.HasPrefix(msg.Text, "/t_myslots") {
@@ -29,12 +48,12 @@ func TryHandleTeacherMySlots(ctx context.Context, bot *tgbotapi.BotAPI, database
 		return true
 	}
 	loc := time.Local
-	now := time.Now().In(loc)
-	weekStart := now.AddDate(0, 0, -int((int(now.Weekday())+6)%7)) // понедельник
+	today := time.Now().In(loc).Truncate(24 * time.Hour)
+
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for i := 0; i < 7; i++ {
-		d := weekStart.AddDate(0, 0, i)
-		lbl := d.Format("Mon 02.01")
+		d := today.AddDate(0, 0, i)
+		lbl := fmt.Sprintf("%s %s", ruDayShort(d.Weekday()), d.Format("02.01"))
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(lbl, fmt.Sprintf("t_ms:day:%s", d.Format("2006-01-02"))),
 		))
@@ -43,11 +62,9 @@ func TryHandleTeacherMySlots(ctx context.Context, bot *tgbotapi.BotAPI, database
 		tgbotapi.NewInlineKeyboardButtonData("Отмена", "t_ms:cancel"),
 	))
 	kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
-	out := tgbotapi.NewMessage(msg.Chat.ID, "Выберите день недели:")
+	out := tgbotapi.NewMessage(msg.Chat.ID, "Выберите день (7 дней вперёд):")
 	out.ReplyMarkup = kb
-	if _, err := tg.Send(bot, out); err != nil {
-		metrics.HandlerErrors.Inc()
-	}
+	_, _ = tg.Send(bot, out)
 	return true
 }
 
@@ -81,7 +98,6 @@ func TryHandleTeacherManageCallback(ctx context.Context, bot *tgbotapi.BotAPI, d
 		loc := time.Local
 		from := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
 		to := from.Add(24 * time.Hour)
-
 		slots, err := db.ListTeacherSlotsRange(ctx, database, u.ID, from, to, 200)
 		if err != nil {
 			observability.CaptureErr(err)

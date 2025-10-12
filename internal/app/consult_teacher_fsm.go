@@ -201,7 +201,7 @@ func TryHandleTeacherSlotsCallback(ctx context.Context, bot *tgbotapi.BotAPI, da
 			clearTeacherFSM(chatID)
 			return true
 		}
-		upsertStepMsg(bot, chatID, st, fmt.Sprintf("Готово. Создано слотов: %d (дубли проигнорированы).", inserted), nil)
+		nextStepBelowInput(bot, chatID, st, fmt.Sprintf("Готово. Создано слотов: %d (дубли проигнорированы).", inserted), nil)
 		clearTeacherFSM(chatID)
 		return true
 	}
@@ -222,7 +222,7 @@ func TryHandleTeacherSlotsText(ctx context.Context, bot *tgbotapi.BotAPI, databa
 			kb := tgbotapi.NewInlineKeyboardMarkup(
 				kbRow(tgbotapi.NewInlineKeyboardButtonData("Назад", "t_slots:back:1"), tgbotapi.NewInlineKeyboardButtonData("Отмена", "t_slots:cancel")),
 			)
-			upsertStepMsg(bot, msg.Chat.ID, st, "Неверный формат. Пример: 16:00-18:00", &kb)
+			nextStepBelowInput(bot, msg.Chat.ID, st, "Неверный формат. Пример: 16:00-18:00", &kb)
 			return true
 		}
 		st.Start, st.End = startT, endT
@@ -231,7 +231,7 @@ func TryHandleTeacherSlotsText(ctx context.Context, bot *tgbotapi.BotAPI, databa
 		kb := tgbotapi.NewInlineKeyboardMarkup(
 			kbRow(tgbotapi.NewInlineKeyboardButtonData("Назад", "t_slots:back:2"), tgbotapi.NewInlineKeyboardButtonData("Отмена", "t_slots:cancel")),
 		)
-		upsertStepMsg(bot, msg.Chat.ID, st, "Шаг 3/5. Введите шаг в минутах (например, 20)", &kb)
+		nextStepBelowInput(bot, msg.Chat.ID, st, "Шаг 3/5. Введите шаг в минутах (например, 20)", &kb)
 		return true
 
 	case 3:
@@ -240,7 +240,7 @@ func TryHandleTeacherSlotsText(ctx context.Context, bot *tgbotapi.BotAPI, databa
 			kb := tgbotapi.NewInlineKeyboardMarkup(
 				kbRow(tgbotapi.NewInlineKeyboardButtonData("Назад", "t_slots:back:2"), tgbotapi.NewInlineKeyboardButtonData("Отмена", "t_slots:cancel")),
 			)
-			upsertStepMsg(bot, msg.Chat.ID, st, "Шаг должен быть положительным числом минут.", &kb)
+			nextStepBelowInput(bot, msg.Chat.ID, st, "Шаг должен быть положительным числом минут.", &kb)
 			return true
 		}
 		st.StepMin = stepMin
@@ -282,7 +282,7 @@ func showClassLetterMenu(ctx context.Context, bot *tgbotapi.BotAPI, database *sq
 	}
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for _, c := range cls {
-		title := fmt.Sprintf("%d%s", c.Number, strings.ToUpper(c.Letter))
+		title := strings.ToUpper(c.Letter)
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(title, fmt.Sprintf("t_slots:csel:%d", c.ID)),
 		))
@@ -293,4 +293,18 @@ func showClassLetterMenu(ctx context.Context, bot *tgbotapi.BotAPI, database *sq
 	))
 	kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
 	upsertStepMsg(bot, chatID, st, "Шаг 5/5. Выберите букву класса:", &kb)
+}
+
+// nextStepBelowInput отправить следующий шаг ниже пользовательского ввода: удалить старое бот-сообщение и прислать новое
+func nextStepBelowInput(bot *tgbotapi.BotAPI, chatID int64, st *teacherFSMState, text string, kb *tgbotapi.InlineKeyboardMarkup) {
+	if st.MsgID != 0 {
+		_, _ = tg.Request(bot, tgbotapi.NewDeleteMessage(chatID, st.MsgID))
+		st.MsgID = 0
+	}
+	msg := tgbotapi.NewMessage(chatID, text)
+	if kb != nil {
+		msg.ReplyMarkup = kb
+	}
+	out, _ := tg.Send(bot, msg)
+	st.MsgID = out.MessageID
 }

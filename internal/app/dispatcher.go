@@ -298,20 +298,18 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 			StartParentConsultFlow(ctx, bot, database, msg)
 			return
 		}
-	case "📘 Расписание консультаций":
+	case "📘 Расписание", "📘 Расписание консультаций", "Расписание", "Расписание консультаций":
 		if user.Role != nil && *user.Role == models.Teacher {
-			// Быстрый выбор: "Эта неделя" / "Следующая" + Отмена
 			loc := time.Local
 			now := time.Now().In(loc)
-			weekStart := now.AddDate(0, 0, -int((int(now.Weekday())+6)%7))
-			thisFrom := time.Date(weekStart.Year(), weekStart.Month(), weekStart.Day(), 0, 0, 0, 0, loc)
-			thisTo := thisFrom.AddDate(0, 0, 7)
-
+			from := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+			to := from.AddDate(0, 0, 7)
 			go func() {
-				_ = export.ExportConsultationsExcel(ctx, bot, database, user.ID, thisFrom, thisTo, loc, chatID)
+				// уже готовая реализация и форматирование внутри internal/export/consult_export.go
+				_ = export.ExportConsultationsExcel(ctx, bot, database, user.ID, from, to, loc, chatID)
 			}()
-			return
 		}
+		return
 
 	default:
 		role := getUserFSMRole(chatID)
