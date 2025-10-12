@@ -140,66 +140,71 @@ func SendConsultBookedCard(ctx context.Context, bot *tgbotapi.BotAPI, database *
 	return nil
 }
 
-// SendConsultCancelCards Подробные карточки при отмене записи + широковещалка об освободившемся слоте.
-func SendConsultCancelCards(
-	ctx context.Context,
-	bot *tgbotapi.BotAPI,
-	database *sql.DB,
-	parentID int64,
-	slot *db.ConsultSlot,
-	teacherChatID int64,
-	loc *time.Location,
-) error {
+// SendConsultCancelCards — карточки об отмене: учителю и родителю + бродкаст по классу.
+func SendConsultCancelCards(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, parentID int64, slot db.ConsultSlot, loc *time.Location) error {
 	// участники
-	parent, _ := db.GetUserByID(ctx, database, parentID)                             // models.User (значение)
-	teacher, _ := db.GetUserByID(ctx, database, slot.TeacherID)                      // models.User (значение)
-	class, _ := db.GetClassByID(ctx, database, slot.ClassID)                         // может быть nil
-	child, _ := db.GetChildByParentAndClassID(ctx, database, parentID, slot.ClassID) // *models.User или nil
-
-	// подписи
-	classLabel := ""
-	if class != nil {
-		classLabel = fmt.Sprintf("%d%s", class.Number, strings.ToUpper(class.Letter))
+	parent, err := db.GetUserByID(ctx, database, parentID)
+	if err != nil {
+		return err
 	}
+	teacher, err := db.GetUserByID(ctx, database, slot.TeacherID)
+	if err != nil {
+		return err
+	}
+	class, err := db.GetClassByID(ctx, database, slot.ClassID)
+	if err != nil {
+		return err
+	}
+
+	// ребёнок родителя в этом классе (если есть)
+	var childName string
+	if child, err := db.GetChildByParentAndClass(ctx, database, parentID, slot.ClassID); err == nil && child != nil {
+		childName = child.Name
+	}
+
+	classLabel := fmt.Sprintf("%d%s", class.Number, class.Letter)
 	start := slot.StartAt.In(loc).Format("02.01.2006 15:04")
 	end := slot.EndAt.In(loc).Format("15:04")
 
-	// 1) Учителю — подробная карточка
-	parentName := "—"
-	if parent.ID != 0 {
-		parentName = parent.Name
+	// --- учителю
+	if teacher.TelegramID != 0 {
+		teacherText := fmt.Sprintf(
+			"Вы отменили запись на\n%s — %s\nродитель: %s\nученик: %s\nкласс: %s",
+			start, end, parent.Name, childName, classLabel,
+		)
+		_, _ = bot.Send(tgbotapi.NewMessage(teacher.TelegramID, teacherText))
 	}
-	childName := "—"
-	if child != nil {
-		childName = child.Name
-	}
-	teacherText := fmt.Sprintf(
-		"Вы отменили запись на\n%s — %s\nродитель: %s\nученик: %s\nкласс: %s",
-		start, end, parentName, childName, classLabel,
-	)
-	_, _ = tg.Send(bot, tgbotapi.NewMessage(teacherChatID, teacherText))
 
-	// 2) Родителю — карточка
-	if parent.TelegramID != 0 && teacher.ID != 0 {
+	// --- родителю
+	if parent.TelegramID != 0 {
 		parentText := fmt.Sprintf(
 			"⚠️ Ваша запись на консультацию\nДата/время: %s — %s\nУчитель: %s\nКласс: %s\nОтменена",
 			start, end, teacher.Name, classLabel,
 		)
-		_, _ = tg.Send(bot, tgbotapi.NewMessage(parent.TelegramID, parentText))
+		_, _ = bot.Send(tgbotapi.NewMessage(parent.TelegramID, parentText))
 	}
 
-	// 3) Всем родителям класса — «освободилось время»
-	if class != nil && teacher.ID != 0 {
-		ids, _ := db.ListParentTelegramIDsByClass(ctx, database, slot.ClassID)
-		freeText := fmt.Sprintf(
-			"ℹ️ Освободилось время для записи на консультацию\n%s — %s\nУчитель: %s\nКласс: %s",
-			start, end, teacher.Name, classLabel,
-		)
-		for _, tgID := range ids {
-			if tgID == 0 || tgID == parent.TelegramID {
-				continue
-			}
-			_, _ = tg.Send(bot, tgbotapi.NewMessage(tgID, freeText))
+	// --- широковещалка по классу (освободился слот)
+	_ = BroadcastFreeConsultSlot(ctx, bot, database, slot, classLabel, teacher.Name, loc)
+
+	return nil
+}
+
+// BroadcastFreeConsultSlot — уведомляем всех родителей класса, что появился свободный слот.
+func BroadcastFreeConsultSlot(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, slot db.ConsultSlot, classLabel, teacherName string, loc *time.Location) error {
+	parents, err := db.ListParentsByClassID(ctx, database, slot.ClassID)
+	if err != nil {
+		return err
+	}
+	start := slot.StartAt.In(loc).Format("02.01.2006 15:04")
+	end := slot.EndAt.In(loc).Format("15:04")
+	text := fmt.Sprintf(
+		"🔔 Освободилось место на консультацию\nДата/время: %s — %s\nУчитель: %s\nКласс: %s\nМожно записаться через «Записаться на консультацию».",
+		start, end, teacherName, classLabel,
+	)
+	for _, p := range parents {
+		if p.TelegramID != 0 {
+			_, _ = bot.Send(tgbotapi.NewMessage(p.TelegramID, text))
 		}
 	}
 	return nil

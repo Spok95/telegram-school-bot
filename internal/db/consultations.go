@@ -195,15 +195,25 @@ func DeleteFreeSlot(ctx context.Context, database *sql.DB, teacherID, slotID int
 	return n == 1, nil
 }
 
-// CancelBookedSlot — отменить занятую запись: обнуляем booked_by_id, пишем причину (опц.)
+// CancelBookedSlot — отменить занятую запись: возвращает ИД родителя, на которого была запись.
 func CancelBookedSlot(ctx context.Context, database *sql.DB, teacherID, slotID int64, reason string) (parentID *int64, ok bool, err error) {
 	var pid sql.NullInt64
 	err = database.QueryRowContext(ctx, `
-		UPDATE consult_slots
-		SET booked_by_id = NULL, booked_at = NULL, cancel_reason = $1, updated_at = now()
-		WHERE id = $2 AND teacher_id = $3 AND booked_by_id IS NOT NULL
-		RETURNING booked_by_id
+		WITH old AS (
+			SELECT booked_by_id
+			FROM consult_slots
+			WHERE id = $2 AND teacher_id = $3 AND booked_by_id IS NOT NULL
+			FOR UPDATE
+		)
+		UPDATE consult_slots s
+		SET booked_by_id = NULL,
+		    booked_at    = NULL,
+		    cancel_reason= $1,
+		    updated_at   = now()
+		WHERE s.id = $2 AND s.teacher_id = $3 AND s.booked_by_id IS NOT NULL
+		RETURNING (SELECT booked_by_id FROM old)
 	`, reason, slotID, teacherID).Scan(&pid)
+
 	if err == sql.ErrNoRows {
 		return nil, false, nil
 	}

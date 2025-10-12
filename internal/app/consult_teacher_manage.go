@@ -264,9 +264,9 @@ func TryHandleTeacherManageCallback(ctx context.Context, bot *tgbotapi.BotAPI, d
 			return true
 		}
 		// загрузить слот, чтобы отдать в карточки
-		slot, err := db.GetSlotByID(ctx, database, slotID)
-		if err == nil && parentID != nil {
-			_ = SendConsultCancelCards(ctx, bot, database, *parentID, slot, cb.Message.Chat.ID, time.Local)
+		slot, _ := db.GetSlotByID(ctx, database, slotID)
+		if parentID != nil && slot != nil {
+			_ = SendConsultCancelCards(ctx, bot, database, *parentID, *slot, time.Local)
 		}
 		edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, "Отменено.")
 		if _, err := tg.Send(bot, edit); err != nil {
