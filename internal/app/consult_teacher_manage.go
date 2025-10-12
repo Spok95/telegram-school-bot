@@ -130,8 +130,25 @@ func TryHandleTeacherManageCallback(ctx context.Context, bot *tgbotapi.BotAPI, d
 			}
 			var rows [][]tgbotapi.InlineKeyboardButton
 			for _, s := range slots {
-				label := fmt.Sprintf("%s–%s (class:%d) #%d",
-					s.StartAt.In(loc).Format("15:04"), s.EndAt.In(loc).Format("15:04"), s.ClassID, s.ID)
+				// человекочитаемая метка класса
+				className := fmt.Sprintf("класс:%d", s.ClassID)
+				if cls, _ := db.GetClassByID(ctx, database, s.ClassID); cls != nil {
+					className = fmt.Sprintf("класс:%d%s", cls.Number, strings.ToUpper(cls.Letter))
+				}
+				// отметка занятости
+				mark := "⬜"
+				if s.BookedByID.Valid {
+					mark = "✅"
+				}
+
+				// общий лейбл
+				label := fmt.Sprintf("%s %s–%s (%s) #%d",
+					mark,
+					s.StartAt.In(loc).Format("15:04"),
+					s.EndAt.In(loc).Format("15:04"),
+					className, s.ID)
+
+				// далее как и было: если занят — «Отменить», если свободен — «Удалить»
 				if s.BookedByID.Valid {
 					rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 						tgbotapi.NewInlineKeyboardButtonData("Отменить "+label, fmt.Sprintf("t_cancel:%d", s.ID)),
