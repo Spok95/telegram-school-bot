@@ -3,6 +3,8 @@ package db
 import (
 	"context"
 	"database/sql"
+
+	"github.com/Spok95/telegram-school-bot/internal/ctxutil"
 )
 
 type ChildLite struct {
@@ -13,33 +15,39 @@ type ChildLite struct {
 	ClassLet sql.NullString
 }
 
-// ListChildrenForParent fallback-реализация: если есть users.child_id — вернем его как единственного "ребенка"
+// ListChildrenForParent Дети родителя через parents_students
 func ListChildrenForParent(ctx context.Context, database *sql.DB, parentID int64) ([]ChildLite, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
+
 	rows, err := database.QueryContext(ctx, `
-		SELECT u2.id, u2.name, u2.class_id,
-		       c.number, c.letter
+		SELECT u.id, u.name, u.class_id, u.class_number, u.class_letter
 		FROM users u
-		LEFT JOIN users u2 ON u2.id = u.child_id
-		LEFT JOIN classes c ON c.id = u2.class_id
-		WHERE u.id = $1 AND u2.id IS NOT NULL
-	`)
+		JOIN parents_students ps ON ps.student_id = u.id
+		WHERE ps.parent_id = $1 AND u.is_active = TRUE
+		ORDER BY u.name
+	`, parentID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []ChildLite
 	for rows.Next() {
-		var ch ChildLite
-		if err := rows.Scan(&ch.ID, &ch.Name, &ch.ClassID, &ch.ClassNum, &ch.ClassLet); err != nil {
+		var c ChildLite
+		if err := rows.Scan(&c.ID, &c.Name, &c.ClassID, &c.ClassNum, &c.ClassLet); err != nil {
 			return nil, err
 		}
-		out = append(out, ch)
+		out = append(out, c)
 	}
 	return out, rows.Err()
 }
 
+// ListTeachersWithFutureSlotsByClass Учителя, у которых есть будущие слоты по указанному классу
 func ListTeachersWithFutureSlotsByClass(ctx context.Context, database *sql.DB, classID int64, limit int) ([]TeacherLite, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
+
 	rows, err := database.QueryContext(ctx, `
 		SELECT DISTINCT u.id, u.name
 		FROM consult_slots s
@@ -51,7 +59,7 @@ func ListTeachersWithFutureSlotsByClass(ctx context.Context, database *sql.DB, c
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var res []TeacherLite
 	for rows.Next() {
