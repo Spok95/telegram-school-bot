@@ -4,11 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
+	"github.com/Spok95/telegram-school-bot/internal/observability"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/xuri/excelize/v2"
 
@@ -42,11 +44,10 @@ func ExportConsultationsExcel(ctx context.Context, bot *tgbotapi.BotAPI, databas
 	}
 
 	f := excelize.NewFile()
-	_ = f.DeleteSheet("Sheet1")
 
 	if len(classIDs) == 0 {
 		const sheet = "Итого"
-		_, _ = f.NewSheet(sheet)
+		_ = f.SetSheetName("Sheet1", sheet)
 		_ = f.SetCellValue(sheet, "A1",
 			fmt.Sprintf("Расписание консультаций (%s–%s)",
 				from.In(loc).Format("02.01.2006"), to.In(loc).Format("02.01.2006")))
@@ -65,13 +66,17 @@ func ExportConsultationsExcel(ctx context.Context, bot *tgbotapi.BotAPI, databas
 		return nil
 	}
 
-	for _, cid := range classIDs {
+	for i, cid := range classIDs {
 		cls, _ := db.GetClassByID(ctx, database, cid)
 		sheet := fmt.Sprintf("class_%d", cid)
 		if cls != nil {
 			sheet = fmt.Sprintf("%d%s", cls.Number, strings.ToUpper(cls.Letter))
 		}
-		_, _ = f.NewSheet(sheet)
+		if i == 0 {
+			_ = f.SetSheetName("Sheet1", sheet)
+		} else {
+			_, _ = f.NewSheet(sheet)
+		}
 
 		_ = f.SetCellValue(sheet, "A1",
 			fmt.Sprintf("Отчёт по классу %s с %s по %s",
@@ -119,11 +124,15 @@ func ExportConsultationsExcel(ctx context.Context, bot *tgbotapi.BotAPI, databas
 
 	tmp, err := os.CreateTemp("", fmt.Sprintf("consult_%d_*.xlsx", teacherID))
 	if err != nil {
+		observability.CaptureErr(err)
+		log.Printf("[EXPORT] failed classIDs query: %v", err)
 		return err
 	}
 	defer func() { _ = os.Remove(tmp.Name()) }()
 
 	if err := f.SaveAs(tmp.Name()); err != nil {
+		observability.CaptureErr(err)
+		log.Printf("[EXPORT] save xlsx failed: %v", err)
 		return err
 	}
 	if _, err := tg.Send(bot, tgbotapi.NewDocument(chatID, tgbotapi.FilePath(tmp.Name()))); err != nil {
