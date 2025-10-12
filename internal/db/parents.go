@@ -134,3 +134,37 @@ func GetChildByParentAndClassID(ctx context.Context, database *sql.DB, parentID,
 	}
 	return &child, nil
 }
+
+// ListParentTelegramIDsByClass — все родительские telegram_id для класса (по class_id или номер/буква у детей)
+func ListParentTelegramIDsByClass(ctx context.Context, database *sql.DB, classID int64) ([]int64, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
+
+	rows, err := database.QueryContext(ctx, `
+		SELECT DISTINCT p.telegram_id
+		FROM parents_students ps
+		JOIN users p ON p.id = ps.parent_id
+		JOIN users s ON s.id = ps.student_id AND s.role = 'student' AND s.is_active = TRUE
+		JOIN classes c ON c.id = $1
+		WHERE p.role = 'parent' AND p.confirmed = TRUE AND p.is_active = TRUE
+		  AND p.telegram_id IS NOT NULL AND p.telegram_id <> 0
+		  AND (
+		    s.class_id = $1 OR
+		    (s.class_id IS NULL AND s.class_number = c.number AND UPPER(s.class_letter) = UPPER(c.letter))
+		  )
+	`, classID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []int64
+	for rows.Next() {
+		var tgID int64
+		if err := rows.Scan(&tgID); err != nil {
+			return nil, err
+		}
+		out = append(out, tgID)
+	}
+	return out, rows.Err()
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +37,25 @@ func ruDayShort(wd time.Weekday) string {
 	}
 }
 
+func weekdayKey(wd time.Weekday) int {
+	switch wd {
+	case time.Monday:
+		return 0
+	case time.Tuesday:
+		return 1
+	case time.Wednesday:
+		return 2
+	case time.Thursday:
+		return 3
+	case time.Friday:
+		return 4
+	case time.Saturday:
+		return 5
+	default: // Sunday
+		return 6
+	}
+}
+
 // TryHandleTeacherMySlots /t_myslots — сначала дни текущей недели
 func TryHandleTeacherMySlots(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) bool {
 	if msg == nil || msg.Text == "" || !strings.HasPrefix(msg.Text, "/t_myslots") {
@@ -50,10 +70,18 @@ func TryHandleTeacherMySlots(ctx context.Context, bot *tgbotapi.BotAPI, database
 	}
 	loc := time.Local
 	today := time.Now().In(loc).Truncate(24 * time.Hour)
+	// готовим 7 дат
+	days := make([]time.Time, 0, 7)
+	for i := 0; i < 7; i++ {
+		days = append(days, today.AddDate(0, 0, i))
+	}
+	// сортируем по «Пн→Вс»
+	sort.SliceStable(days, func(i, j int) bool {
+		return weekdayKey(days[i].Weekday()) < weekdayKey(days[j].Weekday())
+	})
 
 	var rows [][]tgbotapi.InlineKeyboardButton
-	for i := 0; i < 7; i++ {
-		d := today.AddDate(0, 0, i)
+	for _, d := range days {
 		lbl := fmt.Sprintf("%s %s", ruDayShort(d.Weekday()), d.Format("02.01"))
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(lbl, fmt.Sprintf("t_ms:day:%s", d.Format("2006-01-02"))),
@@ -235,8 +263,10 @@ func TryHandleTeacherManageCallback(ctx context.Context, bot *tgbotapi.BotAPI, d
 			}
 			return true
 		}
-		if parentID != nil {
-			_ = SendConsultCancelCards(ctx, bot, database, *parentID, slotID, cb.Message.Chat.ID, time.Local)
+		// загрузить слот, чтобы отдать в карточки
+		slot, err := db.GetSlotByID(ctx, database, slotID)
+		if err == nil && parentID != nil {
+			_ = SendConsultCancelCards(ctx, bot, database, *parentID, slot, cb.Message.Chat.ID, time.Local)
 		}
 		edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, "Отменено.")
 		if _, err := tg.Send(bot, edit); err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -153,11 +154,21 @@ func TryHandleParentFlowCallbacks(ctx context.Context, bot *tgbotapi.BotAPI, dat
 		}
 
 		loc := time.Local
-		today := time.Now().In(loc)
-		var rows [][]tgbotapi.InlineKeyboardButton
+		today := time.Now().In(loc).Truncate(24 * time.Hour)
+
+		// 7 дат вперёд
+		days := make([]time.Time, 0, 7)
 		for i := 0; i < 7; i++ {
-			d := today.AddDate(0, 0, i)
-			lbl := fmt.Sprintf("%s %s", d.Format("02.01"), ruDayShort(d.Weekday())) // ruDayShort уже есть у учителя в пакете app
+			days = append(days, today.AddDate(0, 0, i))
+		}
+		// порядок Пн→Вс
+		sort.SliceStable(days, func(i, j int) bool {
+			return weekdayKey(days[i].Weekday()) < weekdayKey(days[j].Weekday())
+		})
+
+		var rows [][]tgbotapi.InlineKeyboardButton
+		for _, d := range days {
+			lbl := fmt.Sprintf("%s %s", ruDayShort(d.Weekday()), d.Format("02.01"))
 			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData(
 					lbl,
@@ -165,9 +176,8 @@ func TryHandleParentFlowCallbacks(ctx context.Context, bot *tgbotapi.BotAPI, dat
 				),
 			))
 		}
-
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("Назад", "p_back:teachers"),
+			tgbotapi.NewInlineKeyboardButtonData("Назад", fmt.Sprintf("p_pick_child:%d", childID)),
 			tgbotapi.NewInlineKeyboardButtonData("Отмена", "p_flow:cancel"),
 		))
 		kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
