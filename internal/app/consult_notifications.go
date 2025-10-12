@@ -160,3 +160,60 @@ func SendConsultBookedCard(ctx context.Context, bot *tgbotapi.BotAPI, database *
 	}
 	return nil
 }
+
+// SendConsultCancelCards Отправить карточки об отмене: учителю (в текущий чат) и родителю.
+func SendConsultCancelCards(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, parentID int64, slotID int64, teacherChatID int64, loc *time.Location) error {
+	// слот
+	slot, err := db.GetSlotByID(ctx, database, slotID)
+	if err != nil || slot == nil {
+		return err
+	}
+	// родитель
+	parent, err := db.GetUserByID(ctx, database, parentID)
+	if err != nil || parent.ID == 0 {
+		return err
+	}
+	// учитель
+	teacher, err := db.GetUserByID(ctx, database, slot.TeacherID)
+	if err != nil || teacher.ID == 0 {
+		return err
+	}
+	// класс
+	class, _ := db.GetClassByID(ctx, database, slot.ClassID)
+	classLabel := "—"
+	if class != nil {
+		classLabel = fmt.Sprintf("%d%s", class.Number, strings.ToUpper(class.Letter))
+	}
+	// ребёнок (ищем именно того, кто соответствует классу слота)
+	child, _ := db.GetChildByParentAndClassID(ctx, database, parentID, slot.ClassID)
+	childName := ""
+	if child != nil {
+		childName = child.Name
+	}
+
+	// форматирование времени
+	start := slot.StartAt.In(loc).Format("02.01.2006 15:04")
+	end := slot.EndAt.In(loc).Format("15:04")
+
+	// Учителю — подробная карточка
+	teacherText := fmt.Sprintf(
+		"❌ Вы отменили запись\nДата/время: %s — %s\nРодитель: %s\nРебёнок: %s\nКласс: %s",
+		start, end, parent.Name, childName, classLabel,
+	)
+	if _, err := tg.Send(bot, tgbotapi.NewMessage(teacherChatID, teacherText)); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
+
+	// Родителю — карточка об отмене
+	if parent.TelegramID != 0 {
+		parentText := fmt.Sprintf(
+			"⚠️ Ваша запись на консультацию\nДата/время: %s — %s\nУчитель: %s\nКласс: %s\nОтменена",
+			start, end, teacher.Name, classLabel,
+		)
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(parent.TelegramID, parentText)); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
+	}
+
+	return nil
+}

@@ -65,7 +65,9 @@ func TryHandleTeacherMySlots(ctx context.Context, bot *tgbotapi.BotAPI, database
 	kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
 	out := tgbotapi.NewMessage(msg.Chat.ID, "Выберите день (7 дней вперёд):")
 	out.ReplyMarkup = kb
-	_, _ = tg.Send(bot, out)
+	if _, err := tg.Send(bot, out); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 	return true
 }
 
@@ -79,20 +81,28 @@ func TryHandleTeacherManageCallback(ctx context.Context, bot *tgbotapi.BotAPI, d
 		switch {
 		case strings.HasPrefix(cb.Data, "t_ms:cancel"):
 			edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, "Отменено.")
-			_, _ = tg.Send(bot, edit)
-			_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, ""))
+			if _, err := tg.Send(bot, edit); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
+			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return true
 
 		case strings.HasPrefix(cb.Data, "t_ms:back"):
 			// перерисовать список дней (7 дней вперёд)
 			TryHandleTeacherMySlots(ctx, bot, database, &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: cb.Message.Chat.ID}, Text: "/t_myslots"})
-			_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, ""))
+			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return true
 
 		case strings.HasPrefix(cb.Data, "t_ms:day:"):
 			u, _ := db.GetUserByTelegramID(ctx, database, cb.Message.Chat.ID)
 			if u == nil || u.Role == nil || *u.Role != models.Teacher {
-				_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, ""))
+				if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "")); err != nil {
+					metrics.HandlerErrors.Inc()
+				}
 				return true
 			}
 			loc := time.Local
@@ -103,13 +113,19 @@ func TryHandleTeacherManageCallback(ctx context.Context, bot *tgbotapi.BotAPI, d
 			slots, err := db.ListTeacherSlotsRange(ctx, database, u.ID, from, to, 200)
 			if err != nil {
 				observability.CaptureErr(err)
-				_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Ошибка"))
+				if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Ошибка")); err != nil {
+					metrics.HandlerErrors.Inc()
+				}
 				return true
 			}
 			if len(slots) == 0 {
 				edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, "На выбранный день слотов нет.")
-				_, _ = tg.Send(bot, edit)
-				_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, ""))
+				if _, err := tg.Send(bot, edit); err != nil {
+					metrics.HandlerErrors.Inc()
+				}
+				if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "")); err != nil {
+					metrics.HandlerErrors.Inc()
+				}
 				return true
 			}
 			var rows [][]tgbotapi.InlineKeyboardButton
@@ -133,8 +149,12 @@ func TryHandleTeacherManageCallback(ctx context.Context, bot *tgbotapi.BotAPI, d
 			kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
 			edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, "Слоты на выбранный день:")
 			edit.ReplyMarkup = &kb
-			_, _ = tg.Send(bot, edit)
-			_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, ""))
+			if _, err := tg.Send(bot, edit); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
+			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return true
 		}
 	}
@@ -143,13 +163,17 @@ func TryHandleTeacherManageCallback(ctx context.Context, bot *tgbotapi.BotAPI, d
 	if strings.HasPrefix(cb.Data, "t_del:") || strings.HasPrefix(cb.Data, "t_cancel:") {
 		u, _ := db.GetUserByTelegramID(ctx, database, cb.Message.Chat.ID)
 		if u == nil || u.Role == nil || *u.Role != models.Teacher {
-			_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, ""))
+			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return true
 		}
 		sid := strings.TrimPrefix(strings.TrimPrefix(cb.Data, "t_del:"), "t_cancel:")
 		slotID, err := strconv.ParseInt(sid, 10, 64)
 		if err != nil || slotID <= 0 {
-			_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Неверный слот"))
+			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Неверный слот")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return true
 		}
 
@@ -157,17 +181,25 @@ func TryHandleTeacherManageCallback(ctx context.Context, bot *tgbotapi.BotAPI, d
 			ok, err := db.DeleteFreeSlot(ctx, database, u.ID, slotID)
 			if err != nil {
 				observability.CaptureErr(err)
-				_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Ошибка"))
+				if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Ошибка")); err != nil {
+					metrics.HandlerErrors.Inc()
+				}
 				return true
 			}
 			if !ok {
-				_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Нельзя удалить: занят или не ваш"))
+				if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Нельзя удалить: занят или не ваш")); err != nil {
+					metrics.HandlerErrors.Inc()
+				}
 				return true
 			}
 			// перерисуем текст
 			edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, "Слот удалён.")
-			_, _ = tg.Send(bot, edit)
-			_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Удалено"))
+			if _, err := tg.Send(bot, edit); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
+			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Удалено")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return true
 		}
 
@@ -175,21 +207,27 @@ func TryHandleTeacherManageCallback(ctx context.Context, bot *tgbotapi.BotAPI, d
 		parentID, ok, err := db.CancelBookedSlot(ctx, database, u.ID, slotID, "teacher_cancel")
 		if err != nil {
 			observability.CaptureErr(err)
-			_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Ошибка"))
+			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Ошибка")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return true
 		}
 		if !ok {
-			_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Нельзя отменить: свободен или не ваш"))
+			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Нельзя отменить: свободен или не ваш")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return true
 		}
 		if parentID != nil {
-			if slot, _ := db.GetSlotByID(ctx, database, slotID); slot != nil {
-				_ = SendTeacherCancelNotification(ctx, bot, database, *parentID, *slot, time.Local)
-			}
+			_ = SendConsultCancelCards(ctx, bot, database, *parentID, slotID, cb.Message.Chat.ID, time.Local)
 		}
-		edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, "Запись отменена.")
-		_, _ = tg.Send(bot, edit)
-		_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Отменено"))
+		edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, "Отменено.")
+		if _, err := tg.Send(bot, edit); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
+		if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Отменено")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return true
 	}
 

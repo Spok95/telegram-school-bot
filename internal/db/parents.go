@@ -3,9 +3,11 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/Spok95/telegram-school-bot/internal/ctxutil"
+	"github.com/Spok95/telegram-school-bot/internal/models"
 )
 
 type ChildLite struct {
@@ -103,4 +105,32 @@ func ListTeachersWithSlotsByClassRange(ctx context.Context, database *sql.DB, cl
 		res = append(res, t)
 	}
 	return res, rows.Err()
+}
+
+// GetChildByParentAndClassID Ребёнок родителя в конкретном классе (по class_id или по номеру/букве)
+func GetChildByParentAndClassID(ctx context.Context, database *sql.DB, parentID, classID int64) (*models.User, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
+
+	row := database.QueryRowContext(ctx, `
+		SELECT u.id, u.telegram_id, u.name, u.class_id, u.class_number, u.class_letter
+		FROM parents_students ps
+		JOIN users u ON u.id = ps.student_id
+		JOIN classes c ON c.id = $2
+		WHERE ps.parent_id = $1
+		  AND (
+		    u.class_id = $2 OR
+		    (u.class_id IS NULL AND u.class_number = c.number AND UPPER(u.class_letter) = UPPER(c.letter))
+		  )
+		LIMIT 1
+	`, parentID, classID)
+
+	var child models.User
+	if err := row.Scan(&child.ID, &child.TelegramID, &child.Name, &child.ClassID, &child.ClassNumber, &child.ClassLetter); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &child, nil
 }

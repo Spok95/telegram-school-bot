@@ -306,9 +306,13 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 			from := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 			to := from.AddDate(0, 0, 7)
 			go func() {
-				if err := export.ExportConsultationsExcel(ctx, bot, database, user.ID, from, to, loc, chatID); err != nil {
+				ctxExp, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				if err := export.ExportConsultationsExcel(ctxExp, bot, database, user.ID, from, to, loc, chatID); err != nil {
 					observability.CaptureErr(err)
-					_, _ = tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Не удалось сформировать отчёт."))
+					if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Не удалось сформировать отчёт.")); err != nil {
+						metrics.HandlerErrors.Inc()
+					}
 				}
 			}()
 		}

@@ -157,13 +157,15 @@ func TryHandleParentFlowCallbacks(ctx context.Context, bot *tgbotapi.BotAPI, dat
 		var rows [][]tgbotapi.InlineKeyboardButton
 		for i := 0; i < 7; i++ {
 			d := today.AddDate(0, 0, i)
+			lbl := fmt.Sprintf("%s %s", d.Format("02.01"), ruDayShort(d.Weekday())) // ruDayShort уже есть у учителя в пакете app
 			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData(
-					d.Format("02.01 Mon"),
+					lbl,
 					fmt.Sprintf("p_pick_date:%d:%d:%s", teacherID, childID, d.Format("2006-01-02")),
 				),
 			))
 		}
+
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("Назад", "p_back:teachers"),
 			tgbotapi.NewInlineKeyboardButtonData("Отмена", "p_flow:cancel"),
