@@ -16,6 +16,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/export"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	"github.com/Spok95/telegram-school-bot/internal/models"
+	"github.com/Spok95/telegram-school-bot/internal/observability"
 	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -304,9 +305,13 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 			now := time.Now().In(loc)
 			from := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 			to := from.AddDate(0, 0, 7)
+
+			// используем уже существующий генератор отчётов/форматирование из вашего пакета export
 			go func() {
-				// уже готовая реализация и форматирование внутри internal/export/consult_export.go
-				_ = export.ExportConsultationsExcel(ctx, bot, database, user.ID, from, to, loc, chatID)
+				if err := export.ExportConsultationsExcel(ctx, bot, database, user.ID, from, to, loc, chatID); err != nil {
+					observability.CaptureErr(err)
+					_, _ = tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Не удалось сформировать отчёт."))
+				}
 			}()
 		}
 		return
