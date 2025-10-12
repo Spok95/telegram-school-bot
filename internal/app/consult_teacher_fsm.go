@@ -50,7 +50,7 @@ func upsertStepMsg(bot *tgbotapi.BotAPI, chatID int64, st *teacherFSMState, text
 		if kb != nil {
 			msg.ReplyMarkup = kb
 		}
-		out, _ := bot.Send(msg)
+		out, _ := tg.Send(bot, msg)
 		st.MsgID = out.MessageID
 		return
 	}

@@ -150,6 +150,6 @@ func TryHandleParentBookCallback(ctx context.Context, bot *tgbotapi.BotAPI, data
 }
 
 func sendCb(bot *tgbotapi.BotAPI, cb *tgbotapi.CallbackQuery, text string) error {
-	_, err := bot.Request(tgbotapi.NewCallback(cb.ID, text))
+	_, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, text))
 	return err
 }

@@ -130,6 +130,6 @@ func TryHandleTeacherManageCallback(ctx context.Context, bot *tgbotapi.BotAPI, d
 }
 
 func cbErr(bot *tgbotapi.BotAPI, cb *tgbotapi.CallbackQuery, text string) error {
-	_, err := bot.Request(tgbotapi.NewCallback(cb.ID, text))
+	_, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, text))
 	return err
 }
