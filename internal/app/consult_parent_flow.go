@@ -84,16 +84,22 @@ func TryHandleParentFlowCallbacks(ctx context.Context, bot *tgbotapi.BotAPI, dat
 	case strings.HasPrefix(cb.Data, "p_pick_child:"):
 		childID, _ := strconv.ParseInt(strings.TrimPrefix(cb.Data, "p_pick_child:"), 10, 64)
 		ch, err := db.GetUserByID(ctx, database, childID)
-		if err != nil || ch.ID == 0 || ch.ClassNumber == nil || ch.ClassLetter == nil {
-			_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, "У ребёнка не указан класс"))
+		if err != nil || ch.ID == 0 || (ch.ClassID == nil && (ch.ClassNumber == nil || ch.ClassLetter == nil)) {
+			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "У ребёнка не указан класс")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return true
 		}
 
-		teachers, err := db.ListTeachersWithFutureSlotsByClassNL(ctx, database, *ch.ClassNumber, *ch.ClassLetter, 50)
-
+		var teachers []db.TeacherLite
+		if ch.ClassID != nil {
+			teachers, err = db.ListTeachersWithFutureSlotsByClass(ctx, database, *ch.ClassID, 50)
+		} else {
+			teachers, err = db.ListTeachersWithFutureSlotsByClassNL(ctx, database, *ch.ClassNumber, *ch.ClassLetter, 50)
+		}
 		if err != nil {
 			observability.CaptureErr(err)
-			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Ошибка учителей")); err != nil {
+			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Ошибка при получении учителей")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return true
@@ -103,8 +109,12 @@ func TryHandleParentFlowCallbacks(ctx context.Context, bot *tgbotapi.BotAPI, dat
 			if _, err := tg.Send(bot, edit); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
+			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return true
 		}
+
 		var rows [][]tgbotapi.InlineKeyboardButton
 		for _, t := range teachers {
 			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
