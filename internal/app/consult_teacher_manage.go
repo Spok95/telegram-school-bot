@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -73,79 +74,124 @@ func TryHandleTeacherManageCallback(ctx context.Context, bot *tgbotapi.BotAPI, d
 		return false
 	}
 
-	switch {
-	case strings.HasPrefix(cb.Data, "t_ms:cancel"):
-		edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, "Отменено.")
-		if _, err := tg.Send(bot, edit); err != nil {
-			metrics.HandlerErrors.Inc()
+	// 1) День → показать слоты за день (уже работает у тебя)
+	if strings.HasPrefix(cb.Data, "t_ms:") {
+		switch {
+		case strings.HasPrefix(cb.Data, "t_ms:cancel"):
+			edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, "Отменено.")
+			_, _ = tg.Send(bot, edit)
+			_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, ""))
+			return true
+
+		case strings.HasPrefix(cb.Data, "t_ms:back"):
+			// перерисовать список дней (7 дней вперёд)
+			TryHandleTeacherMySlots(ctx, bot, database, &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: cb.Message.Chat.ID}, Text: "/t_myslots"})
+			_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, ""))
+			return true
+
+		case strings.HasPrefix(cb.Data, "t_ms:day:"):
+			u, _ := db.GetUserByTelegramID(ctx, database, cb.Message.Chat.ID)
+			if u == nil || u.Role == nil || *u.Role != models.Teacher {
+				_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, ""))
+				return true
+			}
+			loc := time.Local
+			day, _ := time.Parse("2006-01-02", strings.TrimPrefix(cb.Data, "t_ms:day:"))
+			from := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
+			to := from.Add(24 * time.Hour)
+
+			slots, err := db.ListTeacherSlotsRange(ctx, database, u.ID, from, to, 200)
+			if err != nil {
+				observability.CaptureErr(err)
+				_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Ошибка"))
+				return true
+			}
+			if len(slots) == 0 {
+				edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, "На выбранный день слотов нет.")
+				_, _ = tg.Send(bot, edit)
+				_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, ""))
+				return true
+			}
+			var rows [][]tgbotapi.InlineKeyboardButton
+			for _, s := range slots {
+				label := fmt.Sprintf("%s–%s (class:%d) #%d",
+					s.StartAt.In(loc).Format("15:04"), s.EndAt.In(loc).Format("15:04"), s.ClassID, s.ID)
+				if s.BookedByID.Valid {
+					rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+						tgbotapi.NewInlineKeyboardButtonData("Отменить "+label, fmt.Sprintf("t_cancel:%d", s.ID)),
+					))
+				} else {
+					rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+						tgbotapi.NewInlineKeyboardButtonData("Удалить "+label, fmt.Sprintf("t_del:%d", s.ID)),
+					))
+				}
+			}
+			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("Назад", "t_ms:back"),
+				tgbotapi.NewInlineKeyboardButtonData("Отмена", "t_ms:cancel"),
+			))
+			kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
+			edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, "Слоты на выбранный день:")
+			edit.ReplyMarkup = &kb
+			_, _ = tg.Send(bot, edit)
+			_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, ""))
+			return true
 		}
-		return true
+	}
 
-	case strings.HasPrefix(cb.Data, "t_ms:back"):
-		// перерисовать дни недели
-		msg := tgbotapi.NewMessage(cb.Message.Chat.ID, "/t_myslots")
-		msg.Text = "/t_myslots"
-		TryHandleTeacherMySlots(ctx, bot, database, &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: cb.Message.Chat.ID}, Text: "/t_myslots"})
-		return true
-
-	case strings.HasPrefix(cb.Data, "t_ms:day:"):
+	// 2) Собственно удаление / отмена
+	if strings.HasPrefix(cb.Data, "t_del:") || strings.HasPrefix(cb.Data, "t_cancel:") {
 		u, _ := db.GetUserByTelegramID(ctx, database, cb.Message.Chat.ID)
 		if u == nil || u.Role == nil || *u.Role != models.Teacher {
+			_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, ""))
+			return true
+		}
+		sid := strings.TrimPrefix(strings.TrimPrefix(cb.Data, "t_del:"), "t_cancel:")
+		slotID, err := strconv.ParseInt(sid, 10, 64)
+		if err != nil || slotID <= 0 {
+			_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Неверный слот"))
 			return true
 		}
 
-		day, _ := time.Parse("2006-01-02", strings.TrimPrefix(cb.Data, "t_ms:day:"))
-		loc := time.Local
-		from := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
-		to := from.Add(24 * time.Hour)
-		slots, err := db.ListTeacherSlotsRange(ctx, database, u.ID, from, to, 200)
+		if strings.HasPrefix(cb.Data, "t_del:") {
+			ok, err := db.DeleteFreeSlot(ctx, database, u.ID, slotID)
+			if err != nil {
+				observability.CaptureErr(err)
+				_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Ошибка"))
+				return true
+			}
+			if !ok {
+				_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Нельзя удалить: занят или не ваш"))
+				return true
+			}
+			// перерисуем текст
+			edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, "Слот удалён.")
+			_, _ = tg.Send(bot, edit)
+			_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Удалено"))
+			return true
+		}
+
+		// отмена занятого: уведомить родителя
+		parentID, ok, err := db.CancelBookedSlot(ctx, database, u.ID, slotID, "teacher_cancel")
 		if err != nil {
 			observability.CaptureErr(err)
-			_ = cbErr(bot, cb, "Ошибка")
+			_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Ошибка"))
 			return true
 		}
-		if len(slots) == 0 {
-			edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, "На выбранный день слотов нет.")
-			if _, err := tg.Send(bot, edit); err != nil {
-				metrics.HandlerErrors.Inc()
-			}
+		if !ok {
+			_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Нельзя отменить: свободен или не ваш"))
 			return true
 		}
-		var rows [][]tgbotapi.InlineKeyboardButton
-		for _, s := range slots {
-			label := fmt.Sprintf("%s–%s (class:%d) #%d",
-				s.StartAt.In(loc).Format("15:04"), s.EndAt.In(loc).Format("15:04"), s.ClassID, s.ID)
-			if s.BookedByID.Valid {
-				rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("Отменить "+label, fmt.Sprintf("t_cancel:%d", s.ID)),
-				))
-			} else {
-				rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("Удалить "+label, fmt.Sprintf("t_del:%d", s.ID)),
-				))
+		if parentID != nil {
+			if slot, _ := db.GetSlotByID(ctx, database, slotID); slot != nil {
+				_ = SendTeacherCancelNotification(ctx, bot, database, *parentID, *slot, time.Local)
 			}
 		}
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("Назад", "t_ms:back"),
-			tgbotapi.NewInlineKeyboardButtonData("Отмена", "t_ms:cancel"),
-		))
-		kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
-		edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, "Слоты на выбранный день:")
-		edit.ReplyMarkup = &kb
-		if _, err := tg.Send(bot, edit); err != nil {
-			metrics.HandlerErrors.Inc()
-		}
+		edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, "Запись отменена.")
+		_, _ = tg.Send(bot, edit)
+		_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Отменено"))
 		return true
 	}
 
-	// ниже — уже были хендлеры t_del:/t_cancel: (оставляем)
-	if strings.HasPrefix(cb.Data, "t_del:") || strings.HasPrefix(cb.Data, "t_cancel:") {
-		// существующая логика удаления/отмены
-	}
 	return false
-}
-
-func cbErr(bot *tgbotapi.BotAPI, cb *tgbotapi.CallbackQuery, text string) error {
-	_, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, text))
-	return err
 }
