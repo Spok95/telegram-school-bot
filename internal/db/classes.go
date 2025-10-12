@@ -9,7 +9,6 @@ type Class struct {
 	ID     int64
 	Number int
 	Letter string
-	Name   string
 }
 
 func ListClassNumbers(ctx context.Context, database *sql.DB) ([]int, error) {
@@ -32,7 +31,7 @@ func ListClassNumbers(ctx context.Context, database *sql.DB) ([]int, error) {
 
 func ListClassesByNumber(ctx context.Context, database *sql.DB, number int) ([]Class, error) {
 	rows, err := database.QueryContext(ctx, `
-		SELECT id, number, letter, name
+		SELECT id, number, letter
 		FROM classes
 		WHERE number = $1
 		ORDER BY letter
@@ -45,7 +44,7 @@ func ListClassesByNumber(ctx context.Context, database *sql.DB, number int) ([]C
 	var out []Class
 	for rows.Next() {
 		var c Class
-		if err := rows.Scan(&c.ID, &c.Number, &c.Letter, &c.Name); err != nil {
+		if err := rows.Scan(&c.ID, &c.Number, &c.Letter); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -54,9 +53,9 @@ func ListClassesByNumber(ctx context.Context, database *sql.DB, number int) ([]C
 }
 
 func GetClassByID(ctx context.Context, database *sql.DB, id int64) (*Class, error) {
-	row := database.QueryRowContext(ctx, `SELECT id, number, letter, name FROM classes WHERE id = $1`, id)
+	row := database.QueryRowContext(ctx, `SELECT id, number, letter FROM classes WHERE id = $1`, id)
 	var c Class
-	if err := row.Scan(&c.ID, &c.Number, &c.Letter, &c.Name); err != nil {
+	if err := row.Scan(&c.ID, &c.Number, &c.Letter); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
