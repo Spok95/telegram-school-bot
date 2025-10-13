@@ -19,6 +19,7 @@ import (
 type ParentFSMState string
 
 const (
+	StateParentName        ParentFSMState = "parent_name"
 	StateParentStudentName ParentFSMState = "parent_student_name"
 	StateParentClassNumber ParentFSMState = "parent_class_number"
 	StateParentClassLetter ParentFSMState = "parent_class_letter"
@@ -80,10 +81,9 @@ func StartParentRegistration(ctx context.Context, chatID int64, user *tgbotapi.U
 		return
 	default:
 	}
-	parentFSM[chatID] = StateParentStudentName
-	parentName := strings.TrimSpace(fmt.Sprintf("%s %s", user.FirstName, user.LastName))
-	parentData[chatID] = &ParentRegisterData{ParentName: parentName}
-	if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Введите ФИО ребёнка, которого вы представляете:")); err != nil {
+	parentFSM[chatID] = StateParentName
+	parentData[chatID] = &ParentRegisterData{}
+	if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Введите ваше ФИО:")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
 }
@@ -105,6 +105,18 @@ func HandleParentFSM(ctx context.Context, chatID int64, msg string, bot *tgbotap
 	}
 
 	state := parentFSM[chatID]
+
+	if state == StateParentName {
+		if parentData[chatID] == nil {
+			parentData[chatID] = &ParentRegisterData{}
+		}
+		parentData[chatID].ParentName = db.ToTitleRU(strings.TrimSpace(msg))
+		parentFSM[chatID] = StateParentStudentName
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Введите ФИО ребёнка, которого вы представляете:")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
+		return
+	}
 
 	if state == StateParentStudentName {
 		if parentData[chatID] == nil {
@@ -137,6 +149,12 @@ func HandleParentCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *s
 	}
 	if data == "parent_back" {
 		switch state {
+		case StateParentStudentName:
+			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
+			if _, err := tg.Send(bot, tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "Введите ваше ФИО:")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
+			parentFSM[chatID] = StateParentName
 		case StateParentClassNumber:
 			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
 			if _, err := tg.Send(bot, tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID, "Введите ФИО ребёнка:")); err != nil {

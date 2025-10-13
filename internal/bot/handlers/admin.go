@@ -93,9 +93,8 @@ func ShowPendingUsers(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.D
 			}
 
 			msg = fmt.Sprintf(
-				"Заявка:\n👤 Родитель: %s\n👤 Ребёнок: %s\n🏫 Класс: %s%s\n🧩 Роль: %s\nTelegramID: %d",
-				name, studentName.String, studentClassNumber.String, studentClassLetter.String,
-				role, tgID,
+				"Заявка на авторизацию:\n👤 Родитель: %s\n👦 Ребёнок: %s\n🏫 Класс: %s%s\n🧩 Роль: %s",
+				name, studentName.String, studentClassNumber.String, studentClassLetter.String, role,
 			)
 		default:
 			// fallback
@@ -255,10 +254,30 @@ func NotifyAdminsAboutNewUser(ctx context.Context, bot *tgbotapi.BotAPI, databas
 	}
 
 	// формируем текст
-	msg := fmt.Sprintf("Заявка на авторизацию:\n👤 %s\n🧩 Роль: %s\nTelegramID: %d", name, role, tgID)
-	if role == "student" && classNum.Valid && classLet.Valid {
-		msg = fmt.Sprintf("Заявка на авторизацию:\n👤 %s\n🏫 Класс: %s%s\n🧩 Роль: %s\nTelegramID: %d",
-			name, classNum.String, classLet.String, role, tgID)
+	var msg string
+	switch role {
+	case "parent":
+		var sName, sNum, sLet sql.NullString
+		_ = database.QueryRowContext(ctx, `
+         SELECT s.name, s.class_number, s.class_letter
+         FROM parents_students ps
+         JOIN users s ON s.id = ps.student_id
+         WHERE ps.parent_id = $1
+         LIMIT 1
+     `, userID).Scan(&sName, &sNum, &sLet)
+		msg = fmt.Sprintf("Заявка на авторизацию:\n👤 Родитель: %s\n👦 Ребёнок: %s\n🏫 Класс: %s%s\n🧩 Роль: %s",
+			name, sName.String, sNum.String, sLet.String, role,
+		)
+	case "student":
+		if classNum.Valid && classLet.Valid {
+			msg = fmt.Sprintf("Заявка на авторизацию:\n👤 %s\n🏫 Класс: %s%s\n🧩 Роль: %s",
+				name, classNum.String, classLet.String, role,
+			)
+		} else {
+			msg = fmt.Sprintf("Заявка на авторизацию:\n👤 %s\n🧩 Роль: %s", name, role)
+		}
+	default:
+		msg = fmt.Sprintf("Заявка на авторизацию:\n👤 %s\n🧩 Роль: %s", name, role)
 	}
 
 	// кнопки подтверждения/отклонения такие же, как в ShowPendingUsers
