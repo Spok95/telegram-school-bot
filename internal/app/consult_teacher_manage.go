@@ -237,7 +237,6 @@ func TryHandleTeacherManageCallback(ctx context.Context, bot *tgbotapi.BotAPI, d
 				}
 				return true
 			}
-			// перерисуем текст
 			edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, "Слот удалён.")
 			if _, err := tg.Send(bot, edit); err != nil {
 				metrics.HandlerErrors.Inc()
@@ -248,8 +247,20 @@ func TryHandleTeacherManageCallback(ctx context.Context, bot *tgbotapi.BotAPI, d
 			return true
 		}
 
-		// отмена занятого: уведомить родителя
-		parentID, ok, err := db.CancelBookedSlot(ctx, database, u.ID, slotID, "teacher_cancel")
+		// --- t_cancel: сначала читаем слот, чтобы запомнить parentID и тайм-окно
+		slotBefore, _ := db.GetSlotByID(ctx, database, slotID)
+		var parentID int64
+		if slotBefore != nil && slotBefore.BookedByID.Valid {
+			parentID = slotBefore.BookedByID.Int64
+		} else {
+			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Слот уже свободен")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
+			return true
+		}
+
+		// Отменяем
+		_, ok, err := db.CancelBookedSlot(ctx, database, u.ID, slotID, "teacher_cancel")
 		if err != nil {
 			observability.CaptureErr(err)
 			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Ошибка")); err != nil {
@@ -263,11 +274,11 @@ func TryHandleTeacherManageCallback(ctx context.Context, bot *tgbotapi.BotAPI, d
 			}
 			return true
 		}
-		// загрузить слот, чтобы отдать в карточки
-		slot, _ := db.GetSlotByID(ctx, database, slotID)
-		if parentID != nil && slot != nil {
-			_ = SendConsultCancelCards(ctx, bot, database, *parentID, *slot, time.Local)
-		}
+
+		// Карточки + бродкаст используем ДАННЫЕ ДО отмены
+		_ = SendConsultCancelCards(ctx, bot, database, parentID, *slotBefore, time.Local)
+
+		// UI-ответ в исходном сообщении
 		edit := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, "Отменено.")
 		if _, err := tg.Send(bot, edit); err != nil {
 			metrics.HandlerErrors.Inc()

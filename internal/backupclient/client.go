@@ -27,7 +27,7 @@ func do(ctx context.Context, path string, timeout time.Duration) (string, error)
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode/100 != 2 {
 		return "", fmt.Errorf("%s: http %d: %s", path, resp.StatusCode, strings.TrimSpace(string(body)))

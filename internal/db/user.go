@@ -452,29 +452,6 @@ type TeacherLite struct {
 	Name string
 }
 
-func ListTeachersByClass(ctx context.Context, database *sql.DB, classID int64, limit int) ([]TeacherLite, error) {
-	rows, err := database.QueryContext(ctx, `
-		SELECT id, name FROM users
-		WHERE role = 'teacher' AND class_id = $1
-		ORDER BY name
-		LIMIT $2
-	`, classID, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var res []TeacherLite
-	for rows.Next() {
-		var t TeacherLite
-		if err := rows.Scan(&t.ID, &t.Name); err != nil {
-			return nil, err
-		}
-		res = append(res, t)
-	}
-	return res, rows.Err()
-}
-
 // GetChildByParentAndClass — ребёнок родителя в конкретном классе (для текста карточки).
 func GetChildByParentAndClass(ctx context.Context, database *sql.DB, parentID, classID int64) (*models.User, error) {
 	ctx, cancel := ctxutil.WithDBTimeout(ctx)

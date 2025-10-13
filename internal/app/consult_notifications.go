@@ -172,7 +172,9 @@ func SendConsultCancelCards(ctx context.Context, bot *tgbotapi.BotAPI, database 
 			"Вы отменили запись на\n%s — %s\nродитель: %s\nученик: %s\nкласс: %s",
 			start, end, parent.Name, childName, classLabel,
 		)
-		_, _ = bot.Send(tgbotapi.NewMessage(teacher.TelegramID, teacherText))
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(teacher.TelegramID, teacherText)); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 	}
 
 	// --- родителю
@@ -181,7 +183,9 @@ func SendConsultCancelCards(ctx context.Context, bot *tgbotapi.BotAPI, database 
 			"⚠️ Ваша запись на консультацию\nДата/время: %s — %s\nУчитель: %s\nКласс: %s\nОтменена",
 			start, end, teacher.Name, classLabel,
 		)
-		_, _ = bot.Send(tgbotapi.NewMessage(parent.TelegramID, parentText))
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(parent.TelegramID, parentText)); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 	}
 
 	// --- широковещалка по классу (освободился слот)
@@ -204,7 +208,9 @@ func BroadcastFreeConsultSlot(ctx context.Context, bot *tgbotapi.BotAPI, databas
 	)
 	for _, p := range parents {
 		if p.TelegramID != 0 {
-			_, _ = bot.Send(tgbotapi.NewMessage(p.TelegramID, text))
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(p.TelegramID, text)); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 		}
 	}
 	return nil

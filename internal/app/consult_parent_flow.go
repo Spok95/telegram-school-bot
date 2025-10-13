@@ -98,7 +98,7 @@ func TryHandleParentFlowCallbacks(ctx context.Context, bot *tgbotapi.BotAPI, dat
 		to := from.AddDate(0, 0, 7)
 		if ch.ClassID != nil {
 			// существующий DAO по class_id — но в явном диапазоне
-			teachers, err = db.ListTeachersWithSlotsByClassRange(ctx, database, *ch.ClassID, from, to, 50) // см. ниже
+			teachers, err = db.ListTeachersWithSlotsByClassRange(ctx, database, *ch.ClassID, from, to, 50)
 		} else {
 			teachers, err = db.ListTeachersWithSlotsByClassNLRange(ctx, database, *ch.ClassNumber, *ch.ClassLetter, from, to, 50)
 		}

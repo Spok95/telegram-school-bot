@@ -12,15 +12,14 @@ import (
 
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
-	tg "github.com/Spok95/telegram-school-bot/internal/tg"
+	"github.com/Spok95/telegram-school-bot/internal/tg"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/xuri/excelize/v2"
 )
 
-// ExportConsultationsExcel — XLSX-отчёт «Расписание консультаций».
-// Один лист на класс. Колонки: Дата | Время | ФИО родителя | ФИО ребёнка.
-func ExportConsultationsExcel(
+// ConsultationsExcelExport — XLSX-отчёт «Расписание консультаций». Один лист на класс. Колонки: Дата | Время | ФИО родителя | ФИО ребёнка.
+func ConsultationsExcelExport(
 	ctx context.Context,
 	bot *tgbotapi.BotAPI,
 	database *sql.DB,
@@ -105,7 +104,6 @@ func ExportConsultationsExcel(
 
 // --- helpers ---
 
-// element для одной строки отчёта
 type consultRow struct {
 	Date       string
 	TimeRange  string
@@ -126,7 +124,7 @@ func distinctClassIDs(ctx context.Context, dbx *sql.DB, teacherID int64, from, t
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var ids []int64
 	for rows.Next() {
 		var id int64
@@ -169,7 +167,7 @@ func loadBookedRows(ctx context.Context, dbx *sql.DB, teacherID, classID int64, 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var res []consultRow
 	for rows.Next() {
