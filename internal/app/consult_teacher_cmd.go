@@ -117,7 +117,7 @@ func reply(bot *tgbotapi.BotAPI, chatID int64, text string) {
 }
 
 func splitArgs(s string) []string {
-	return strings.FieldsFunc(s, func(r rune) bool { return unicode.IsSpace(r) })
+	return strings.FieldsFunc(s, unicode.IsSpace)
 }
 
 func parseWeekday(w string) (time.Weekday, bool) {

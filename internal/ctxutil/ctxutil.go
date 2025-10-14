@@ -29,9 +29,7 @@ func WithOp(ctx context.Context, name string) context.Context {
 	return context.WithValue(ctx, keyOpName, name)
 }
 
-var (
-	DefaultDBTimeout = 5 * time.Second
-)
+var DefaultDBTimeout = 5 * time.Second
 
 // WithTimeout — удобная обёртка над context.WithTimeout.
 func WithTimeout(parent context.Context, d time.Duration) (context.Context, context.CancelFunc) {

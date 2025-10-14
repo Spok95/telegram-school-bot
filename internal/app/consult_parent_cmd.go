@@ -148,5 +148,5 @@ func handleParentBook(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.D
 
 // --- util ---
 func fields(s string) []string {
-	return strings.FieldsFunc(strings.TrimSpace(s), func(r rune) bool { return unicode.IsSpace(r) })
+	return strings.FieldsFunc(strings.TrimSpace(s), unicode.IsSpace)
 }

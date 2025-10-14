@@ -542,7 +542,7 @@ func restoreFromUpload(ctx context.Context, database *sql.DB, localPath string) 
 	// Если .sql — сожмём в .sql.gz (sidecar обычно ждёт gzip)
 	dstPath := filepath.Join(dstDir, "manual-"+ts+"-"+base)
 	if strings.HasSuffix(name, ".sql") {
-		dstPath = dstPath + ".gz"
+		dstPath += ".gz"
 		in, err := os.Open(localPath)
 		if err != nil {
 			return err
