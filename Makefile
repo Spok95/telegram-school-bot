@@ -49,3 +49,13 @@ logs:
 
 backup:
 	docker compose exec pgbackup sh -lc 'pg_dump -h $${DB_HOST:-postgres} -U $${DB_USER:-school} -d $${DB_NAME:-school} -Fc | gzip > /backups/manual-$$(date +%F-%H%M).sql.gz'
+
+.PHONY: govuln
+govuln:
+	@set -euo pipefail; \
+	PKGS=$$(go list ./... | grep -v '/internal/testutil/'); \
+	if [ -z "$$PKGS" ]; then \
+		echo "no packages to scan"; \
+	else \
+		go run golang.org/x/vuln/cmd/govulncheck@latest $$PKGS; \
+	fi

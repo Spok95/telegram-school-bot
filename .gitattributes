@@ -1,2 +1,0 @@
-ops/pgbackup/*.sh text eol=lf
-ops/pgbackup/cgi-bin/* text eol=lf
