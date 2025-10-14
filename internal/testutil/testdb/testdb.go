@@ -1,3 +1,6 @@
+//go:build testutil
+// +build testutil
+
 package testdb
 
 import (

@@ -46,6 +46,7 @@ func main() {
 		log.Fatalf("logger: %v", err)
 	}
 	defer lg.Closer()
+	observability.SetLogger(lg)
 	lg.Sugar.Infow("starting bot", "env", cfg.Env)
 
 	closeSentry, err := observability.InitSentry(cfg.SentryDSN, cfg.Env, version+"-"+commit)
@@ -88,7 +89,7 @@ func main() {
 		lg.Sugar.Fatalw("❌ goose dialect", "err", err)
 	}
 	if err := goose.Up(database, "."); err != nil {
-		lg.Sugar.Fatalw("❌ Ошибка миграций: %v", "err", err)
+		lg.Sugar.Fatalw("❌ Ошибка миграций", "err", err)
 	}
 
 	err = db.SetActivePeriod(ctx, database)
@@ -112,6 +113,11 @@ func main() {
 	// === HTTP: /healthz, /metrics ===
 	app.StartHTTP(ctx, cfg.HTTPAddr, database)
 	lg.Sugar.Infow("http started", "addr", cfg.HTTPAddr)
+
+	// === REMINDERS ===
+	// Если есть конфиг таймзоны — подставь, иначе используем локаль сервера
+	loc := time.Local
+	jobs.StartConsultReminderLoop(ctx, bot, database, loc)
 
 	// === Фоновые задачи ===
 	// app.StartSchoolYearNotifier(bot, database, cfg.Location) // если функция поддерживает tz

@@ -13,8 +13,10 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/bot/menu"
 	"github.com/Spok95/telegram-school-bot/internal/ctxutil"
 	"github.com/Spok95/telegram-school-bot/internal/db"
+	"github.com/Spok95/telegram-school-bot/internal/export"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	"github.com/Spok95/telegram-school-bot/internal/models"
+	"github.com/Spok95/telegram-school-bot/internal/observability"
 	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -147,6 +149,27 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 		auth.HandleAddChildText(ctx, bot, database, msg)
 		return
 	}
+	if TryHandleTeacherAddSlots(ctx, bot, database, msg) {
+		return
+	}
+	if TryHandleParentCommands(ctx, bot, database, msg) {
+		return
+	}
+	// Учительский FSM /t_slots
+	if TryHandleTeacherSlotsCommand(ctx, bot, database, msg) {
+		return
+	}
+	if TryHandleTeacherSlotsText(ctx, bot, database, msg) {
+		return
+	}
+	// Родитель: список слотов кнопками
+	if TryHandleParentSlotsCommand(ctx, bot, database, msg) {
+		return
+	}
+	// Учитель: список и управление слотами
+	if TryHandleTeacherMySlots(ctx, bot, database, msg) {
+		return
+	}
 
 	switch text {
 	case "/add_score", "➕ Начислить баллы":
@@ -225,13 +248,21 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 		}
 	case "♻️ Восстановить БД":
 		if user.Role != nil && (*user.Role == "admin") {
-			unlock := chatLimiter.lock(chatID)
-			bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
-			go func(c context.Context) {
-				defer unlock()
-				defer cancel()
-				handlers.HandleAdminRestoreLatest(c, bot, database, chatID)
-			}(bg)
+			warn := "⚠️ВНИМАНИЕ!!!⚠️\n" +
+				"Восстановление базы данных может привести к потере несохранённых данных.\n" +
+				"Перед восстановлением рекомендуется сделать «💾 Бэкап БД».\n\n" +
+				"Вы уверены, что хотите восстановить?"
+
+			kb := tgbotapi.NewInlineKeyboardMarkup(
+				tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("✅ ДА", "restore_latest:yes"),
+					tgbotapi.NewInlineKeyboardButtonData("Отменить", "restore_latest:no"),
+				),
+			)
+
+			m := tgbotapi.NewMessage(chatID, warn)
+			m.ReplyMarkup = kb
+			_, _ = tg.Send(bot, m)
 		}
 	case "📥 Восстановить из файла":
 		if user.Role != nil && (*user.Role == "admin") {
@@ -243,6 +274,58 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 				handlers.HandleAdminRestoreStart(c, bot, database, chatID)
 			}(bg)
 		}
+	case "/consult_help":
+		reply(bot, chatID, "Консультации:\n"+
+			"• Учитель: /t_slots — пошаговое создание слотов на 4 недели.\n"+
+			"• Учитель: /t_addslots <день> <HH:MM-HH:MM> <шаг-мин> <class_id>\n"+
+			"• Родитель: /p_slots <teacher_id> <YYYY-MM-DD> — свободные слоты кнопками.\n"+
+			"• Родитель: /p_free <teacher_id> <YYYY-MM-DD> — свободные слоты списком.\n"+
+			"• Родитель: /p_book <slot_id> — бронирование по ID.")
+		return
+	case "🗓 Создать слоты":
+		// запускаем мастер
+		if user.Role != nil && *user.Role == models.Teacher {
+			// эмулируем /t_slots
+			msg := *msg
+			msg.Text = "/t_slots"
+			if TryHandleTeacherSlotsCommand(ctx, bot, database, &msg) {
+				return
+			}
+		}
+	case "📋 Мои слоты":
+		if user.Role != nil && *user.Role == models.Teacher {
+			// эмулируем /t_myslots
+			msg := *msg
+			msg.Text = "/t_myslots"
+			if TryHandleTeacherMySlots(ctx, bot, database, &msg) {
+				return
+			}
+		}
+	case "📅 Записаться на консультацию":
+		if user.Role != nil && *user.Role == models.Parent {
+			// стартуем parent-флоу выбора учителя/даты
+			StartParentConsultFlow(ctx, bot, database, msg)
+			return
+		}
+	case "📘 Расписание", "📘 Расписание консультаций", "Расписание", "Расписание консультаций":
+		if user.Role != nil && *user.Role == models.Teacher {
+			loc := time.Local
+			now := time.Now().In(loc)
+			from := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+			to := from.AddDate(0, 0, 7)
+			go func() {
+				ctxExp, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				if err := export.ConsultationsExcelExport(ctxExp, bot, database, user.ID, from, to, loc, chatID); err != nil {
+					observability.CaptureErr(err)
+					if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Не удалось сформировать отчёт.")); err != nil {
+						metrics.HandlerErrors.Inc()
+					}
+				}
+			}()
+		}
+		return
+
 	default:
 		role := getUserFSMRole(chatID)
 		if _, ok := handlers.PeriodsFSMActive(chatID); ok && user.Role != nil && (*user.Role == "admin") {
@@ -303,13 +386,29 @@ func HandleCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB,
 		if role == "parent" {
 			auth.StartParentRegistration(ctx, chatID, cb.From, bot)
 		} else {
-			auth.StartRegistration(ctx, chatID, role, bot, database)
+			auth.StartRegistration(ctx, chatID, role, bot)
 		}
 		return
 	}
 
+	// Учитель: управление слотами (удалить/отменить)
+	if TryHandleTeacherManageCallback(ctx, bot, database, cb) {
+		return
+	}
+	// Учительский FSM /t_slots (кнопки)
+	if TryHandleTeacherSlotsCallback(ctx, bot, database, cb) {
+		return
+	}
+	// Родитель: кнопка бронирования
+	if TryHandleParentBookCallback(ctx, bot, database, cb) {
+		return
+	}
+	if TryHandleParentFlowCallbacks(ctx, bot, database, cb) {
+		return
+	}
+
 	if handlers.AdminRestoreFSMActive(chatID) && (data == "restore_cancel") {
-		handlers.HandleAdminRestoreCallback(ctx, bot, cb)
+		handlers.HandleAdminRestoreCallback(ctx, bot, database, cb)
 		return
 	}
 
@@ -468,6 +567,33 @@ func HandleCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB,
 	}
 	if strings.HasPrefix(data, "peradm_") {
 		handlers.HandleAdminPeriodsCallback(ctx, bot, database, cb)
+		return
+	}
+	// подтверждение восстановления «последнего» бэкапа
+	if data == "restore_latest:yes" {
+		// уберём инлайн-клавиатуру у предупреждения
+		_, _ = tg.Send(bot, tgbotapi.NewEditMessageReplyMarkup(
+			chatID, cb.Message.MessageID, tgbotapi.InlineKeyboardMarkup{}))
+
+		unlock := chatLimiter.lock(chatID)
+		bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+		go func(c context.Context) {
+			defer unlock()
+			defer cancel()
+			handlers.HandleAdminRestoreLatest(c, bot, database, chatID)
+		}(bg)
+		return
+	}
+	if data == "restore_latest:no" {
+		_, _ = tg.Send(bot, tgbotapi.NewEditMessageReplyMarkup(
+			chatID, cb.Message.MessageID, tgbotapi.InlineKeyboardMarkup{}))
+		_, _ = tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Восстановление отменено."))
+		return
+	}
+
+	// починка отмены при «📥 Восстановить из файла»
+	if data == "restore_cancel" {
+		handlers.HandleAdminRestoreCallback(ctx, bot, database, cb) // в файле admin_restore.go это уже реализовано
 		return
 	}
 

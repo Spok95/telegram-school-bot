@@ -22,7 +22,7 @@ lint:
 	golangci-lint run
 
 test:
-	GOFLAGS=-count=1 $(GO) test -race -covermode=atomic -coverprofile=coverage.out ./...
+	GOFLAGS=-count=1 $(GO) test -tags testutil -race -covermode=atomic -coverprofile=coverage.out ./...
 
 bench:
 	$(GO) test -run '^$$' -bench . ./internal/db -benchtime=10s -benchmem
@@ -49,3 +49,13 @@ logs:
 
 backup:
 	docker compose exec pgbackup sh -lc 'pg_dump -h $${DB_HOST:-postgres} -U $${DB_USER:-school} -d $${DB_NAME:-school} -Fc | gzip > /backups/manual-$$(date +%F-%H%M).sql.gz'
+
+.PHONY: govuln
+govuln:
+	@set -euo pipefail; \
+	PKGS=$$(go list ./... | grep -v '/internal/testutil/'); \
+	if [ -z "$$PKGS" ]; then \
+		echo "no packages to scan"; \
+	else \
+		go run golang.org/x/vuln/cmd/govulncheck@latest $$PKGS; \
+	fi

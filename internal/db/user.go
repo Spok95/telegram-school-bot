@@ -446,3 +446,56 @@ func GetAdminTelegramIDs(ctx context.Context, database *sql.DB) ([]int64, error)
 	}
 	return ids, rows.Err()
 }
+
+type TeacherLite struct {
+	ID   int64
+	Name string
+}
+
+// GetChildByParentAndClass — ребёнок родителя в конкретном классе (для текста карточки).
+func GetChildByParentAndClass(ctx context.Context, database *sql.DB, parentID, classID int64) (*models.User, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
+	var u models.User
+	err := database.QueryRowContext(ctx, `
+		SELECT u.id, u.name, u.class_id, u.class_number, u.class_letter
+		FROM users u
+		JOIN parents_students ps ON ps.student_id = u.id
+		WHERE ps.parent_id = $1 AND u.class_id = $2 AND u.is_active = TRUE
+		LIMIT 1
+	`, parentID, classID).Scan(&u.ID, &u.Name, &u.ClassID, &u.ClassNumber, &u.ClassLetter)
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+// ListParentsByClassID — все родители (у кого есть активные дети) данного класса.
+func ListParentsByClassID(ctx context.Context, database *sql.DB, classID int64) ([]models.User, error) {
+	ctx, cancel := ctxutil.WithDBTimeout(ctx)
+	defer cancel()
+
+	rows, err := database.QueryContext(ctx, `
+		SELECT DISTINCT p.id, p.telegram_id, p.name
+		FROM users p
+		JOIN parents_students ps ON ps.parent_id = p.id
+		JOIN users s ON s.id = ps.student_id
+		WHERE p.role = 'parent' AND p.is_active = TRUE
+		  AND s.role = 'student' AND s.is_active = TRUE
+		  AND s.class_id = $1
+	`, classID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []models.User
+	for rows.Next() {
+		var u models.User
+		if err := rows.Scan(&u.ID, &u.TelegramID, &u.Name); err != nil {
+			continue
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}

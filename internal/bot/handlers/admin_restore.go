@@ -3,6 +3,7 @@ package handlers
 import (
 	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"database/sql"
 	"encoding/csv"
@@ -74,7 +75,8 @@ func HandleAdminRestoreStart(ctx context.Context, bot *tgbotapi.BotAPI, database
 	restoreWaiting[chatID] = true
 
 	text := "⚠️ Восстановление перезапишет данные в существующих таблицах.\n\n" +
-		"Пришлите ZIP, полученный кнопкой «💾 Бэкап БД». Я загружу файл и восстановлю данные."
+		"Пришлите файл бэкапа из «💾 Бэкап БД» — это *.sql.gz (поддерживаются также *.sql и *.zip). " +
+		"Я загружу файл и восстановлю данные."
 
 	cancel := tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "restore_cancel")
 	m := tgbotapi.NewMessage(chatID, text)
@@ -87,13 +89,37 @@ func HandleAdminRestoreStart(ctx context.Context, bot *tgbotapi.BotAPI, database
 	}
 }
 
-func HandleAdminRestoreCallback(ctx context.Context, bot *tgbotapi.BotAPI, cb *tgbotapi.CallbackQuery) {
+func HandleAdminRestoreCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
 	select {
 	case <-ctx.Done():
 		return
 	default:
 	}
 	chatID := cb.Message.Chat.ID
+	switch cb.Data {
+	case "restore_latest":
+		// предупреждение + кнопки
+		warn := "⚠️ВНИМАНИЕ!!!⚠️\n" +
+			"Восстановление базы данных может привести к потере несохранённых данных.\n" +
+			"Перед восстановлением рекомендуется сделать «💾 Бэкап БД».\n\n" +
+			"Вы уверены, что хотите восстановить?"
+		kb := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("✅ ДА", "restore_confirm_latest"),
+				tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "restore_cancel"),
+			),
+		)
+		msg := tgbotapi.NewMessage(chatID, warn)
+		msg.ReplyMarkup = kb
+		_, _ = tg.Send(bot, msg)
+		return
+
+	case "restore_confirm_latest":
+		// запускаем восстановление как и раньше
+		HandleAdminRestoreLatest(ctx, bot, database, chatID)
+		return
+	}
+
 	if cb.Data == "restore_cancel" {
 		delete(restoreWaiting, chatID)
 
@@ -114,7 +140,7 @@ func HandleAdminRestoreMessage(ctx context.Context, bot *tgbotapi.BotAPI, databa
 		return
 	}
 	if msg.Document == nil {
-		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Пришлите ZIP-файл с бэкапом.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Пришлите файл бэкапа: *.sql.gz / *.sql / *.zip.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
@@ -122,7 +148,7 @@ func HandleAdminRestoreMessage(ctx context.Context, bot *tgbotapi.BotAPI, databa
 	defer func() { delete(restoreWaiting, chatID) }()
 
 	// качаем файл из Telegram
-	path, err := downloadTelegramFile(ctx, bot, msg.Document.FileID)
+	path, err := downloadTelegramFile(ctx, bot, msg.Document.FileID, msg.Document.FileName)
 	if err != nil {
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Не удалось скачать файл: %v", err))); err != nil {
 			metrics.HandlerErrors.Inc()
@@ -135,7 +161,7 @@ func HandleAdminRestoreMessage(ctx context.Context, bot *tgbotapi.BotAPI, databa
 		metrics.HandlerErrors.Inc()
 	}
 
-	if err := restoreFromZip(ctx, database, path); err != nil {
+	if err := restoreFromUpload(ctx, database, path); err != nil {
 		log.Println("restore error:", err)
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Ошибка восстановления: %v", err))); err != nil {
 			metrics.HandlerErrors.Inc()
@@ -147,7 +173,7 @@ func HandleAdminRestoreMessage(ctx context.Context, bot *tgbotapi.BotAPI, databa
 	}
 }
 
-func downloadTelegramFile(ctx context.Context, bot *tgbotapi.BotAPI, fileID string) (string, error) {
+func downloadTelegramFile(ctx context.Context, bot *tgbotapi.BotAPI, fileID string, origName string) (string, error) {
 	f, err := bot.GetFile(tgbotapi.FileConfig{FileID: fileID})
 	if err != nil {
 		return "", err
@@ -169,7 +195,11 @@ func downloadTelegramFile(ctx context.Context, bot *tgbotapi.BotAPI, fileID stri
 	if resp.StatusCode != 200 {
 		return "", fmt.Errorf("telegram file status: %s", resp.Status)
 	}
-	tmp := filepath.Join(os.TempDir(), "restore_"+time.Now().Format("20060102_150405")+".zip")
+	safe := strings.ReplaceAll(filepath.Base(origName), string(os.PathSeparator), "_")
+	if safe == "" {
+		safe = "upload.bin"
+	}
+	tmp := filepath.Join(os.TempDir(), "restore_"+time.Now().Format("20060102_150405")+"_"+safe)
 	out, err := os.Create(tmp)
 	if err != nil {
 		return "", err
@@ -487,4 +517,77 @@ func tableExistsContext(ctx context.Context, tx *sql.Tx, table string) (bool, er
 // quoteIdent — экранирует идентификатор для SQL
 func quoteIdent(id string) string {
 	return `"` + strings.ReplaceAll(id, `"`, `""`) + `"`
+}
+
+// restoreFromUpload — универсальная восстановлялка:
+//   - *.zip (старый формат с CSV) → restoreFromZip
+//   - *.sql.gz / *.sql (бэкап sidecar'а) → кладём в /backups с новым таймштампом и зовём RestoreLatest
+func restoreFromUpload(ctx context.Context, database *sql.DB, localPath string) error {
+	name := strings.ToLower(filepath.Base(localPath))
+
+	// 1) ZIP с CSV — оставляем текущую логику
+	if strings.HasSuffix(name, ".zip") {
+		return restoreFromZip(ctx, database, localPath)
+	}
+
+	// 2) .sql.gz или .sql — кладём в /backups и просим sidecar восстановить "последний"
+	dstDir := "/backups"
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		return fmt.Errorf("mkdir backups: %w", err)
+	}
+
+	ts := time.Now().Format("2006-01-02_150405")
+	base := filepath.Base(localPath)
+
+	// Если .sql — сожмём в .sql.gz (sidecar обычно ждёт gzip)
+	dstPath := filepath.Join(dstDir, "manual-"+ts+"-"+base)
+	if strings.HasSuffix(name, ".sql") {
+		dstPath += ".gz"
+		in, err := os.Open(localPath)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = in.Close() }()
+		out, err := os.Create(dstPath)
+		if err != nil {
+			return err
+		}
+		gz := gzip.NewWriter(out)
+		if _, err := io.Copy(gz, in); err != nil {
+			_ = gz.Close()
+			_ = out.Close()
+			return err
+		}
+		if err := gz.Close(); err != nil {
+			_ = out.Close()
+			return err
+		}
+		if err := out.Close(); err != nil {
+			return err
+		}
+	} else {
+		// .sql.gz — просто копируем как новый "последний" файл
+		src, err := os.Open(localPath)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = src.Close() }()
+		out, err := os.Create(dstPath)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(out, src); err != nil {
+			_ = out.Close()
+			return err
+		}
+		if err := out.Close(); err != nil {
+			return err
+		}
+	}
+
+	// Просим sidecar восстановить "последний" файл в /backups
+	if _, err := backupclient.RestoreLatest(ctx); err != nil {
+		return fmt.Errorf("restore-latest: %w", err)
+	}
+	return nil
 }

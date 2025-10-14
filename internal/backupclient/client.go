@@ -27,7 +27,7 @@ func do(ctx context.Context, path string, timeout time.Duration) (string, error)
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode/100 != 2 {
 		return "", fmt.Errorf("%s: http %d: %s", path, resp.StatusCode, strings.TrimSpace(string(body)))
@@ -40,5 +40,12 @@ func TriggerBackup(ctx context.Context) (string, error) {
 }
 
 func RestoreLatest(ctx context.Context) (string, error) {
-	return do(ctx, "/cgi-bin/restore-latest", 5*time.Minute)
+	s, err := do(ctx, "/cgi-bin/restore-latest", 5*time.Minute)
+	if err != nil {
+		return "", err
+	}
+	if strings.EqualFold(strings.TrimSpace(s), "no backups") {
+		return "", fmt.Errorf("no backups")
+	}
+	return s, nil
 }

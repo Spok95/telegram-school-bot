@@ -137,6 +137,11 @@ func HandleExportCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *s
 				metrics.HandlerErrors.Inc()
 			}
 			return
+		case ExportStepSchoolYearSelect:
+			state.Step = ExportStepPeriodMode
+			editMenu(bot, chatID, cq.Message.MessageID, "📅 Выберите режим периода:", periodModeRows())
+			return
+
 		default:
 			delete(exportStates, chatID)
 			fsmutil.DisableMarkup(bot, chatID, cq.Message.MessageID)
@@ -199,6 +204,7 @@ func HandleExportCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *s
 				metrics.HandlerErrors.Inc()
 			}
 		case "export_mode_schoolyear":
+			state.PeriodMode = "schoolyear"
 			state.Step = ExportStepSchoolYearSelect
 			editMenu(bot, chatID, cq.Message.MessageID, "📘 Выберите учебный год:", schoolYearRows("export_schoolyear_"))
 			return
@@ -281,14 +287,16 @@ func HandleExportCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *s
 		if strings.HasPrefix(data, "export_schoolyear_") {
 			startYear, _ := strconv.Atoi(strings.TrimPrefix(data, "export_schoolyear_"))
 			from, to := db.SchoolYearBoundsByStartYear(startYear)
+			state.PeriodMode = "schoolyear"
 			state.FromDate, state.ToDate = &from, &to
 
 			// Дальше поведение как в «произвольном» диапазоне:
 			switch state.ReportType {
 			case "student":
-				// выбираем ученика/учеников
-				state.Step = ExportStepStudentSelect
-				promptStudentSelectExport(ctx, bot, database, cq)
+				// СНАЧАЛА выбираем класс → потом ученика
+				state.SelectedStudentIDs = nil
+				state.Step = ExportStepClassNumber
+				editMenu(bot, chatID, cq.Message.MessageID, "🔢 Выберите номер класса:", classNumberRows("export_class_number_"))
 				return
 			case "class":
 				// выбираем класс
@@ -550,6 +558,36 @@ func generateExportReport(ctx context.Context, bot *tgbotapi.BotAPI, database *s
 				return
 			}
 			periodLabel = fmt.Sprintf("%s–%s", state.FromDate.Format("02.01.2006"), state.ToDate.Format("02.01.2006"))
+			switch state.ReportType {
+			case "student":
+				for _, id := range state.SelectedStudentIDs {
+					part, err := db.GetScoresByStudentAndDateRange(c, database, id, *state.FromDate, *state.ToDate)
+					if err != nil {
+						log.Println("Ошибка при получении баллов:", err)
+					}
+					scores = append(scores, part...)
+				}
+			case "class":
+				scores, err = db.GetScoresByClassAndDateRange(c, database, int(state.ClassNumber), state.ClassLetter, *state.FromDate, *state.ToDate)
+				if err != nil {
+					log.Println("Ошибка при получении баллов:", err)
+				}
+			case "school":
+				scores, err = db.GetScoresByDateRange(c, database, *state.FromDate, *state.ToDate)
+				if err != nil {
+					log.Println("Ошибка при получении баллов:", err)
+				}
+			}
+		case "schoolyear":
+			if state.FromDate == nil || state.ToDate == nil {
+				if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Даты учебного года не заданы")); err != nil {
+					metrics.HandlerErrors.Inc()
+				}
+				return
+			}
+			// Красивый ярлык периода: "2024–2025"
+			periodLabel = db.SchoolYearLabel(db.CurrentSchoolYearStartYear(*state.FromDate))
+
 			switch state.ReportType {
 			case "student":
 				for _, id := range state.SelectedStudentIDs {
