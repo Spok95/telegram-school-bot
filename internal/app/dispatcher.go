@@ -248,13 +248,21 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 		}
 	case "♻️ Восстановить БД":
 		if user.Role != nil && (*user.Role == "admin") {
-			unlock := chatLimiter.lock(chatID)
-			bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
-			go func(c context.Context) {
-				defer unlock()
-				defer cancel()
-				handlers.HandleAdminRestoreLatest(c, bot, database, chatID)
-			}(bg)
+			warn := "⚠️ВНИМАНИЕ!!!⚠️\n" +
+				"Восстановление базы данных может привести к потере несохранённых данных.\n" +
+				"Перед восстановлением рекомендуется сделать «💾 Бэкап БД».\n\n" +
+				"Вы уверены, что хотите восстановить?"
+
+			kb := tgbotapi.NewInlineKeyboardMarkup(
+				tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("✅ ДА", "restore_latest:yes"),
+					tgbotapi.NewInlineKeyboardButtonData("Отменить", "restore_latest:no"),
+				),
+			)
+
+			m := tgbotapi.NewMessage(chatID, warn)
+			m.ReplyMarkup = kb
+			_, _ = tg.Send(bot, m)
 		}
 	case "📥 Восстановить из файла":
 		if user.Role != nil && (*user.Role == "admin") {
@@ -400,7 +408,7 @@ func HandleCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB,
 	}
 
 	if handlers.AdminRestoreFSMActive(chatID) && (data == "restore_cancel") {
-		handlers.HandleAdminRestoreCallback(ctx, bot, cb)
+		handlers.HandleAdminRestoreCallback(ctx, bot, database, cb)
 		return
 	}
 
@@ -559,6 +567,33 @@ func HandleCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB,
 	}
 	if strings.HasPrefix(data, "peradm_") {
 		handlers.HandleAdminPeriodsCallback(ctx, bot, database, cb)
+		return
+	}
+	// подтверждение восстановления «последнего» бэкапа
+	if data == "restore_latest:yes" {
+		// уберём инлайн-клавиатуру у предупреждения
+		_, _ = tg.Send(bot, tgbotapi.NewEditMessageReplyMarkup(
+			chatID, cb.Message.MessageID, tgbotapi.InlineKeyboardMarkup{}))
+
+		unlock := chatLimiter.lock(chatID)
+		bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+		go func(c context.Context) {
+			defer unlock()
+			defer cancel()
+			handlers.HandleAdminRestoreLatest(c, bot, database, chatID)
+		}(bg)
+		return
+	}
+	if data == "restore_latest:no" {
+		_, _ = tg.Send(bot, tgbotapi.NewEditMessageReplyMarkup(
+			chatID, cb.Message.MessageID, tgbotapi.InlineKeyboardMarkup{}))
+		_, _ = tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Восстановление отменено."))
+		return
+	}
+
+	// починка отмены при «📥 Восстановить из файла»
+	if data == "restore_cancel" {
+		handlers.HandleAdminRestoreCallback(ctx, bot, database, cb) // в файле admin_restore.go это уже реализовано
 		return
 	}
 

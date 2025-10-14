@@ -89,13 +89,37 @@ func HandleAdminRestoreStart(ctx context.Context, bot *tgbotapi.BotAPI, database
 	}
 }
 
-func HandleAdminRestoreCallback(ctx context.Context, bot *tgbotapi.BotAPI, cb *tgbotapi.CallbackQuery) {
+func HandleAdminRestoreCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
 	select {
 	case <-ctx.Done():
 		return
 	default:
 	}
 	chatID := cb.Message.Chat.ID
+	switch cb.Data {
+	case "restore_latest":
+		// предупреждение + кнопки
+		warn := "⚠️ВНИМАНИЕ!!!⚠️\n" +
+			"Восстановление базы данных может привести к потере несохранённых данных.\n" +
+			"Перед восстановлением рекомендуется сделать «💾 Бэкап БД».\n\n" +
+			"Вы уверены, что хотите восстановить?"
+		kb := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("✅ ДА", "restore_confirm_latest"),
+				tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "restore_cancel"),
+			),
+		)
+		msg := tgbotapi.NewMessage(chatID, warn)
+		msg.ReplyMarkup = kb
+		_, _ = tg.Send(bot, msg)
+		return
+
+	case "restore_confirm_latest":
+		// запускаем восстановление как и раньше
+		HandleAdminRestoreLatest(ctx, bot, database, chatID)
+		return
+	}
+
 	if cb.Data == "restore_cancel" {
 		delete(restoreWaiting, chatID)
 

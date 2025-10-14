@@ -40,5 +40,12 @@ func TriggerBackup(ctx context.Context) (string, error) {
 }
 
 func RestoreLatest(ctx context.Context) (string, error) {
-	return do(ctx, "/cgi-bin/restore-latest", 5*time.Minute)
+	s, err := do(ctx, "/cgi-bin/restore-latest", 5*time.Minute)
+	if err != nil {
+		return "", err
+	}
+	if strings.EqualFold(strings.TrimSpace(s), "no backups") {
+		return "", fmt.Errorf("no backups")
+	}
+	return s, nil
 }
