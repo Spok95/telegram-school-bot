@@ -159,7 +159,7 @@ func TryHandleTeacherSlotsCallback(ctx context.Context, bot *tgbotapi.BotAPI, da
 			kb := tgbotapi.NewInlineKeyboardMarkup(
 				kbRow(tgbotapi.NewInlineKeyboardButtonData("Назад", "t_slots:back:2"), tgbotapi.NewInlineKeyboardButtonData("Отмена", "t_slots:cancel")),
 			)
-			upsertStepMsg(bot, chatID, st, "Шаг 3/5. Введите шаг в минутах (например, 20)", &kb)
+			upsertStepMsg(bot, chatID, st, "Шаг 3/5. Введите шаг в минутах, необходимый на одну консультацию (например, 15)", &kb)
 			return true
 		case 4:
 			// вернуться к выбору номера
@@ -201,7 +201,7 @@ func TryHandleTeacherSlotsCallback(ctx context.Context, bot *tgbotapi.BotAPI, da
 			clearTeacherFSM(chatID)
 			return true
 		}
-		nextStepBelowInput(bot, chatID, st, fmt.Sprintf("Готово. Создано слотов: %d (дубли проигнорированы).", inserted), nil)
+		nextStepBelowInput(bot, chatID, st, fmt.Sprintf("Готово. Создано слотов: %d.", inserted), nil)
 		clearTeacherFSM(chatID)
 		return true
 	}
@@ -231,7 +231,7 @@ func TryHandleTeacherSlotsText(ctx context.Context, bot *tgbotapi.BotAPI, databa
 		kb := tgbotapi.NewInlineKeyboardMarkup(
 			kbRow(tgbotapi.NewInlineKeyboardButtonData("Назад", "t_slots:back:2"), tgbotapi.NewInlineKeyboardButtonData("Отмена", "t_slots:cancel")),
 		)
-		nextStepBelowInput(bot, msg.Chat.ID, st, "Шаг 3/5. Введите шаг в минутах (например, 20)", &kb)
+		nextStepBelowInput(bot, msg.Chat.ID, st, "Шаг 3/5. Введите шаг в минутах, необходимый на одну консультацию (например, 15)", &kb)
 		return true
 
 	case 3:
