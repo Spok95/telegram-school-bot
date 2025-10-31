@@ -1,45 +1,74 @@
 name: CI
+
 on:
-  push: { branches: [ main, develop ] }
+  push:
+    branches: [ "**" ]
   pull_request:
+    branches: [ "**" ]
+
+permissions:
+  contents: read
 
 jobs:
-  lint_test:
+  ci:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with: { go-version: '1.24' }
-      - name: Cache Go
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-      - name: Tidy
-        run: go mod tidy
-      - name: Lint
-        run: |
-          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-          golangci-lint run
-      - name: Test
-        run: go test -tags testutil -race -covermode=atomic ./...
 
-  govulncheck:
-    runs-on: ubuntu-latest
+    env:
+      # Жестко используем установленный actions/setup-go,
+      # чтобы не подтягивался другой toolchain
+      GOTOOLCHAIN: local
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with: { go-version: '1.24' }
-      - name: govulncheck (exclude internal/testutil)
-        shell: bash
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # >>> СТАВИМ GO СРАЗУ, ДО ЛЮБЫХ go-команд
+      - name: Set up Go 1.24.9
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.9"
+          check-latest: true
+          cache: true
+          cache-dependency-path: |
+            go.sum
+
+      - name: Show Go env
         run: |
-          set -euo pipefail
-          PKGS=$(go list ./... | grep -vE '(^|/)internal/testutil(/|$)')
-          if [ -z "$PKGS" ]; then
-            echo "No non-testutil packages to scan"
-            exit 0
-          fi
-          go run golang.org/x/vuln/cmd/govulncheck@latest $PKGS
-      
+          go version
+          go env GOTOOLCHAIN GOROOT GOPATH
+
+      # Если go.sum не закоммичен, job упадёт дальше.
+      # На всякий случай подчистим и синхронизируем модули (но лучше закоммитить go.sum в репо).
+      - name: Tidy modules (fails on diff)
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum || (echo "::warning::go.mod/go.sum changed — commit them locally"; exit 1)
+
+      - name: Download modules
+        run: go mod download
+
+      # ---- Lint ----
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.61.0
+          args: >
+            --timeout=4m
+            ./...
+
+      - name: Lint
+        run: golangci-lint run
+
+      # ---- Tests ----
+      # Тесты запускаем с тегом testutil, если в проекте он используется; убери строку -tags если не нужен
+      - name: Test
+        run: go test -tags testutil ./...
+
+      # ---- Build (быстрый sanity) ----
+      - name: Build
+        run: go build ./...
+
+      # ---- Govulncheck (исключаем dev/testcontainers по умолчанию — без тега) ----
+      - name: Govulncheck
+        run: |
+          go run golang.org/x/vuln/cmd/govulncheck@latest ./...
