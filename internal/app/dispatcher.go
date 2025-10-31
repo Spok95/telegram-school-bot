@@ -462,6 +462,7 @@ func HandleCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB,
 		strings.HasPrefix(data, "add_score_") ||
 		strings.HasPrefix(data, "add_score_student_") ||
 		strings.HasPrefix(data, "add_confirm:") ||
+		data == "add_comment" ||
 		data == "add_students_done" ||
 		data == "add_select_all_students" ||
 		data == "add_back" ||
