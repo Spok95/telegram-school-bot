@@ -98,7 +98,7 @@ func HandleMyScore(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 		log.Println("ошибка при получении истории:", err)
 	} else {
 		if len(history) > 0 {
-			text += "\n\n📖 История:\n"
+			text += "\n\n📖 История начислений:\n"
 			count := 0
 			for _, s := range history {
 				if s.Status != "approved" {
@@ -126,7 +126,7 @@ func HandleMyScore(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 				}
 			}
 		} else {
-			text += "\n\n📖 История: пусто"
+			text += "\n\n📖 История начислений: пусто"
 		}
 	}
 
@@ -231,7 +231,7 @@ func ShowStudentRating(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.
 
 	history, err := db.GetScoresByStudentAndDateRange(ctx, database, studentID, from, to)
 	if err == nil && len(history) > 0 {
-		text += "\n\n📖 История:\n"
+		text += "\n\n📖 История начислений:\n"
 		count := 0
 		for _, s := range history {
 			if s.Status != "approved" {
@@ -257,7 +257,7 @@ func ShowStudentRating(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.
 			}
 		}
 	} else {
-		text += "\n\n📖 История: пусто"
+		text += "\n\n📖 История начислений: пусто"
 	}
 
 	if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, text)); err != nil {
