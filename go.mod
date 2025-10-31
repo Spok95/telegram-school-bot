@@ -1,6 +1,7 @@
 module github.com/Spok95/telegram-school-bot
 
 go 1.24.4
+toolchain go1.24.9
 
 require (
 	github.com/getsentry/sentry-go v0.28.1

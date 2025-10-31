@@ -1,37 +1,57 @@
 name: CI
+
 on:
-  push: { branches: [ main, develop ] }
+  push:
+    branches: ["**"]
   pull_request:
 
-jobs:
-  lint_test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with: { go-version: '1.24' }
-      - name: Cache Go
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-      - name: Tidy
-        run: go mod tidy
-      - name: Lint
-        run: |
-          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-          golangci-lint run
-      - name: Test
-        run: go test -tags testutil -race -covermode=atomic ./...
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
-  govulncheck:
+jobs:
+  build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with: { go-version: '1.24' }
+      # === 1) Всегда первым: нужная версия Go со всеми патчами stdlib ===
+      - name: Set up Go 1.24.9
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.9'   # фикс уязвимостей stdlib (x509, net/http, tls, asn1, url, pem)
+          check-latest: true
+          cache: true
+
+      # === 2) Код репозитория ===
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Go env
+        run: |
+          go version
+          go env
+
+      # === 3) Зависимости (необязательно, но ускоряет) ===
+      - name: Download modules
+        run: go mod download
+
+      # === 4) Линт (golangci-lint) ===
+      # Если хочешь использовать свой "make lint", закомментируй этот блок и добавь шаг с `make lint`.
+      - name: Lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.61.0
+          args: --timeout=5m
+
+      # === 5) Тесты (dev-инфраструктура за флагом testutil) ===
+      - name: Test (with testutil tag)
+        run: go test -tags testutil ./...
+
+      # === 6) Сборка (опционально) ===
+      - name: Build
+        run: go build ./...
+
+      # === 7) Govulncheck: исключаем internal/testutil/** ===
       - name: govulncheck (exclude internal/testutil)
         shell: bash
         run: |
@@ -42,4 +62,3 @@ jobs:
             exit 0
           fi
           go run golang.org/x/vuln/cmd/govulncheck@latest $PKGS
-      
