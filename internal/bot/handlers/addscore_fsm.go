@@ -18,14 +18,19 @@ import (
 )
 
 type AddFSMState struct {
-	Step               int
-	ClassNumber        int64
-	ClassLetter        string
-	SelectedStudentIDs []int64
-	CategoryID         int
-	LevelID            int
-	Comment            string
-	RequestID          string
+	Step                 int
+	ClassNumber          int64
+	ClassLetter          string
+	SelectedStudentIDs   []int64
+	CategoryID           int
+	LevelID              int
+	Comment              string
+	RequestID            string
+	CategoryName         string
+	LevelLabel           string
+	LevelValue           int
+	SelectedStudentNames []string
+	MessageID            int
 }
 
 var addStates = make(map[int64]*AddFSMState)
@@ -205,6 +210,14 @@ func HandleAddScoreCallback(ctx context.Context, bot *tgbotapi.BotAPI, database 
 		return
 	}
 
+	// Ввод комментария (опционально)
+	if data == "add_comment" {
+		state.Step = 7
+		rows := [][]tgbotapi.InlineKeyboardButton{addBackCancelRow()}
+		addEditMenu(bot, chatID, cq.Message.MessageID, "Введите комментарий (необязательно):", rows)
+		return
+	}
+
 	// ⬅ Назад
 	if data == "add_back" {
 		switch state.Step {
@@ -262,7 +275,7 @@ func HandleAddScoreCallback(ctx context.Context, bot *tgbotapi.BotAPI, database 
 			buttons = append(buttons, addBackCancelRow())
 			addEditMenu(bot, chatID, cq.Message.MessageID, "Выберите категорию:", buttons)
 			return
-		case 6: // ввод комментария → назад к уровню
+		case 6: // карточка подтверждения → назад к выбору уровня
 			state.Step = 5
 			levels, _ := db.GetLevelsByCategoryIDFull(ctx, database, int64(state.CategoryID), false)
 			var buttons [][]tgbotapi.InlineKeyboardButton
@@ -275,6 +288,10 @@ func HandleAddScoreCallback(ctx context.Context, bot *tgbotapi.BotAPI, database 
 			}
 			buttons = append(buttons, addBackCancelRow())
 			addEditMenu(bot, chatID, cq.Message.MessageID, "Выберите уровень:", buttons)
+			return
+		case 7: // ввод комментария → назад к карточке подтверждения
+			state.Step = 6
+			renderAddConfirm(bot, chatID, cq.Message.MessageID, state)
 			return
 		default:
 			delete(addStates, chatID)
@@ -442,11 +459,12 @@ func HandleAddScoreCallback(ctx context.Context, bot *tgbotapi.BotAPI, database 
 		state.LevelID = lvlID
 		state.Step = 6
 
-		// === Новый шаг: карточка подтверждения (без текстового комментария) ===
+		// === Карточка подтверждения (теперь с опциональным комментарием) ===
 
 		// уровень
 		level, _ := db.GetLevelByID(ctx, database, state.LevelID)
-		points := level.Value
+		state.LevelLabel = level.Label
+		state.LevelValue = level.Value
 
 		// имя категории (без отдельного метода — через общий список)
 		catName := fmt.Sprintf("Категория #%d", state.CategoryID)
@@ -458,6 +476,7 @@ func HandleAddScoreCallback(ctx context.Context, bot *tgbotapi.BotAPI, database 
 				}
 			}
 		}
+		state.CategoryName = catName
 
 		period, err := db.GetActivePeriod(ctx, database)
 		if err != nil || period == nil {
@@ -479,20 +498,13 @@ func HandleAddScoreCallback(ctx context.Context, bot *tgbotapi.BotAPI, database 
 				names = append(names, u.Name)
 			}
 		}
+		state.SelectedStudentNames = names
 
 		state.RequestID = fmt.Sprintf("%d_%d", chatID, time.Now().UnixNano())
+		state.MessageID = cq.Message.MessageID
 
-		text := fmt.Sprintf(
-			"Подтверждение начисления\n\nКласс: %d%s\nКатегория: %s\nКоличество баллов: %d\nУченики:\n• %s\n\nПодтвердить начисление?",
-			state.ClassNumber, state.ClassLetter, catName, points, strings.Join(names, "\n• "),
-		)
-		rows := [][]tgbotapi.InlineKeyboardButton{
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("✅ Да", "add_confirm:"+state.RequestID),
-			),
-			addBackCancelRow(),
-		}
-		addEditMenu(bot, chatID, cq.Message.MessageID, text, rows)
+		// рендер карточки подтверждения
+		renderAddConfirm(bot, chatID, cq.Message.MessageID, state)
 		return
 	}
 }
@@ -511,6 +523,31 @@ func HandleAddScoreText(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgbotapi
 		return
 	}
 
+	if state.Step == 7 {
+		// ввод опционального комментария
+		if fsmutil.IsCancelText(msg.Text) {
+			delete(addStates, chatID)
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Начисление отменено.")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
+			return
+		}
+		trimmed := strings.TrimSpace(msg.Text)
+		state.Comment = trimmed // пусто — значит без комментария
+		state.Step = 6
+		// перерисуем карточку подтверждения, показывая (если есть) комментарий
+		// если MessageID потерян, безопасно проигнорируем (но мы его ставим при карточке)
+		mid := state.MessageID
+		if mid == 0 {
+			mid = msg.MessageID
+		}
+		renderAddConfirm(bot, chatID, mid, state)
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Нажмите «✅ Да» или используйте «Назад/Отмена» ниже.")); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
+		return
+	}
+
 	if state.Step == 6 {
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Нажмите «✅ Да» или используйте «Назад/Отмена» ниже.")); err != nil {
 			metrics.HandlerErrors.Inc()
@@ -523,4 +560,30 @@ func HandleAddScoreText(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgbotapi
 // GetAddScoreState доступ из main.go
 func GetAddScoreState(chatID int64) *AddFSMState {
 	return addStates[chatID]
+}
+
+// renderAddConfirm — единый рендер карточки подтверждения начисления.
+// Использует только состояние (без доступа к БД).
+func renderAddConfirm(bot *tgbotapi.BotAPI, chatID int64, messageID int, state *AddFSMState) {
+	text := fmt.Sprintf(
+		"Подтвердите начисление баллов:\n\nКласс: %d%s\nУченики: %s\nКатегория: %s\nУровень: %s (%d)\nБаллы: %d",
+		state.ClassNumber, state.ClassLetter, strings.Join(state.SelectedStudentNames, ", "),
+		state.CategoryName, state.LevelLabel, state.LevelValue, state.LevelValue,
+	)
+	if trim := strings.TrimSpace(state.Comment); trim != "" {
+		text += "\nКомментарий: " + trim
+	}
+	rows := [][]tgbotapi.InlineKeyboardButton{
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("✏️ Комментарий", "add_comment"),
+			tgbotapi.NewInlineKeyboardButtonData("✅ Да", "add_confirm:"+state.RequestID),
+		),
+	}
+	rows = append(rows, addBackCancelRow())
+	markup := tgbotapi.NewInlineKeyboardMarkup(rows...)
+	edit := tgbotapi.NewEditMessageText(chatID, messageID, text)
+	edit.ReplyMarkup = &markup
+	if _, err := tg.Send(bot, edit); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
 }
