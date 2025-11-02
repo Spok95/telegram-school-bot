@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -95,13 +94,13 @@ func TryHandleParentFlowCallbacks(ctx context.Context, bot *tgbotapi.BotAPI, dat
 		var teachers []db.TeacherLite
 		loc := time.Local
 		from := time.Now().In(loc).Truncate(24 * time.Hour)
-		to := from.AddDate(0, 0, 7)
+		to := from.AddDate(0, 0, 14) // две недели
 		if ch.ClassID != nil {
-			// существующий DAO по class_id — но в явном диапазоне
 			teachers, err = db.ListTeachersWithSlotsByClassRange(ctx, database, *ch.ClassID, from, to, 50)
 		} else {
-			teachers, err = db.ListTeachersWithSlotsByClassNLRange(ctx, database, *ch.ClassNumber, *ch.ClassLetter, from, to, 50)
+			teachers, err = db.ListTeachersWithSlotsByClassNLRange(ctx, database, int(*ch.ClassNumber), *ch.ClassLetter, from, to, 50)
 		}
+
 		if err != nil {
 			observability.CaptureErr(err)
 			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Ошибка при получении учителей")); err != nil {
@@ -155,16 +154,26 @@ func TryHandleParentFlowCallbacks(ctx context.Context, bot *tgbotapi.BotAPI, dat
 
 		loc := time.Local
 		today := time.Now().In(loc).Truncate(24 * time.Hour)
-
-		// 7 дат вперёд
-		days := make([]time.Time, 0, 7)
-		for i := 0; i < 7; i++ {
-			days = append(days, today.AddDate(0, 0, i))
+		from := today
+		to := today.AddDate(0, 0, 14)
+		// класс ребёнка
+		var classID int64
+		if ch.ClassID != nil {
+			classID = *ch.ClassID
+		} else if ch.ClassNumber != nil && ch.ClassLetter != nil {
+			if cls, _ := db.GetClassByNumberLetter(ctx, database, int(*ch.ClassNumber), *ch.ClassLetter); cls != nil {
+				classID = cls.ID
+			}
 		}
-		// порядок Пн→Вс
-		sort.SliceStable(days, func(i, j int) bool {
-			return weekdayKey(days[i].Weekday()) < weekdayKey(days[j].Weekday())
-		})
+		days, err := db.ListDaysWithFreeSlotsByTeacherForClass(ctx, database, teacherID, classID, from, to, loc, 30)
+		if err != nil {
+			_ = sendCb(bot, cb, "Ошибка при получении дат")
+			return true
+		}
+		if len(days) == 0 {
+			_ = sendCb(bot, cb, "Свободных дат нет")
+			return true
+		}
 
 		var rows [][]tgbotapi.InlineKeyboardButton
 		for _, d := range days {
@@ -197,8 +206,20 @@ func TryHandleParentFlowCallbacks(ctx context.Context, bot *tgbotapi.BotAPI, dat
 		childID, _ := strconv.ParseInt(parts[2], 10, 64)
 		day, _ := time.Parse("2006-01-02", parts[3])
 
+		// получить classID ребёнка
+		var classID int64
+		if ch, err := db.GetUserByID(ctx, database, childID); err == nil && ch.ID != 0 {
+			if ch.ClassID != nil {
+				classID = *ch.ClassID
+			} else if ch.ClassNumber != nil && ch.ClassLetter != nil {
+				if cls, _ := db.GetClassByNumberLetter(ctx, database, int(*ch.ClassNumber), *ch.ClassLetter); cls != nil {
+					classID = cls.ID
+				}
+			}
+		}
+
 		loc := time.Local
-		free, err := db.ListFreeSlotsByTeacherOnDate(ctx, database, teacherID, day, loc, 50)
+		free, err := db.ListFreeSlotsByTeacherOnDateForClass(ctx, database, teacherID, classID, day, loc, 50)
 		if err != nil {
 			observability.CaptureErr(err)
 			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Ошибка слотов")); err != nil {

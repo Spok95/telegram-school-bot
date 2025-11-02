@@ -60,6 +60,7 @@ func administrationMenu() tgbotapi.ReplyKeyboardMarkup {
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("📥 Экспорт отчёта"),
+			tgbotapi.NewKeyboardButton("📈 Отчёт консультаций"),
 		),
 	)
 }
@@ -78,6 +79,7 @@ func adminMenu() tgbotapi.ReplyKeyboardMarkup {
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("📥 Экспорт отчёта"),
 			tgbotapi.NewKeyboardButton("🗂 Справочники"),
+			tgbotapi.NewKeyboardButton("📈 Отчёт консультаций"),
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("📅 Периоды"),
@@ -104,6 +106,7 @@ func parentMenu() tgbotapi.ReplyKeyboardMarkup {
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("📅 Записаться на консультацию"),
+			tgbotapi.NewKeyboardButton("📋 Мои записи"),
 		),
 	)
 }

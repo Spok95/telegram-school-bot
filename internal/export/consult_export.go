@@ -4,214 +4,322 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/Spok95/telegram-school-bot/internal/db"
-	"github.com/Spok95/telegram-school-bot/internal/metrics"
-	"github.com/Spok95/telegram-school-bot/internal/tg"
-
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/xuri/excelize/v2"
 )
 
 // ConsultationsExcelExport — XLSX-отчёт «Расписание консультаций». Один лист на класс. Колонки: Дата | Время | ФИО родителя | ФИО ребёнка.
-func ConsultationsExcelExport(
-	ctx context.Context,
-	bot *tgbotapi.BotAPI,
-	database *sql.DB,
-	teacherID int64,
-	from, to time.Time,
-	loc *time.Location,
-	chatID int64,
-) error {
-	// Список классов, где у учителя есть записи за период (берём только ЗАНЯТЫЕ слоты).
-	classIDs, err := distinctClassIDs(ctx, database, teacherID, from, to)
+func ConsultationsExcelExport(ctx context.Context, database *sql.DB, teacherID int64, from, _ time.Time, loc *time.Location) (string, error) {
+	// НОРМАЛИЗУЕМ ОКНО: с полуночи "from" и до полуночи +14 дней
+	from = time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, loc)
+	to14 := from.AddDate(0, 0, 14) // именно 14 суток вперёд
+
+	// Собираем классы, по которым у учителя есть слоты в окне (без дублей)
+	classRows, err := database.QueryContext(ctx, `
+		SELECT DISTINCT c.id, c.number, c.letter
+		FROM consult_slots s
+		JOIN classes c ON c.id = s.class_id
+		WHERE s.teacher_id = $1
+		  AND s.start_at >= $2
+		  AND s.start_at <  $3
+		UNION
+		SELECT DISTINCT c2.id, c2.number, c2.letter
+		FROM consult_slots s
+		JOIN consult_slot_classes csc ON csc.slot_id = s.id
+		JOIN classes c2 ON c2.id = csc.class_id
+		WHERE s.teacher_id = $1
+		  AND s.start_at >= $2
+		  AND s.start_at <  $3
+		ORDER BY 2, 3
+	`, teacherID, from, to14)
 	if err != nil {
-		log.Printf("[EXPORT] classIDs query failed: %v", err)
-		_, _ = tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Не удалось сформировать отчёт."))
-		return err
+		return "", err
+	}
+	defer func() { _ = classRows.Close() }()
+
+	type cls struct {
+		ID     int64
+		Number int
+		Letter string
+	}
+	var classes []cls
+	for classRows.Next() {
+		var cl cls
+		if err := classRows.Scan(&cl.ID, &cl.Number, &cl.Letter); err != nil {
+			return "", err
+		}
+		classes = append(classes, cl)
+	}
+
+	// Готовим xlsx
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+
+	// Общая функция форматирования листа
+	ensureSheet := func(sheet string) error {
+		idx, err := f.GetSheetIndex(sheet)
+		if err != nil || idx == -1 {
+			if _, err := f.NewSheet(sheet); err != nil {
+				return err
+			}
+		}
+		_ = f.SetCellValue(sheet, "A1", "Дата")
+		_ = f.SetCellValue(sheet, "B1", "Время")
+		_ = f.SetCellValue(sheet, "C1", "ФИО родителя")
+		_ = f.SetCellValue(sheet, "D1", "ФИО ребёнка")
+
+		_, _ = f.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true}})
+		_ = f.AutoFilter(sheet, "A1:D1", nil)
+		_ = f.SetColWidth(sheet, "A", "A", 14)
+		_ = f.SetColWidth(sheet, "B", "B", 14)
+		_ = f.SetColWidth(sheet, "C", "C", 34)
+		_ = f.SetColWidth(sheet, "D", "D", 24)
+		return nil
+	}
+
+	// Для каждого класса — отдельный лист и выборка БЕЗ дублей
+	for _, cl := range classes {
+		sheet := fmt.Sprintf("%d%s — %s—%s",
+			cl.Number, strings.ToUpper(cl.Letter),
+			from.Format("02.01.2006"), to14.Format("02.01.2006"))
+		if err := ensureSheet(sheet); err != nil {
+			return "", err
+		}
+
+		// Ключевой момент:
+		//  - берём слоты учителя в окне
+		//  - оставляем только ЗАНЯТЫЕ
+		//  - и только те, где booked_class_id совпадает с текущим классом
+		//  - ребёнка берём по booked_child_id (строго тот, кто выбран при записи)
+		rows, err := database.QueryContext(ctx, `
+			SELECT 
+				s.start_at, s.end_at,
+				up.name AS parent_name,
+				COALESCE(uc.name, '') AS child_name
+			FROM consult_slots s
+			JOIN users up ON up.id = s.booked_by_id
+			LEFT JOIN users uc ON uc.id = s.booked_child_id
+			WHERE s.teacher_id = $1
+			  AND s.start_at >= $2
+			  AND s.start_at <  $3
+			  AND s.booked_by_id IS NOT NULL
+			  AND s.booked_class_id = $4
+			ORDER BY s.start_at
+		`, teacherID, from, to14, cl.ID)
+		if err != nil {
+			return "", err
+		}
+
+		r := 2
+		for rows.Next() {
+			var start, end time.Time
+			var parentName, childName string
+			if err := rows.Scan(&start, &end, &parentName, &childName); err != nil {
+				_ = rows.Close()
+				return "", err
+			}
+			start = start.In(loc)
+			end = end.In(loc)
+
+			_ = f.SetCellValue(sheet, fmt.Sprintf("A%d", r), start.Format("02.01.2006"))
+			_ = f.SetCellValue(sheet, fmt.Sprintf("B%d", r), fmt.Sprintf("%s–%s", start.Format("15:04"), end.Format("15:04")))
+			_ = f.SetCellValue(sheet, fmt.Sprintf("C%d", r), parentName)
+			_ = f.SetCellValue(sheet, fmt.Sprintf("D%d", r), childName)
+			r++
+		}
+		_ = rows.Close()
+	}
+
+	// Активный лист — первый реальный (если есть)
+	if len(classes) > 0 {
+		first := fmt.Sprintf("%d%s — %s—%s",
+			classes[0].Number, strings.ToUpper(classes[0].Letter),
+			from.Format("02.01.2006"), to14.Format("02.01.2006"))
+		if idx, err := f.GetSheetIndex(first); err == nil && idx >= 0 {
+			f.SetActiveSheet(idx)
+		}
+	}
+
+	// Сохраняем временный файл
+	tmp := filepath.Join(os.TempDir(),
+		fmt.Sprintf("consult_%d_%d.xlsx", teacherID, time.Now().UnixNano()))
+	if err := f.SaveAs(tmp); err != nil {
+		return "", err
+	}
+	return tmp, nil
+}
+
+// ConsultationsExcelExportAdmin — XLSX по всем учителям за период.
+func ConsultationsExcelExportAdmin(
+	ctx context.Context, database *sql.DB,
+	from, _ time.Time, loc *time.Location,
+) (string, error) {
+	to14 := from.AddDate(0, 0, 14)
+
+	type teacherLite struct {
+		ID   int64
+		Name string
+	}
+
+	// Учителя
+	rowsT, err := database.QueryContext(ctx, `
+		SELECT id, name
+		FROM users
+		WHERE role = 'teacher' AND confirmed = TRUE AND is_active = TRUE
+		ORDER BY LOWER(name)
+	`)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = rowsT.Close() }()
+
+	var teachers []teacherLite
+	for rowsT.Next() {
+		var t teacherLite
+		if err := rowsT.Scan(&t.ID, &t.Name); err != nil {
+			return "", err
+		}
+		teachers = append(teachers, t)
+	}
+	if err := rowsT.Err(); err != nil {
+		return "", err
+	}
+	if len(teachers) == 0 {
+		return "", fmt.Errorf("нет учителей")
 	}
 
 	f := excelize.NewFile()
+	_ = f.SetSheetName(f.GetSheetName(0), "Сводка")
+	_ = f.SetCellValue("Сводка", "A1", "Период")
+	_ = f.SetCellValue("Сводка", "B1",
+		fmt.Sprintf("%s — %s", from.In(loc).Format("02.01.2006"), to14.In(loc).Format("02.01.2006")))
+	_ = f.SetColWidth("Сводка", "A", "B", 28)
 
-	// Пусто — формируем аккуратную заглушку.
-	if len(classIDs) == 0 {
-		const sheet = "Итого"
-		_ = f.SetSheetName("Sheet1", sheet)
-		_ = f.SetCellValue(sheet, "A1",
-			fmt.Sprintf("Расписание консультаций (%s — %s)",
-				from.In(loc).Format("02.01.2006"), to.In(loc).Format("02.01.2006")))
-		_ = f.SetCellValue(sheet, "A3", "Данных за период нет")
-		if err := ApplyDefaultExcelFormatting(f, sheet); err != nil {
-			log.Printf("[EXPORT] formatting failed: %v", err)
+	ensureSheet := func(sheet string) error {
+		if idx, err := f.GetSheetIndex(sheet); err != nil || idx == -1 {
+			if _, err := f.NewSheet(sheet); err != nil {
+				return err
+			}
 		}
-		return saveAndSend(bot, f, chatID, "consultations_empty")
+		// Порядок колонок: Дата, Время, Класс, ФИО родителя, ФИО ребёнка
+		_ = f.SetCellValue(sheet, "A1", "Дата")
+		_ = f.SetCellValue(sheet, "B1", "Время")
+		_ = f.SetCellValue(sheet, "C1", "Класс")
+		_ = f.SetCellValue(sheet, "D1", "ФИО родителя")
+		_ = f.SetCellValue(sheet, "E1", "ФИО ребёнка")
+		_ = f.AutoFilter(sheet, "A1:E1", nil)
+		_ = f.SetColWidth(sheet, "A", "A", 14)
+		_ = f.SetColWidth(sheet, "B", "B", 14)
+		_ = f.SetColWidth(sheet, "C", "C", 10)
+		_ = f.SetColWidth(sheet, "D", "D", 34)
+		_ = f.SetColWidth(sheet, "E", "E", 24)
+		return nil
 	}
 
-	// Для каждого класса — отдельный лист.
-	firstRenamed := false
-	for _, cid := range classIDs {
-		cls, _ := db.GetClassByID(ctx, database, cid)
-		sheet := fmt.Sprintf("class_%d", cid)
-		if cls != nil {
-			sheet = fmt.Sprintf("%d%s — %s–%s",
-				cls.Number, strings.ToUpper(cls.Letter),
-				from.In(loc).Format("02.01.2006"), to.In(loc).Format("02.01.2006"))
-		}
+	rowSum := 3
+	firstDataSheetIdx := -1
 
-		// Первый лист у excelize называется "Sheet1" — переименуем его, остальные создаём.
-		if !firstRenamed {
-			_ = f.SetSheetName("Sheet1", sheet)
-			firstRenamed = true
-		} else {
-			_, _ = f.NewSheet(sheet)
-		}
+	for _, t := range teachers {
+		sheet := t.Name
 
-		// Заголовок таблицы (строка 1)
-		headers := []string{"Дата", "Время", "ФИО родителя", "ФИО ребёнка"}
-		for i, h := range headers {
-			cell := fmt.Sprintf("%s1", columnName(i+1))
-			_ = f.SetCellValue(sheet, cell, h)
-		}
-
-		// Данные: только занятые слоты этого учителя и класса в периоде.
-		rows, err := loadBookedRows(ctx, database, teacherID, cid, from, to, loc)
+		// Данные по учителю: только реальные брони и конкретный ребёнок/класс
+		rows, err := database.QueryContext(ctx, `
+			SELECT
+				(s.start_at AT TIME ZONE $3) AS st,
+				(s.end_at   AT TIME ZONE $3) AS et,
+				cls.number, cls.letter,
+				up.name AS parent_name,
+				uc.name AS child_name
+			FROM consult_slots s
+			JOIN classes cls ON cls.id = s.booked_class_id
+			LEFT JOIN users up ON up.id = s.booked_by_id
+			LEFT JOIN users uc ON uc.id = s.booked_child_id
+			WHERE s.teacher_id = $1
+			  AND s.start_at >= $2 AND s.start_at < $4
+			  AND s.booked_by_id   IS NOT NULL
+			  AND s.booked_class_id IS NOT NULL
+			  AND s.booked_child_id IS NOT NULL
+			ORDER BY st ASC, et ASC, cls.number ASC, LOWER(cls.letter) ASC
+		`, t.ID, from, loc.String(), to14)
 		if err != nil {
-			log.Printf("[EXPORT] rows query failed (class_id=%d): %v", cid, err)
+			return "", err
+		}
+
+		type rec struct {
+			Date   string
+			Time   string
+			Class  string
+			Parent string
+			Child  string
+		}
+		var data []rec
+
+		for rows.Next() {
+			var st, et time.Time
+			var num int
+			var letter string
+			var parent, child sql.NullString
+			if err := rows.Scan(&st, &et, &num, &letter, &parent, &child); err != nil {
+				_ = rows.Close()
+				return "", err
+			}
+			if !child.Valid {
+				continue
+			}
+			data = append(data, rec{
+				Date:   st.In(loc).Format("02.01.2006"),
+				Time:   fmt.Sprintf("%s—%s", st.In(loc).Format("15:04"), et.In(loc).Format("15:04")),
+				Class:  fmt.Sprintf("%d%s", num, strings.ToUpper(letter)),
+				Parent: parent.String,
+				Child:  child.String,
+			})
+		}
+		_ = rows.Close()
+
+		if len(data) == 0 {
+			_ = f.SetCellValue("Сводка", fmt.Sprintf("A%d", rowSum), t.Name)
+			_ = f.SetCellValue("Сводка", fmt.Sprintf("B%d", rowSum), "нет записей")
+			rowSum++
 			continue
 		}
-		// Записываем строки
-		row := 2
-		for _, r := range rows {
-			_ = f.SetCellValue(sheet, fmt.Sprintf("A%d", row), r.Date)
-			_ = f.SetCellValue(sheet, fmt.Sprintf("B%d", row), r.TimeRange)
-			_ = f.SetCellValue(sheet, fmt.Sprintf("C%d", row), r.ParentName)
-			_ = f.SetCellValue(sheet, fmt.Sprintf("D%d", row), r.ChildName)
-			row++
+
+		if err := ensureSheet(sheet); err != nil {
+			return "", err
+		}
+		r := 2
+		for _, v := range data {
+			_ = f.SetCellValue(sheet, fmt.Sprintf("A%d", r), v.Date)
+			_ = f.SetCellValue(sheet, fmt.Sprintf("B%d", r), v.Time)
+			_ = f.SetCellValue(sheet, fmt.Sprintf("C%d", r), v.Class)
+			_ = f.SetCellValue(sheet, fmt.Sprintf("D%d", r), v.Parent)
+			_ = f.SetCellValue(sheet, fmt.Sprintf("E%d", r), v.Child)
+			r++
 		}
 
-		if err := ApplyDefaultExcelFormatting(f, sheet); err != nil {
-			log.Printf("[EXPORT] formatting failed on %s: %v", sheet, err)
+		_ = f.SetCellValue("Сводка", fmt.Sprintf("A%d", rowSum), t.Name)
+		_ = f.SetCellFormula("Сводка", fmt.Sprintf("B%d", rowSum),
+			fmt.Sprintf(`HYPERLINK("#'%s'!A1","лист")`, sheet))
+		rowSum++
+
+		if firstDataSheetIdx == -1 {
+			if idx, err := f.GetSheetIndex(sheet); err == nil && idx >= 0 {
+				firstDataSheetIdx = idx
+			}
 		}
 	}
 
-	return saveAndSend(bot, f, chatID, fmt.Sprintf("consult_%d", teacherID))
-}
-
-// --- helpers ---
-
-type consultRow struct {
-	Date       string
-	TimeRange  string
-	ParentName string
-	ChildName  string
-}
-
-// distinctClassIDs все классы, где учитель имеет ЗАНЯТЫЕ слоты в периоде
-func distinctClassIDs(ctx context.Context, dbx *sql.DB, teacherID int64, from, to time.Time) ([]int64, error) {
-	q := `
-		SELECT DISTINCT s.class_id
-		FROM consult_slots s
-		WHERE s.teacher_id = $1
-		  AND s.start_at >= $2 AND s.start_at < $3
-		  AND s.booked_by_id IS NOT NULL
-		ORDER BY 1`
-	rows, err := dbx.QueryContext(ctx, q, teacherID, from, to)
-	if err != nil {
-		return nil, err
+	if firstDataSheetIdx >= 0 {
+		f.SetActiveSheet(firstDataSheetIdx)
 	}
-	defer func() { _ = rows.Close() }()
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
-}
 
-// loadBookedRows строки для конкретного класса
-func loadBookedRows(ctx context.Context, dbx *sql.DB, teacherID, classID int64, from, to time.Time, loc *time.Location) ([]consultRow, error) {
-	// Берём родителя из s.booked_by_id, а ребёнка — того, кто привязан к родителю и учится в этом же классе.
-	q := `
-	SELECT
-		s.start_at, s.end_at,
-		p.name as parent_name,
-		COALESCE(ch.name, '') as child_name
-	FROM consult_slots s
-	JOIN users p ON p.id = s.booked_by_id
-	JOIN classes c ON c.id = s.class_id
-	LEFT JOIN LATERAL (
-		SELECT u.name
-		FROM parents_students ps
-		JOIN users u ON u.id = ps.student_id
-		WHERE ps.parent_id = p.id
-		  AND (
-		      u.class_id = s.class_id
-		      OR (u.class_id IS NULL AND u.class_number = c.number AND UPPER(u.class_letter) = UPPER(c.letter))
-		  )
-		LIMIT 1
-	) ch ON TRUE
-	WHERE s.teacher_id = $1
-	  AND s.class_id = $2
-	  AND s.start_at >= $3 AND s.start_at < $4
-	  AND s.booked_by_id IS NOT NULL
-	ORDER BY s.start_at`
-	rows, err := dbx.QueryContext(ctx, q, teacherID, classID, from, to)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var res []consultRow
-	for rows.Next() {
-		var start, end time.Time
-		var parent, child string
-		if err := rows.Scan(&start, &end, &parent, &child); err != nil {
-			return nil, err
-		}
-		res = append(res, consultRow{
-			Date:       start.In(loc).Format("02.01.2006"),
-			TimeRange:  fmt.Sprintf("%s–%s", start.In(loc).Format("15:04"), end.In(loc).Format("15:04")),
-			ParentName: parent,
-			ChildName:  child,
-		})
-	}
-	return res, rows.Err()
-}
-
-// saveAndSend сохранить и отправить документ
-func saveAndSend(bot *tgbotapi.BotAPI, f *excelize.File, chatID int64, base string) error {
-	ts := time.Now().Unix()
-	filename := fmt.Sprintf("%s_%d.xlsx", base, ts)
-	path := filepath.Join(os.TempDir(), filename)
+	path := filepath.Join(os.TempDir(),
+		fmt.Sprintf("consultations_admin_%s.xlsx", time.Now().Format("20060102150405")))
 	if err := f.SaveAs(path); err != nil {
-		log.Printf("[EXPORT] save failed: %v", err)
-		_, _ = tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Не удалось сформировать отчёт."))
-		return err
+		return "", err
 	}
-	doc := tgbotapi.NewDocument(chatID, tgbotapi.FilePath(path))
-	doc.Caption = "📘 Расписание консультаций"
-	_, err := tg.Send(bot, doc)
-	if err != nil {
-		metrics.HandlerErrors.Inc()
-	}
-	return err
-}
-
-// columnName Excel column name (1 -> A, 27 -> AA)
-func columnName(n int) string {
-	s := ""
-	for n > 0 {
-		n--
-		s = string(rune('A'+(n%26))) + s
-		n /= 26
-	}
-	return s
+	return path, nil
 }

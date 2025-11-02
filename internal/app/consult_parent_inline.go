@@ -123,34 +123,30 @@ func TryHandleParentBookCallback(ctx context.Context, bot *tgbotapi.BotAPI, data
 		return true
 	}
 
-	// валидируем доступ к слоту:
-	// 1) если class_id совпал — ок
-	// 2) иначе сверяем по номеру/букве ребёнка
-	valid := false
-	if child.ClassID != nil && *child.ClassID == slot.ClassID {
-		valid = true
-	} else if child.ClassNumber != nil && child.ClassLetter != nil {
-		if cls, _ := db.GetClassByID(ctx, database, slot.ClassID); cls != nil {
-			if int64(cls.Number) == *child.ClassNumber && strings.EqualFold(cls.Letter, *child.ClassLetter) {
-				valid = true
-			}
-		}
+	// валидируем доступ к слоту по consult_slots.class_id ИЛИ consult_slot_classes
+	if child.ClassID == nil {
+		_ = sendCb(bot, cb, "У ребёнка не указан класс")
+		return true
 	}
-	if !valid {
-		if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Неверный класс")); err != nil {
-			metrics.HandlerErrors.Inc()
-		}
+	allowed, err := db.SlotHasClass(ctx, database, slot.ID, *child.ClassID)
+	if err != nil {
+		observability.CaptureErr(err)
+		_ = sendCb(bot, cb, "Ошибка проверки класса")
+		return true
+	}
+	if !allowed {
+		_ = sendCb(bot, cb, "Слот недоступен для этого класса")
 		return true
 	}
 
-	ok, err := db.TryBookSlot(ctx, database, slotID, u.ID)
+	ok, err := db.TryBookSlotWithChild(ctx, database, slot.ID, u.ID, child.ID, *child.ClassID)
 	if err != nil {
 		observability.CaptureErr(err)
-		_ = sendCb(bot, cb, "Ошибка брони")
+		_ = sendCb(bot, cb, "Ошибка бронирования")
 		return true
 	}
 	if !ok {
-		_ = sendCb(bot, cb, "Уже занято")
+		_ = sendCb(bot, cb, "Это время уже занято")
 		return true
 	}
 
@@ -166,6 +162,78 @@ func TryHandleParentBookCallback(ctx context.Context, bot *tgbotapi.BotAPI, data
 	if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Готово")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
+	return true
+}
+
+// TryHandleParentMyConsultsCallback показывает список будущих записей родителя
+func TryHandleParentMyConsultsCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) bool {
+	if cb == nil || cb.Data == "" || cb.Data != "p_my_consults" {
+		return false
+	}
+	chatID := cb.Message.Chat.ID
+	u, err := db.GetUserByTelegramID(ctx, database, chatID)
+	if err != nil || u == nil || u.Role == nil || *u.Role != models.Parent {
+		_ = sendCb(bot, cb, "Только для родителей")
+		return true
+	}
+	from := time.Now().Add(-time.Hour)
+	items, err := db.ListParentBookings(ctx, database, u.ID, from, 50)
+	if err != nil {
+		_ = sendCb(bot, cb, "Ошибка списка")
+		return true
+	}
+	if len(items) == 0 {
+		edit := tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "Записей не найдено.")
+		if _, err := tg.Send(bot, edit); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
+		return true
+	}
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, it := range items {
+		label := it.StartAt.In(time.Local).Format("02.01 15:04") + " — " + it.Teacher
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("❌ Отменить: "+label, fmt.Sprintf("p_cancel:%d", it.SlotID)),
+		))
+	}
+	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("Закрыть", "p_flow:cancel"),
+	))
+	kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
+	edit := tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "Ваши записи:")
+	edit.ReplyMarkup = &kb
+	if _, err := tg.Send(bot, edit); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
+	return true
+}
+
+// TryHandleParentCancelCallback отмена своей записи
+func TryHandleParentCancelCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) bool {
+	if cb == nil || cb.Data == "" || !strings.HasPrefix(cb.Data, "p_cancel:") {
+		return false
+	}
+	slotID, _ := strconv.ParseInt(strings.TrimPrefix(cb.Data, "p_cancel:"), 10, 64)
+	chatID := cb.Message.Chat.ID
+	u, err := db.GetUserByTelegramID(ctx, database, chatID)
+	if err != nil || u == nil || u.Role == nil || *u.Role != models.Parent {
+		_ = sendCb(bot, cb, "Только для родителей")
+		return true
+	}
+	ok, err := db.ParentCancelBookedSlot(ctx, database, u.ID, slotID, "Отмена родителем")
+	if err != nil {
+		_ = sendCb(bot, cb, "Ошибка отмены")
+		return true
+	}
+	if !ok {
+		_ = sendCb(bot, cb, "Не удалось отменить (возможно, уже отменено)")
+		return true
+	}
+	// уведомления: карточки тому, кого это касается (широковещалку мы убрали в notifications)
+	if slot, _ := db.GetSlotByID(ctx, database, slotID); slot != nil {
+		_ = SendConsultCancelCards(ctx, bot, database, u.ID, *slot, time.Local)
+	}
+	_ = sendCb(bot, cb, "Отменено")
 	return true
 }
 

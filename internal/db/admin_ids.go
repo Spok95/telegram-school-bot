@@ -34,13 +34,3 @@ func IsAdminID(chatID int64) bool {
 	_, ok := EnvAdminIDs()[chatID]
 	return ok
 }
-
-// AdminIDsSlice — удобно для рассылки всем админам.
-func AdminIDsSlice() []int64 {
-	m := EnvAdminIDs()
-	ids := make([]int64, 0, len(m))
-	for id := range m {
-		ids = append(ids, id)
-	}
-	return ids
-}

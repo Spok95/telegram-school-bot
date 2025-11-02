@@ -26,7 +26,7 @@ func isSystemErr(err error) bool {
 }
 
 func Send(bot *tgbotapi.BotAPI, msg tgbotapi.Chattable) (tgbotapi.Message, error) {
-	m, err := bot.Send(msg) // ВАЖНО: здесь НУЖЕН ПРЯМОЙ вызов bot.Send
+	m, err := bot.Send(msg)
 	if isSystemErr(err) {
 		observability.CaptureErr(err)
 	}
@@ -34,7 +34,7 @@ func Send(bot *tgbotapi.BotAPI, msg tgbotapi.Chattable) (tgbotapi.Message, error
 }
 
 func Request(bot *tgbotapi.BotAPI, req tgbotapi.Chattable) (*tgbotapi.APIResponse, error) {
-	r, err := bot.Request(req) // ВАЖНО: здесь НУЖЕН ПРЯМОЙ вызов bot.Request
+	r, err := bot.Request(req)
 	if isSystemErr(err) {
 		observability.CaptureErr(err)
 	}

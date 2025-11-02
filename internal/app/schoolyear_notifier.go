@@ -40,7 +40,7 @@ func RunSchoolYearNotifier(ctx context.Context, bot *tgbotapi.BotAPI, database *
 		var firstErr error
 		for _, chatID := range ids {
 			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, text)); err != nil && firstErr == nil {
-				firstErr = err // tg.Send уже шлёт системные ошибки в Sentry; тут вернём для job_errors
+				firstErr = err
 			}
 		}
 
