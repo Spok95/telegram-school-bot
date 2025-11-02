@@ -75,7 +75,7 @@ func parentEditMenu(bot *tgbotapi.BotAPI, chatID int64, messageID int, text stri
 	}
 }
 
-func StartParentRegistration(ctx context.Context, chatID int64, user *tgbotapi.User, bot *tgbotapi.BotAPI) {
+func StartParentRegistration(ctx context.Context, chatID int64, _ *tgbotapi.User, bot *tgbotapi.BotAPI) {
 	select {
 	case <-ctx.Done():
 		return

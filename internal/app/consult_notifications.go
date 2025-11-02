@@ -169,7 +169,7 @@ func SendConsultCancelCards(ctx context.Context, bot *tgbotapi.BotAPI, database 
 	// --- учителю
 	if teacher.TelegramID != 0 {
 		teacherText := fmt.Sprintf(
-			"Вы отменили запись на\n%s — %s\nродитель: %s\nученик: %s\nкласс: %s",
+			"Отменена запись на\n%s — %s\nродитель: %s\nученик: %s\nкласс: %s",
 			start, end, parent.Name, childName, classLabel,
 		)
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(teacher.TelegramID, teacherText)); err != nil {
@@ -185,32 +185,6 @@ func SendConsultCancelCards(ctx context.Context, bot *tgbotapi.BotAPI, database 
 		)
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(parent.TelegramID, parentText)); err != nil {
 			metrics.HandlerErrors.Inc()
-		}
-	}
-
-	// --- широковещалка по классу (освободился слот)
-	_ = BroadcastFreeConsultSlot(ctx, bot, database, slot, classLabel, teacher.Name, loc)
-
-	return nil
-}
-
-// BroadcastFreeConsultSlot — уведомляем всех родителей класса, что появился свободный слот.
-func BroadcastFreeConsultSlot(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, slot db.ConsultSlot, classLabel, teacherName string, loc *time.Location) error {
-	parents, err := db.ListParentsByClassID(ctx, database, slot.ClassID)
-	if err != nil {
-		return err
-	}
-	start := slot.StartAt.In(loc).Format("02.01.2006 15:04")
-	end := slot.EndAt.In(loc).Format("15:04")
-	text := fmt.Sprintf(
-		"🔔 Освободилось место на консультацию\nДата/время: %s — %s\nУчитель: %s\nКласс: %s\nМожно записаться через «Записаться на консультацию».",
-		start, end, teacherName, classLabel,
-	)
-	for _, p := range parents {
-		if p.TelegramID != 0 {
-			if _, err := tg.Send(bot, tgbotapi.NewMessage(p.TelegramID, text)); err != nil {
-				metrics.HandlerErrors.Inc()
-			}
 		}
 	}
 	return nil

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -307,6 +308,53 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 			StartParentConsultFlow(ctx, bot, database, msg)
 			return
 		}
+	case "📋 Мои записи":
+		if user.Role != nil && *user.Role == models.Parent {
+			from := time.Now().Add(-time.Hour) // показываем и «почти сейчас»
+			items, err := db.ListParentBookings(ctx, database, user.ID, from, 50)
+			if err != nil {
+				if _, e := tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Не удалось получить список записей.")); e != nil {
+					metrics.HandlerErrors.Inc()
+				}
+				return
+			}
+
+			if len(items) == 0 {
+				// Пусто — всё равно отдадим кнопку «Обновить список», которая вызывает p_my_consults
+				kb := tgbotapi.NewInlineKeyboardMarkup(
+					tgbotapi.NewInlineKeyboardRow(
+						tgbotapi.NewInlineKeyboardButtonData("🔄 Обновить список", "p_my_consults"),
+					),
+				)
+				m := tgbotapi.NewMessage(chatID, "Записей не найдено.")
+				m.ReplyMarkup = kb
+				if _, e := tg.Send(bot, m); e != nil {
+					metrics.HandlerErrors.Inc()
+				}
+				return
+			}
+
+			// Есть записи — соберём кнопки отмены и «Обновить список»
+			var rows [][]tgbotapi.InlineKeyboardButton
+			for _, it := range items {
+				label := it.StartAt.In(time.Local).Format("02.01 15:04") + " — " + it.Teacher
+				rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("❌ Отменить: "+label, fmt.Sprintf("p_cancel:%d", it.SlotID)),
+				))
+			}
+			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("🔄 Обновить список", "p_my_consults"),
+			))
+			kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
+
+			m := tgbotapi.NewMessage(chatID, "Ваши записи на консультации:")
+			m.ReplyMarkup = kb
+			if _, e := tg.Send(bot, m); e != nil {
+				metrics.HandlerErrors.Inc()
+			}
+			return
+		}
+
 	case "📘 Расписание", "📘 Расписание консультаций", "Расписание", "Расписание консультаций":
 		if user.Role != nil && *user.Role == models.Teacher {
 			loc := time.Local
@@ -316,7 +364,7 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 			go func() {
 				ctxExp, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel()
-				if err := export.ConsultationsExcelExport(ctxExp, bot, database, user.ID, from, to, loc, chatID); err != nil {
+				if _, err := export.ConsultationsExcelExport(ctxExp, database, user.ID, from, to, loc); err != nil {
 					observability.CaptureErr(err)
 					if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Не удалось сформировать отчёт.")); err != nil {
 						metrics.HandlerErrors.Inc()
@@ -325,6 +373,67 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 			}()
 		}
 		return
+	case "📈 Отчёт консультаций":
+		if user.Role != nil && (*user.Role == models.Admin || *user.Role == models.Administration) {
+			loc := time.Local
+			now := time.Now().In(loc)
+			from := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+			to := from.AddDate(0, 0, 14)
+			go func() {
+				ctxExp, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+				defer cancel()
+				path, err := export.ConsultationsExcelExportAdmin(ctxExp, database, from, to, loc)
+				if err != nil {
+					observability.CaptureErr(err)
+					if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Не удалось сформировать отчёт.")); err != nil {
+						metrics.HandlerErrors.Inc()
+					}
+					return
+				}
+				doc := tgbotapi.NewDocument(chatID, tgbotapi.FilePath(path))
+				doc.Caption = "📘 Расписание консультаций (админ)"
+				if _, err := tg.Send(bot, doc); err != nil {
+					metrics.HandlerErrors.Inc()
+				}
+			}()
+			return
+		}
+	case "/consult_report":
+		if user.Role != nil && (*user.Role == models.Admin || *user.Role == models.Administration) {
+			parts := strings.Fields(text)
+			if len(parts) != 3 {
+				if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Неверный формат дат. Ожидается YYYY-MM-DD YYYY-MM-DD")); err != nil {
+					metrics.HandlerErrors.Inc()
+				}
+				return
+			}
+			from, err1 := time.Parse("2006-01-02", parts[1])
+			to, err2 := time.Parse("2006-01-02", parts[2])
+			if err1 != nil || err2 != nil {
+				if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Неверный формат дат. Ожидается YYYY-MM-DD YYYY-MM-DD")); err != nil {
+					metrics.HandlerErrors.Inc()
+				}
+				return
+			}
+			loc := time.Local
+			go func() {
+				ctxExp, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+				defer cancel()
+				path, err := export.ConsultationsExcelExportAdmin(ctxExp, database, from, to, loc)
+				if err != nil {
+					observability.CaptureErr(err)
+					if _, err = tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Не удалось сформировать отчёт.")); err != nil {
+						metrics.HandlerErrors.Inc()
+					}
+				}
+				doc := tgbotapi.NewDocument(chatID, tgbotapi.FilePath(path))
+				doc.Caption = "📘 Расписание консультаций (админ)"
+				if _, err := tg.Send(bot, doc); err != nil {
+					metrics.HandlerErrors.Inc()
+				}
+			}()
+			return
+		}
 
 	default:
 		role := getUserFSMRole(chatID)
@@ -404,6 +513,13 @@ func HandleCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB,
 		return
 	}
 	if TryHandleParentFlowCallbacks(ctx, bot, database, cb) {
+		return
+	}
+	// Родитель: «мои записи» (список) и «отмена записи»
+	if TryHandleParentMyConsultsCallback(ctx, bot, database, cb) {
+		return
+	}
+	if TryHandleParentCancelCallback(ctx, bot, database, cb) {
 		return
 	}
 

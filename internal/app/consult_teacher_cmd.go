@@ -96,7 +96,7 @@ func TryHandleTeacherAddSlots(ctx context.Context, bot *tgbotapi.BotAPI, databas
 		return true
 	}
 
-	reply(bot, chatID, fmt.Sprintf("Готово. Создано слотов: %d (дубликаты проигнорированы).", inserted))
+	reply(bot, chatID, fmt.Sprintf("Готово. Создано слотов: %d.", inserted))
 	return true
 }
 

@@ -63,3 +63,21 @@ func GetClassByID(ctx context.Context, database *sql.DB, id int64) (*Class, erro
 	}
 	return &c, nil
 }
+
+// GetClassByNumberLetter — вернуть класс по номеру и букве (без учёта регистра буквы).
+func GetClassByNumberLetter(ctx context.Context, database *sql.DB, number int, letter string) (*Class, error) {
+	row := database.QueryRowContext(ctx, `
+		SELECT id, number, letter
+		FROM classes
+		WHERE number = $1 AND lower(letter) = lower($2)
+		LIMIT 1
+	`, number, letter)
+	var c Class
+	if err := row.Scan(&c.ID, &c.Number, &c.Letter); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &c, nil
+}

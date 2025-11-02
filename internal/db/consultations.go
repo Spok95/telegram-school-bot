@@ -226,3 +226,244 @@ func CancelBookedSlot(ctx context.Context, database *sql.DB, teacherID, slotID i
 	}
 	return nil, true, nil
 }
+
+// CreateSlotsMultiClasses — создаёт/переиспользует слоты учителя на конкретных стартах
+// и добавляет привязки слотов к нескольким классам (consult_slot_classes).
+func CreateSlotsMultiClasses(ctx context.Context, dbx *sql.DB, teacherID int64, classIDs []int64, starts []time.Time, stepMin int) (int64, error) {
+	if len(classIDs) == 0 || len(starts) == 0 {
+		return 0, nil
+	}
+
+	tx, err := dbx.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	primaryClassID := classIDs[0]
+	var processed int64
+
+	for _, st := range starts {
+		end := st.Add(time.Duration(stepMin) * time.Minute)
+
+		// 1) пытаемся вставить слот: если уже есть такой (teacher_id, start_at) — не падаем
+		var slotID int64
+		err = tx.QueryRowContext(ctx, `
+			INSERT INTO consult_slots (teacher_id, class_id, start_at, end_at)
+			VALUES ($1, $2, $3, $4)
+			ON CONFLICT (teacher_id, start_at) DO NOTHING
+			RETURNING id
+		`, teacherID, primaryClassID, st, end).Scan(&slotID)
+
+		if err == sql.ErrNoRows {
+			// слот уже существовал — возьмём его id
+			err = tx.QueryRowContext(ctx, `
+				SELECT id FROM consult_slots
+				WHERE teacher_id = $1 AND start_at = $2
+				LIMIT 1
+			`, teacherID, st).Scan(&slotID)
+		}
+		if err != nil {
+			return 0, err
+		}
+
+		// 2) привязываем слот ко всем выбранным классам (включая primary)
+		for _, cid := range classIDs {
+			if _, err := tx.ExecContext(ctx, `
+				INSERT INTO consult_slot_classes (slot_id, class_id)
+				VALUES ($1, $2)
+				ON CONFLICT DO NOTHING
+			`, slotID, cid); err != nil {
+				return 0, err
+			}
+		}
+
+		processed++
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return processed, nil
+}
+
+// ListDaysWithFreeSlotsByTeacherForClass — даты (YYYY-MM-DD) cо свободными слотами для данного учителя и класса в интервале.
+func ListDaysWithFreeSlotsByTeacherForClass(ctx context.Context, database *sql.DB, teacherID, classID int64, from, to time.Time, loc *time.Location, limit int) ([]time.Time, error) {
+	rows, err := database.QueryContext(ctx, `
+	    SELECT DISTINCT
+	        (s.start_at AT TIME ZONE 'UTC' AT TIME ZONE $5)::date AS day_local
+	    FROM consult_slots s
+	    WHERE s.booked_by_id IS NULL
+	      AND s.teacher_id = $1
+	      AND s.start_at >= $2 AND s.start_at < $3
+	      AND (
+	            s.class_id = $4
+	         OR EXISTS (
+	              SELECT 1
+	              FROM consult_slot_classes csc
+	              WHERE csc.slot_id = s.id AND csc.class_id = $4
+	         )
+	      )
+	    ORDER BY day_local
+	    LIMIT $6
+	`, teacherID, from.UTC(), to.UTC(), classID, loc.String(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []time.Time
+	for rows.Next() {
+		var d time.Time
+		if err := rows.Scan(&d); err != nil {
+			return nil, err
+		}
+		// d уже «дата без времени», оставляем как есть
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// ListFreeSlotsByTeacherOnDateForClass — свободные слоты на конкретную дату (с учётом consult_slot_classes).
+func ListFreeSlotsByTeacherOnDateForClass(ctx context.Context, database *sql.DB, teacherID, classID int64, day time.Time, loc *time.Location, limit int) ([]ConsultSlot, error) {
+	startLocal := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
+	endLocal := startLocal.Add(24 * time.Hour)
+	from := startLocal.UTC()
+	to := endLocal.UTC()
+
+	rows, err := database.QueryContext(ctx, `
+	SELECT s.id, s.teacher_id, s.class_id, s.start_at, s.end_at, s.booked_by_id
+	FROM consult_slots s
+	WHERE s.booked_by_id IS NULL
+	  AND s.teacher_id = $1
+	  AND s.start_at >= $2 AND s.start_at < $3
+	  AND (
+	       s.class_id = $4
+	       OR EXISTS (
+	           SELECT 1 FROM consult_slot_classes csc
+	           WHERE csc.slot_id = s.id AND csc.class_id = $4
+	       )
+	  )
+	ORDER BY s.start_at
+	LIMIT $5
+`, teacherID, from, to, classID, limit)
+
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var res []ConsultSlot
+	for rows.Next() {
+		var s ConsultSlot
+		if err := rows.Scan(&s.ID, &s.TeacherID, &s.ClassID, &s.StartAt, &s.EndAt, &s.BookedByID); err != nil {
+			return nil, err
+		}
+		res = append(res, s)
+	}
+	return res, rows.Err()
+}
+
+// ParentCancelBookedSlot — родитель отменяет свою запись.
+func ParentCancelBookedSlot(ctx context.Context, database *sql.DB, parentID, slotID int64, reason string) (ok bool, err error) {
+	res, err := database.ExecContext(ctx, `
+		UPDATE consult_slots
+		SET booked_by_id = NULL,
+		    booked_at    = NULL,
+		    cancel_reason= $1,
+		    updated_at   = now()
+		WHERE id = $2 AND booked_by_id = $3
+	`, reason, slotID, parentID)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}
+
+type ParentBooking struct {
+	SlotID     int64
+	StartAt    time.Time
+	EndAt      time.Time
+	TeacherID  int64
+	Teacher    string
+	ClassID    int64
+	ClassLabel string
+	ChildName  string
+}
+
+// ListParentBookings — предстоящие записи родителя (на будущее).
+func ListParentBookings(ctx context.Context, database *sql.DB, parentID int64, from time.Time, limit int) ([]ParentBooking, error) {
+	// Берём имя ребёнка через parents_students -> users (как в Excel-экспорте)
+	q := `
+		SELECT s.id, s.start_at, s.end_at,
+		       t.id, t.name,
+		       COALESCE(cls.id, 0),
+		       COALESCE(cls.number::text || cls.letter, ''),
+		       COALESCE(ch.name, '')
+		FROM consult_slots s
+		JOIN users t ON t.id = s.teacher_id
+		LEFT JOIN classes cls ON cls.id = s.class_id
+		LEFT JOIN LATERAL (
+			SELECT u.name
+			FROM parents_students ps
+			JOIN users u ON u.id = ps.student_id
+			WHERE ps.parent_id = s.booked_by_id
+			  AND (
+			     (cls.id IS NOT NULL AND u.class_id = cls.id)
+			     OR (cls.id IS NULL AND u.class_id IS NULL
+			         AND u.class_number IS NOT NULL AND u.class_letter IS NOT NULL
+			         AND cls.id IS NULL) -- fallback не нужен, но оставим структуру на будущее
+			  )
+			LIMIT 1
+		) ch ON TRUE
+		WHERE s.booked_by_id = $1
+		  AND s.start_at >= $2
+		ORDER BY s.start_at
+		LIMIT $3`
+	rows, err := database.QueryContext(ctx, q, parentID, from.UTC(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []ParentBooking
+	for rows.Next() {
+		var r ParentBooking
+		if err := rows.Scan(&r.SlotID, &r.StartAt, &r.EndAt, &r.TeacherID, &r.Teacher, &r.ClassID, &r.ClassLabel, &r.ChildName); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// SlotHasClass — проверяет, разрешён ли слот slotID для указанного classID
+// (или как основной класс слота, или через consult_slot_classes).
+func SlotHasClass(ctx context.Context, database *sql.DB, slotID, classID int64) (bool, error) {
+	var ok bool
+	err := database.QueryRowContext(ctx, `
+		SELECT 
+		  (EXISTS (SELECT 1 FROM consult_slots s WHERE s.id = $1 AND s.class_id = $2))
+		  OR
+		  (EXISTS (SELECT 1 FROM consult_slot_classes csc WHERE csc.slot_id = $1 AND csc.class_id = $2))
+	`, slotID, classID).Scan(&ok)
+	return ok, err
+}
+
+// TryBookSlotWithChild — атомарно бронирует слот и фиксирует, какого ребёнка и класс выбрали.
+// Возвращает true, если удалось (слот был свободен).
+func TryBookSlotWithChild(ctx context.Context, dbx *sql.DB, slotID, parentID, childID, classID int64) (bool, error) {
+	res, err := dbx.ExecContext(ctx, `
+		UPDATE consult_slots
+		SET booked_by_id   = $2,
+		    booked_at      = NOW(),
+		    booked_child_id = $3,
+		    booked_class_id = $4
+		WHERE id = $1
+		  AND booked_by_id IS NULL
+	`, slotID, parentID, childID, classID)
+	if err != nil {
+		return false, err
+	}
+	aff, _ := res.RowsAffected()
+	return aff > 0, nil
+}
