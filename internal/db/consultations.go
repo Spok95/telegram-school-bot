@@ -346,7 +346,6 @@ func ListFreeSlotsByTeacherOnDateForClass(ctx context.Context, database *sql.DB,
 	ORDER BY s.start_at
 	LIMIT $5
 `, teacherID, from, to, classID, limit)
-
 	if err != nil {
 		return nil, err
 	}

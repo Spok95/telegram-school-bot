@@ -158,7 +158,6 @@ func ConsultationsExcelExportAdmin(
 	ctx context.Context, database *sql.DB,
 	from, _ time.Time, loc *time.Location,
 ) (string, error) {
-
 	to14 := from.AddDate(0, 0, 14)
 
 	type teacherLite struct {

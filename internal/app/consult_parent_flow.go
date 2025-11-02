@@ -160,12 +160,9 @@ func TryHandleParentFlowCallbacks(ctx context.Context, bot *tgbotapi.BotAPI, dat
 		var classID int64
 		if ch.ClassID != nil {
 			classID = *ch.ClassID
-		} else {
-			// fallback через номер/букву
-			if ch.ClassNumber != nil && ch.ClassLetter != nil {
-				if cls, _ := db.GetClassByNumberLetter(ctx, database, int(*ch.ClassNumber), *ch.ClassLetter); cls != nil {
-					classID = cls.ID
-				}
+		} else if ch.ClassNumber != nil && ch.ClassLetter != nil {
+			if cls, _ := db.GetClassByNumberLetter(ctx, database, int(*ch.ClassNumber), *ch.ClassLetter); cls != nil {
+				classID = cls.ID
 			}
 		}
 		days, err := db.ListDaysWithFreeSlotsByTeacherForClass(ctx, database, teacherID, classID, from, to, loc, 30)
