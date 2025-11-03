@@ -17,6 +17,7 @@ func ConsultationsExcelExport(ctx context.Context, database *sql.DB, teacherID i
 	// НОРМАЛИЗУЕМ ОКНО: с полуночи "from" и до полуночи +14 дней
 	from = time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, loc)
 	to14 := from.AddDate(0, 0, 14) // именно 14 суток вперёд
+	now := time.Now().In(loc)
 
 	// Собираем классы, по которым у учителя есть слоты в окне (без дублей)
 	classRows, err := database.QueryContext(ctx, `
@@ -95,6 +96,7 @@ func ConsultationsExcelExport(ctx context.Context, database *sql.DB, teacherID i
 		//  - оставляем только ЗАНЯТЫЕ
 		//  - и только те, где booked_class_id совпадает с текущим классом
 		//  - ребёнка берём по booked_child_id (строго тот, кто выбран при записи)
+		// нижнюю границу берём не "from 00:00", а "прямо сейчас"
 		rows, err := database.QueryContext(ctx, `
 			SELECT 
 				s.start_at, s.end_at,
@@ -109,7 +111,7 @@ func ConsultationsExcelExport(ctx context.Context, database *sql.DB, teacherID i
 			  AND s.booked_by_id IS NOT NULL
 			  AND s.booked_class_id = $4
 			ORDER BY s.start_at
-		`, teacherID, from, to14, cl.ID)
+		`, teacherID, now, to14, cl.ID)
 		if err != nil {
 			return "", err
 		}
@@ -222,6 +224,7 @@ func ConsultationsExcelExportAdmin(
 
 	rowSum := 3
 	firstDataSheetIdx := -1
+	now := time.Now().In(loc)
 
 	for _, t := range teachers {
 		sheet := t.Name
@@ -244,7 +247,7 @@ func ConsultationsExcelExportAdmin(
 			  AND s.booked_class_id IS NOT NULL
 			  AND s.booked_child_id IS NOT NULL
 			ORDER BY st ASC, et ASC, cls.number ASC, LOWER(cls.letter) ASC
-		`, t.ID, from, loc.String(), to14)
+		`, t.ID, now, loc.String(), to14)
 		if err != nil {
 			return "", err
 		}

@@ -360,20 +360,31 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 			loc := time.Local
 			now := time.Now().In(loc)
 			from := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
-			to := from.AddDate(0, 0, 7)
+			to := from.AddDate(0, 0, 14) // 14 дней вперёд
+
 			go func() {
-				ctxExp, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				ctxExp, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 				defer cancel()
-				if _, err := export.ConsultationsExcelExport(ctxExp, database, user.ID, from, to, loc); err != nil {
+
+				path, err := export.ConsultationsExcelExport(ctxExp, database, user.ID, from, to, loc)
+				if err != nil {
 					observability.CaptureErr(err)
-					if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Не удалось сформировать отчёт.")); err != nil {
+					if _, e := tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Не удалось сформировать отчёт.")); e != nil {
 						metrics.HandlerErrors.Inc()
 					}
+					return
+				}
+
+				doc := tgbotapi.NewDocument(chatID, tgbotapi.FilePath(path))
+				doc.Caption = "📘 Расписание консультаций"
+				if _, e := tg.Send(bot, doc); e != nil {
+					metrics.HandlerErrors.Inc()
 				}
 			}()
 		}
 		return
-	case "📈 Отчёт консультаций":
+
+	case "📈 Отчёт консультаций", "/consult_report":
 		if user.Role != nil && (*user.Role == models.Admin || *user.Role == models.Administration) {
 			loc := time.Local
 			now := time.Now().In(loc)
@@ -389,42 +400,6 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 						metrics.HandlerErrors.Inc()
 					}
 					return
-				}
-				doc := tgbotapi.NewDocument(chatID, tgbotapi.FilePath(path))
-				doc.Caption = "📘 Расписание консультаций (админ)"
-				if _, err := tg.Send(bot, doc); err != nil {
-					metrics.HandlerErrors.Inc()
-				}
-			}()
-			return
-		}
-	case "/consult_report":
-		if user.Role != nil && (*user.Role == models.Admin || *user.Role == models.Administration) {
-			parts := strings.Fields(text)
-			if len(parts) != 3 {
-				if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Неверный формат дат. Ожидается YYYY-MM-DD YYYY-MM-DD")); err != nil {
-					metrics.HandlerErrors.Inc()
-				}
-				return
-			}
-			from, err1 := time.Parse("2006-01-02", parts[1])
-			to, err2 := time.Parse("2006-01-02", parts[2])
-			if err1 != nil || err2 != nil {
-				if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "Неверный формат дат. Ожидается YYYY-MM-DD YYYY-MM-DD")); err != nil {
-					metrics.HandlerErrors.Inc()
-				}
-				return
-			}
-			loc := time.Local
-			go func() {
-				ctxExp, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-				defer cancel()
-				path, err := export.ConsultationsExcelExportAdmin(ctxExp, database, from, to, loc)
-				if err != nil {
-					observability.CaptureErr(err)
-					if _, err = tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Не удалось сформировать отчёт.")); err != nil {
-						metrics.HandlerErrors.Inc()
-					}
 				}
 				doc := tgbotapi.NewDocument(chatID, tgbotapi.FilePath(path))
 				doc.Caption = "📘 Расписание консультаций (админ)"
