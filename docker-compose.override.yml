@@ -1,0 +1,21 @@
+services:
+  bot:
+    # даём боту ту же папку, что и на сервере
+    volumes:
+      - ./backups:/backups:rw
+    # если хочешь, можешь сразу прописать урл бэкапера
+    environment:
+      - PG_BACKUP_URL=http://pgbackup:8081
+
+  postgres:
+    # чтобы можно было руками забирать бэкапы из контейнера
+    volumes:
+      - ./backups:/backups:rw
+
+  pgbackup:
+    # чтобы локально повторить серверный вариант
+    command: ["sh","-lc","sh /start.sh"]
+    user: "0:0"
+    volumes:
+      - ./backups:/backups:rw
+      - .:/ops:ro

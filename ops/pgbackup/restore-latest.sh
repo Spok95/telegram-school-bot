@@ -1,31 +1,24 @@
-#!/usr/bin/env bash
-set -Eeuo pipefail
+#!/bin/sh
+set -e
 
-: "${PGHOST:=postgres}"
-: "${PGPORT:=5432}"
-: "${PGUSER:=postgres}"
-: "${PGDATABASE:=school}"
-: "${BACKUP_DIR:=/backups}"
+BACKUP_DIR=/backups
+FILE="$BACKUP_DIR/latest.sql.gz"
 
-latest="$BACKUP_DIR/latest.sql.gz"
-if [[ ! -f "$latest" ]]; then
-  echo "no latest.sql.gz in $BACKUP_DIR" >&2
+PGHOST="${PGHOST:-postgres}"
+PGPORT="${PGPORT:-5432}"
+PGUSER="${PGUSER:-school}"
+PGDATABASE="${PGDATABASE:-school}"
+
+if [ ! -f "$FILE" ]; then
+  echo "no latest.sql.gz in $BACKUP_DIR"
   exit 1
 fi
 
-# обнулим public, чтобы не было конфликтов
-psql "host=$PGHOST port=$PGPORT user=$PGUSER dbname=$PGDATABASE" -v ON_ERROR_STOP=1 <<'SQL'
-DO $$
-BEGIN
-  PERFORM 1;
-  EXECUTE 'DROP SCHEMA IF EXISTS public CASCADE';
-  EXECUTE 'CREATE SCHEMA public';
-  EXECUTE 'GRANT ALL ON SCHEMA public TO public';
-EXCEPTION WHEN OTHERS THEN
-  RAISE;
-END $$;
-SQL
+# всё шумное — в /dev/null
+psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" \
+  -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;" >/dev/null 2>&1
 
-# рестор
-zcat "$latest" \
- | psql "host=$PGHOST port=$PGPORT user=$PGUSER dbname=$PGDATABASE" -v ON_ERROR_STOP=1
+gzip -dc "$FILE" | psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" >/dev/null 2>&1
+
+# а это уже попадёт в телеграм
+echo "$FILE"

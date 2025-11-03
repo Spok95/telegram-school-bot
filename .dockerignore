@@ -10,3 +10,4 @@ node_modules/
 vendor/
 *.sqlite3
 data/
+backups/
