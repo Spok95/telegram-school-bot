@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -33,30 +34,6 @@ func addChildBackCancelRow() []tgbotapi.InlineKeyboardButton {
 	return fsmutil.BackCancelRow("add_child_back", "add_child_cancel")
 }
 
-func addChildClassNumberRows() [][]tgbotapi.InlineKeyboardButton {
-	var rows [][]tgbotapi.InlineKeyboardButton
-	for i := 1; i <= 11; i++ {
-		cb := fmt.Sprintf("parent_class_num_%d", i) // оставим префикс parent_* чтобы не плодить новые
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d класс", i), cb),
-		))
-	}
-	rows = append(rows, addChildBackCancelRow())
-	return rows
-}
-
-func addChildClassLetterRows() [][]tgbotapi.InlineKeyboardButton {
-	letters := []string{"А", "Б", "В", "Г", "Д"}
-	var rows [][]tgbotapi.InlineKeyboardButton
-	for _, l := range letters {
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(l, "parent_class_letter_"+l),
-		))
-	}
-	rows = append(rows, addChildBackCancelRow())
-	return rows
-}
-
 func addChildEditMenu(bot *tgbotapi.BotAPI, chatID int64, messageID int, text string, rows [][]tgbotapi.InlineKeyboardButton) {
 	cfg := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
@@ -64,6 +41,57 @@ func addChildEditMenu(bot *tgbotapi.BotAPI, chatID int64, messageID int, text st
 	if _, err := tg.Send(bot, cfg); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
+}
+
+func addChildInlineClassNumbersFromDB(ctx context.Context, database *sql.DB) [][]tgbotapi.InlineKeyboardButton {
+	classes, err := db.ListVisibleClasses(ctx, database)
+	if err != nil || len(classes) == 0 {
+		return [][]tgbotapi.InlineKeyboardButton{
+			addChildBackCancelRow(),
+		}
+	}
+
+	// соберём уникальные номера
+	numsSet := make(map[int]struct{})
+	for _, c := range classes {
+		numsSet[c.Number] = struct{}{}
+	}
+	var nums []int
+	for n := range numsSet {
+		nums = append(nums, n)
+	}
+	sort.Ints(nums)
+
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, n := range nums {
+		cb := fmt.Sprintf("parent_class_num_%d", n)
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d класс", n), cb),
+		))
+	}
+	rows = append(rows, addChildBackCancelRow())
+	return rows
+}
+
+func addChildInlineClassLettersFromDB(ctx context.Context, database *sql.DB, number int) [][]tgbotapi.InlineKeyboardButton {
+	classes, err := db.ListVisibleClasses(ctx, database)
+	if err != nil || len(classes) == 0 {
+		return [][]tgbotapi.InlineKeyboardButton{
+			addChildBackCancelRow(),
+		}
+	}
+
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, c := range classes {
+		if c.Number != number {
+			continue
+		}
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(strings.ToUpper(c.Letter), "parent_class_letter_"+strings.ToUpper(c.Letter)),
+		))
+	}
+	rows = append(rows, addChildBackCancelRow())
+	return rows
 }
 
 // ===== Старт/текстовые шаги =====
@@ -104,8 +132,10 @@ func HandleAddChildText(ctx context.Context, bot *tgbotapi.BotAPI, database *sql
 		addChildData[chatID].StudentName = fio
 		addChildFSM[chatID] = StateAddChildClassNumber
 
+		// тянем только видимые классы
+		rows := addChildInlineClassNumbersFromDB(ctx, database)
 		out := tgbotapi.NewMessage(chatID, "Выберите номер класса ребёнка:")
-		out.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(addChildClassNumberRows()...)
+		out.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
 		if _, err := tg.Send(bot, out); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
@@ -121,8 +151,9 @@ func HandleAddChildText(ctx context.Context, bot *tgbotapi.BotAPI, database *sql
 		addChildData[chatID].ClassNumber = number
 		addChildFSM[chatID] = StateAddChildClassLetter
 		// создадим карточку выбора буквы
+		rows := addChildInlineClassLettersFromDB(ctx, database, number)
 		out := tgbotapi.NewMessage(chatID, "Выберите букву класса:")
-		out.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(addChildClassLetterRows()...)
+		out.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
 		if _, err := tg.Send(bot, out); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
@@ -173,7 +204,7 @@ func HandleAddChildCallback(ctx context.Context, bot *tgbotapi.BotAPI, database 
 			addChildFSM[chatID] = StateAddChildName
 		case StateAddChildClassLetter:
 			addChildFSM[chatID] = StateAddChildClassNumber
-			addChildEditMenu(bot, chatID, messageID, "Выберите номер класса ребёнка:", addChildClassNumberRows())
+			addChildEditMenu(bot, chatID, messageID, "Выберите номер класса ребёнка:", addChildInlineClassNumbersFromDB(ctx, database))
 		case StateAddChildWaiting:
 			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Заявка уже отправлена, ожидайте подтверждения.")); err != nil {
 				metrics.HandlerErrors.Inc()
@@ -198,7 +229,8 @@ func HandleAddChildCallback(ctx context.Context, bot *tgbotapi.BotAPI, database 
 		}
 		addChildData[chatID].ClassNumber = num
 		addChildFSM[chatID] = StateAddChildClassLetter
-		addChildEditMenu(bot, chatID, messageID, "Выберите букву класса:", addChildClassLetterRows())
+		rows := addChildInlineClassLettersFromDB(ctx, database, addChildData[chatID].ClassNumber)
+		addChildEditMenu(bot, chatID, messageID, "Выберите букву класса:", rows)
 		return
 	}
 

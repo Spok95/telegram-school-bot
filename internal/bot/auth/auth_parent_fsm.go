@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -42,24 +43,51 @@ func parentBackCancelRow() []tgbotapi.InlineKeyboardButton {
 	return fsmutil.BackCancelRow("parent_back", "parent_cancel")
 }
 
-func parentClassNumberRows() [][]tgbotapi.InlineKeyboardButton {
+func parentClassNumberRowsFromDB(ctx context.Context, database *sql.DB) [][]tgbotapi.InlineKeyboardButton {
+	classes, err := db.ListVisibleClasses(ctx, database)
+	if err != nil || len(classes) == 0 {
+		return [][]tgbotapi.InlineKeyboardButton{
+			parentBackCancelRow(),
+		}
+	}
+
+	// уникальные номера
+	numsSet := make(map[int]struct{})
+	for _, c := range classes {
+		numsSet[c.Number] = struct{}{}
+	}
+	var nums []int
+	for n := range numsSet {
+		nums = append(nums, n)
+	}
+	sort.Ints(nums)
+
 	var rows [][]tgbotapi.InlineKeyboardButton
-	for i := 1; i <= 11; i++ {
-		cb := fmt.Sprintf("parent_class_num_%d", i)
+	for _, n := range nums {
+		cb := fmt.Sprintf("parent_class_num_%d", n)
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d класс", i), cb),
+			tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d класс", n), cb),
 		))
 	}
 	rows = append(rows, parentBackCancelRow())
 	return rows
 }
 
-func parentClassLetterRows() [][]tgbotapi.InlineKeyboardButton {
-	letters := []string{"А", "Б", "В", "Г", "Д"}
+func parentClassLetterRowsFromDB(ctx context.Context, database *sql.DB, number int) [][]tgbotapi.InlineKeyboardButton {
+	classes, err := db.ListVisibleClasses(ctx, database)
+	if err != nil || len(classes) == 0 {
+		return [][]tgbotapi.InlineKeyboardButton{
+			parentBackCancelRow(),
+		}
+	}
+
 	var rows [][]tgbotapi.InlineKeyboardButton
-	for _, l := range letters {
+	for _, c := range classes {
+		if c.Number != number {
+			continue
+		}
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(l, "parent_class_letter_"+l),
+			tgbotapi.NewInlineKeyboardButtonData(strings.ToUpper(c.Letter), "parent_class_letter_"+strings.ToUpper(c.Letter)),
 		))
 	}
 	rows = append(rows, parentBackCancelRow())
@@ -88,7 +116,7 @@ func StartParentRegistration(ctx context.Context, chatID int64, _ *tgbotapi.User
 	}
 }
 
-func HandleParentFSM(ctx context.Context, chatID int64, msg string, bot *tgbotapi.BotAPI) {
+func HandleParentFSM(ctx context.Context, chatID int64, msg string, bot *tgbotapi.BotAPI, database *sql.DB) {
 	select {
 	case <-ctx.Done():
 		return
@@ -122,11 +150,13 @@ func HandleParentFSM(ctx context.Context, chatID int64, msg string, bot *tgbotap
 		if parentData[chatID] == nil {
 			parentData[chatID] = &ParentRegisterData{}
 		}
-		parentData[chatID].StudentName = msg
 		parentData[chatID].StudentName = db.ToTitleRU(strings.TrimSpace(msg))
 		parentFSM[chatID] = StateParentClassNumber
+
+		rows := parentClassNumberRowsFromDB(ctx, database)
+
 		msgOut := tgbotapi.NewMessage(chatID, "Выберите номер класса ребёнка:")
-		msgOut.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(parentClassNumberRows()...)
+		msgOut.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
 		if _, err := tg.Send(bot, msgOut); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
@@ -163,7 +193,8 @@ func HandleParentCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *s
 			parentFSM[chatID] = StateParentStudentName
 		case StateParentClassLetter:
 			parentFSM[chatID] = StateParentClassNumber
-			parentEditMenu(bot, chatID, cq.Message.MessageID, "Выберите номер класса ребёнка:", parentClassNumberRows())
+			rows := parentClassNumberRowsFromDB(ctx, database)
+			parentEditMenu(bot, chatID, cq.Message.MessageID, "Выберите номер класса ребёнка:", rows)
 		case StateParentWaiting:
 			if _, err := tg.Request(bot, tgbotapi.NewCallback(cq.ID, "Заявка уже отправлена, ожидайте подтверждения.")); err != nil {
 				metrics.HandlerErrors.Inc()
@@ -184,7 +215,8 @@ func HandleParentCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *s
 		}
 		parentData[chatID].ClassNumber = num
 		parentFSM[chatID] = StateParentClassLetter
-		parentEditMenu(bot, chatID, cq.Message.MessageID, "Выберите букву класса:", parentClassLetterRows())
+		rows := parentClassLetterRowsFromDB(ctx, database, num)
+		parentEditMenu(bot, chatID, cq.Message.MessageID, "Выберите букву класса:", rows)
 		return
 	}
 
