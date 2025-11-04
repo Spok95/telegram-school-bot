@@ -72,6 +72,7 @@ func showCategoriesList(ctx context.Context, bot *tgbotapi.BotAPI, chatID int64,
 		rows = append(rows, row)
 	}
 	rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("➕ Добавить категорию", "catalog_cat_add")))
+	rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("🏫 Классы", "catalog_classes")))
 	rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "catalog_cancel")))
 
 	if edit && messageID != 0 {
@@ -141,6 +142,49 @@ func showLevelCard(ctx context.Context, bot *tgbotapi.BotAPI, chatID int64, mess
 	editTextAndMarkup(bot, chatID, messageID, text, rows)
 }
 
+func showClassesList(
+	ctx context.Context,
+	bot *tgbotapi.BotAPI,
+	chatID int64,
+	messageID int,
+	edit bool,
+	database *sql.DB,
+) {
+	classes, err := db.ListAllClasses(ctx, database)
+	if err != nil {
+		editTextAndMarkup(bot, chatID, messageID, "❌ Не удалось загрузить список классов.", [][]tgbotapi.InlineKeyboardButton{
+			{tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", "catalog_back")},
+		})
+		return
+	}
+
+	text := "🏫 Справочники → Классы\n\nНажмите на класс, чтобы скрыть/показать его в списках."
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, c := range classes {
+		label := fmt.Sprintf("%d%s", c.Number, strings.ToUpper(c.Letter))
+		if c.Hidden {
+			label += " (скрыт)"
+		}
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(label, fmt.Sprintf("catalog_cls_toggle_%d", c.ID)),
+		))
+	}
+	// назад в справочники
+	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", "catalog_backroot"),
+	))
+
+	if edit {
+		editTextAndMarkup(bot, chatID, messageID, text, rows)
+		return
+	}
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
+	if _, err := tg.Send(bot, msg); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
+}
+
 // ====== callbacks
 
 func HandleCatalogCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cq *tgbotapi.CallbackQuery) {
@@ -169,6 +213,16 @@ func HandleCatalogCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *
 		st.LevelID = nil
 		st.CategoryID = nil
 		showCategoriesList(ctx, bot, chatID, cq.Message.MessageID, true, database)
+		return
+	}
+
+	if data == "catalog_backroot" {
+		showCategoriesList(ctx, bot, chatID, cq.Message.MessageID, true, database)
+		return
+	}
+
+	if data == "catalog_classes" {
+		showClassesList(ctx, bot, chatID, cq.Message.MessageID, true, database)
 		return
 	}
 
@@ -228,6 +282,28 @@ func HandleCatalogCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *
 		st.Awaiting = "level_label_edit"
 		rows := [][]tgbotapi.InlineKeyboardButton{catBackCancel()}
 		editTextAndMarkup(bot, chatID, cq.Message.MessageID, "✏️ Введите новое имя (label) для уровня:", rows)
+	case strings.HasPrefix(data, "catalog_cls_toggle_"):
+		idStr := strings.TrimPrefix(data, "catalog_cls_toggle_")
+		clsID, _ := strconv.ParseInt(idStr, 10, 64)
+
+		cls, err := db.GetClassByID(ctx, database, clsID)
+		if err != nil || cls == nil {
+			// просто перерисуем список
+			showClassesList(ctx, bot, chatID, cq.Message.MessageID, true, database)
+			return
+		}
+
+		// инвертируем
+		newHidden := !cls.Hidden
+		if err := db.SetClassHidden(ctx, database, clsID, newHidden); err != nil {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Не удалось изменить видимость класса.")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
+		}
+
+		// и перерисуем список
+		showClassesList(ctx, bot, chatID, cq.Message.MessageID, true, database)
+		return
 	}
 }
 

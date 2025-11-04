@@ -40,24 +40,51 @@ func studentBackCancelRow() []tgbotapi.InlineKeyboardButton {
 	return fsmutil.BackCancelRow("student_back", "student_cancel")
 }
 
-func studentClassNumberRows() [][]tgbotapi.InlineKeyboardButton {
+func studentClassNumberRowsFromDB(ctx context.Context, database *sql.DB) [][]tgbotapi.InlineKeyboardButton {
+	classes, err := db.ListVisibleClasses(ctx, database)
+	if err != nil || len(classes) == 0 {
+		return [][]tgbotapi.InlineKeyboardButton{
+			studentBackCancelRow(),
+		}
+	}
+
+	numsSet := make(map[int]struct{})
+	for _, c := range classes {
+		numsSet[c.Number] = struct{}{}
+	}
+	var nums []int
+	for n := range numsSet {
+		nums = append(nums, n)
+	}
+	// тут добавь
+	// sort.Ints(nums)
+
 	var rows [][]tgbotapi.InlineKeyboardButton
-	for i := 1; i <= 11; i++ {
-		cb := fmt.Sprintf("student_class_num_%d", i)
+	for _, n := range nums {
+		cb := fmt.Sprintf("student_class_num_%d", n)
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d класс", i), cb),
+			tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d класс", n), cb),
 		))
 	}
 	rows = append(rows, studentBackCancelRow())
 	return rows
 }
 
-func studentClassLetterRows() [][]tgbotapi.InlineKeyboardButton {
-	letters := []string{"А", "Б", "В", "Г", "Д"}
+func studentClassLetterRowsFromDB(ctx context.Context, database *sql.DB, number int) [][]tgbotapi.InlineKeyboardButton {
+	classes, err := db.ListVisibleClasses(ctx, database)
+	if err != nil || len(classes) == 0 {
+		return [][]tgbotapi.InlineKeyboardButton{
+			studentBackCancelRow(),
+		}
+	}
+
 	var rows [][]tgbotapi.InlineKeyboardButton
-	for _, l := range letters {
+	for _, c := range classes {
+		if c.Number != number {
+			continue
+		}
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(l, "student_class_letter_"+l),
+			tgbotapi.NewInlineKeyboardButtonData(strings.ToUpper(c.Letter), "student_class_letter_"+strings.ToUpper(c.Letter)),
 		))
 	}
 	rows = append(rows, studentBackCancelRow())
@@ -90,7 +117,7 @@ func StartStudentRegistration(ctx context.Context, chatID int64, bot *tgbotapi.B
 }
 
 // HandleStudentFSM Обработка шагов FSM
-func HandleStudentFSM(ctx context.Context, chatID int64, msg string, bot *tgbotapi.BotAPI) {
+func HandleStudentFSM(ctx context.Context, chatID int64, msg string, bot *tgbotapi.BotAPI, database *sql.DB) {
 	select {
 	case <-ctx.Done():
 		return
@@ -111,8 +138,11 @@ func HandleStudentFSM(ctx context.Context, chatID int64, msg string, bot *tgbota
 	if state == StateStudentName {
 		studentData[chatID] = &StudentRegisterData{Name: msg}
 		studentFSM[chatID] = StateStudentClassNum
+
+		rows := studentClassNumberRowsFromDB(ctx, database)
+
 		msgOut := tgbotapi.NewMessage(chatID, "Выберите номер класса:")
-		msgOut.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(studentClassNumberRows()...)
+		msgOut.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
 		if _, err := tg.Send(bot, msgOut); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
@@ -157,7 +187,8 @@ func HandleStudentCallback(ctx context.Context, cb *tgbotapi.CallbackQuery, bot 
 			studentFSM[chatID] = StateStudentName
 		case StateStudentLetterBtn:
 			studentFSM[chatID] = StateStudentClassNum
-			studentEditMenu(bot, chatID, cb.Message.MessageID, "Выберите номер класса:", studentClassNumberRows())
+			rows := studentClassNumberRowsFromDB(ctx, database)
+			studentEditMenu(bot, chatID, cb.Message.MessageID, "Выберите номер класса:", rows)
 		case StateStudentWaitingConfirm:
 			if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Заявка уже отправлена, ожидайте подтверждения.")); err != nil {
 				metrics.HandlerErrors.Inc()
@@ -184,7 +215,8 @@ func HandleStudentCallback(ctx context.Context, cb *tgbotapi.CallbackQuery, bot 
 		}
 		studentData[chatID].ClassNumber = int64(num)
 		studentFSM[chatID] = StateStudentLetterBtn
-		studentEditMenu(bot, chatID, cb.Message.MessageID, "Выберите букву класса:", studentClassLetterRows())
+		rows := studentClassLetterRowsFromDB(ctx, database, num)
+		studentEditMenu(bot, chatID, cb.Message.MessageID, "Выберите букву класса:", rows)
 		return
 	}
 

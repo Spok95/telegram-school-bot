@@ -1,0 +1,7 @@
+-- +goose Up
+ALTER TABLE classes
+    ADD COLUMN IF NOT EXISTS hidden BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- +goose Down
+ALTER TABLE classes
+    DROP COLUMN IF EXISTS hidden;

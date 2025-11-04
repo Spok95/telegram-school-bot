@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -71,7 +72,38 @@ func StartRemoveScoreFSM(ctx context.Context, bot *tgbotapi.BotAPI, database *sq
 	}
 
 	out := tgbotapi.NewMessage(chatID, "Выберите номер класса:")
-	out.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(ClassNumberRows("remove")...)
+
+	// тянем только не скрытые классы
+	classes, err := db.ListVisibleClasses(ctx, database)
+	if err != nil || len(classes) == 0 {
+		out.Text = "Нет доступных классов для списания."
+		if _, err := tg.Send(bot, out); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
+		return
+	}
+
+	// собираем уникальные номера и сортируем
+	numsSet := make(map[int]struct{})
+	for _, c := range classes {
+		numsSet[c.Number] = struct{}{}
+	}
+	var nums []int
+	for n := range numsSet {
+		nums = append(nums, n)
+	}
+	sort.Ints(nums)
+
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, n := range nums {
+		cb := fmt.Sprintf("remove_class_num_%d", n)
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d класс", n), cb),
+		))
+	}
+	rows = append(rows, removeBackCancelRow())
+
+	out.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
 	if _, err := tg.Send(bot, out); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
@@ -103,11 +135,55 @@ func HandleRemoveCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *s
 		switch state.Step {
 		case 2: // возвращаемся к выбору номера
 			state.Step = 1
-			removeEditMenu(bot, chatID, cq.Message.MessageID, "Выберите номер класса:", ClassNumberRows("remove"))
+
+			classes, err := db.ListVisibleClasses(ctx, database)
+			if err != nil || len(classes) == 0 {
+				removeEditMenu(bot, chatID, cq.Message.MessageID, "Нет доступных классов для списания.", [][]tgbotapi.InlineKeyboardButton{removeBackCancelRow()})
+				return
+			}
+
+			numsSet := make(map[int]struct{})
+			for _, c := range classes {
+				numsSet[c.Number] = struct{}{}
+			}
+			var nums []int
+			for n := range numsSet {
+				nums = append(nums, n)
+			}
+			sort.Ints(nums)
+
+			var rows [][]tgbotapi.InlineKeyboardButton
+			for _, n := range nums {
+				cb := fmt.Sprintf("remove_class_num_%d", n)
+				rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d класс", n), cb),
+				))
+			}
+			rows = append(rows, removeBackCancelRow())
+
+			removeEditMenu(bot, chatID, cq.Message.MessageID, "Выберите номер класса:", rows)
 			return
 		case 3: // назад к букве
 			state.Step = 2
-			removeEditMenu(bot, chatID, cq.Message.MessageID, "Выберите букву класса:", ClassLetterRows("remove_class_letter_"))
+
+			classes, err := db.ListVisibleClasses(ctx, database)
+			if err != nil || len(classes) == 0 {
+				removeEditMenu(bot, chatID, cq.Message.MessageID, "Нет букв для этого класса.", [][]tgbotapi.InlineKeyboardButton{removeBackCancelRow()})
+				return
+			}
+
+			var rows [][]tgbotapi.InlineKeyboardButton
+			for _, c := range classes {
+				if int64(c.Number) != state.ClassNumber {
+					continue
+				}
+				rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData(strings.ToUpper(c.Letter), "remove_class_letter_"+strings.ToUpper(c.Letter)),
+				))
+			}
+			rows = append(rows, removeBackCancelRow())
+
+			removeEditMenu(bot, chatID, cq.Message.MessageID, "Выберите букву класса:", rows)
 			return
 		case 4: // назад к ученикам
 			state.Step = 3
@@ -182,7 +258,25 @@ func HandleRemoveCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *s
 		num, _ := strconv.ParseInt(numStr, 10, 64)
 		state.ClassNumber = num
 		state.Step = 2
-		removeEditMenu(bot, chatID, cq.Message.MessageID, "Выберите букву класса:", ClassLetterRows("remove_class_letter_"))
+
+		classes, err := db.ListVisibleClasses(ctx, database)
+		if err != nil || len(classes) == 0 {
+			removeEditMenu(bot, chatID, cq.Message.MessageID, "Нет букв для этого класса.", [][]tgbotapi.InlineKeyboardButton{removeBackCancelRow()})
+			return
+		}
+
+		var rows [][]tgbotapi.InlineKeyboardButton
+		for _, c := range classes {
+			if int64(c.Number) != state.ClassNumber {
+				continue
+			}
+			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData(strings.ToUpper(c.Letter), "remove_class_letter_"+strings.ToUpper(c.Letter)),
+			))
+		}
+		rows = append(rows, removeBackCancelRow())
+
+		removeEditMenu(bot, chatID, cq.Message.MessageID, "Выберите букву класса:", rows)
 		return
 	}
 

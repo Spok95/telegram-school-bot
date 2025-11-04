@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -40,6 +41,58 @@ var auctionStates = make(map[int64]*AuctionFSMState)
 
 func auctionBackCancelRow() []tgbotapi.InlineKeyboardButton {
 	return fsmutil.BackCancelRow("auction_back", "auction_cancel")
+}
+
+func auctionClassNumberRowsFromDB(ctx context.Context, database *sql.DB, prefix string) [][]tgbotapi.InlineKeyboardButton {
+	classes, err := db.ListVisibleClasses(ctx, database)
+	if err != nil || len(classes) == 0 {
+		return [][]tgbotapi.InlineKeyboardButton{
+			auctionBackCancelRow(),
+		}
+	}
+
+	// соберём уникальные номера
+	numsSet := make(map[int]struct{})
+	for _, c := range classes {
+		numsSet[c.Number] = struct{}{}
+	}
+	var nums []int
+	for n := range numsSet {
+		nums = append(nums, n)
+	}
+	sort.Ints(nums)
+
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, n := range nums {
+		cb := fmt.Sprintf("%s%d", prefix, n)
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d класс", n), cb),
+		))
+	}
+	rows = append(rows, auctionBackCancelRow())
+	return rows
+}
+
+func auctionClassLetterRowsFromDB(ctx context.Context, database *sql.DB, prefix string, number int64) [][]tgbotapi.InlineKeyboardButton {
+	classes, err := db.ListVisibleClasses(ctx, database)
+	if err != nil || len(classes) == 0 {
+		return [][]tgbotapi.InlineKeyboardButton{
+			auctionBackCancelRow(),
+		}
+	}
+
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, c := range classes {
+		if int64(c.Number) != number {
+			continue
+		}
+		cb := fmt.Sprintf("%s%s", prefix, strings.ToUpper(c.Letter))
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(strings.ToUpper(c.Letter), cb),
+		))
+	}
+	rows = append(rows, auctionBackCancelRow())
+	return rows
 }
 
 // ——— start ———
@@ -114,13 +167,23 @@ func HandleAuctionCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *
 				metrics.HandlerErrors.Inc()
 			}
 			return
-		case AuctionStepClassLetter: // назад к номеру
+		case AuctionStepClassLetter:
 			state.Step = AuctionStepClassNumber
-			promptClassNumber(cq, bot, "auction_class_number_")
+			rows := auctionClassNumberRowsFromDB(ctx, database, "auction_class_number_")
+			mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
+			edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "Выберите номер класса:", mk)
+			if _, err := tg.Send(bot, edit); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		case AuctionStepStudentSelect: // назад к букве
 			state.Step = AuctionStepClassLetter
-			promptClassLetter(cq, bot, "auction_class_letter_")
+			rows := auctionClassLetterRowsFromDB(ctx, database, "auction_class_letter_", state.ClassNumber)
+			mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
+			edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "Выберите букву класса:", mk)
+			if _, err := tg.Send(bot, edit); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
 			return
 		case AuctionStepPoints: // назад к предыдущему выбору
 			if state.Mode == "students" {
@@ -128,9 +191,15 @@ func HandleAuctionCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *
 				promptStudentSelect(ctx, cq, bot, database)
 			} else {
 				state.Step = AuctionStepClassLetter
-				promptClassLetter(cq, bot, "auction_class_letter_")
+				rows := auctionClassLetterRowsFromDB(ctx, database, "auction_class_letter_", state.ClassNumber)
+				mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
+				edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "Выберите букву класса:", mk)
+				if _, err := tg.Send(bot, edit); err != nil {
+					metrics.HandlerErrors.Inc()
+				}
 			}
 			return
+
 		default:
 			// safety: отмена
 			delete(auctionStates, chatID)
@@ -147,14 +216,26 @@ func HandleAuctionCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *
 	case strings.HasPrefix(data, "auction_mode_"):
 		state.Mode = strings.TrimPrefix(data, "auction_mode_")
 		state.Step = AuctionStepClassNumber
-		promptClassNumber(cq, bot, "auction_class_number_")
+
+		rows := auctionClassNumberRowsFromDB(ctx, database, "auction_class_number_")
+		mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
+		edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "Выберите номер класса:", mk)
+		if _, err := tg.Send(bot, edit); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 
 	case strings.HasPrefix(data, "auction_class_number_"):
 		numStr := strings.TrimPrefix(data, "auction_class_number_")
 		classNumber, _ := strconv.ParseInt(numStr, 10, 64)
 		state.ClassNumber = classNumber
 		state.Step = AuctionStepClassLetter
-		promptClassLetter(cq, bot, "auction_class_letter_")
+
+		rows := auctionClassLetterRowsFromDB(ctx, database, "auction_class_letter_", classNumber)
+		mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
+		edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "Выберите букву класса:", mk)
+		if _, err := tg.Send(bot, edit); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 
 	case strings.HasPrefix(data, "auction_class_letter_"):
 		letter := strings.TrimPrefix(data, "auction_class_letter_")
@@ -337,34 +418,6 @@ func HandleAuctionText(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.
 }
 
 // ——— menus (edit current message) ———
-
-func promptClassNumber(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, prefix string) {
-	chatID := cq.Message.Chat.ID
-	var rows [][]tgbotapi.InlineKeyboardButton
-	for i := 1; i <= 11; i++ {
-		btn := tgbotapi.NewInlineKeyboardButtonData(strconv.Itoa(i), fmt.Sprintf("%s%d", prefix, i))
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(btn))
-	}
-	rows = append(rows, auctionBackCancelRow())
-	edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "🔢 Выберите номер класса:", tgbotapi.NewInlineKeyboardMarkup(rows...))
-	if _, err := tg.Send(bot, edit); err != nil {
-		metrics.HandlerErrors.Inc()
-	}
-}
-
-func promptClassLetter(cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, prefix string) {
-	chatID := cq.Message.Chat.ID
-	letters := []string{"А", "Б", "В", "Г", "Д"}
-	row := []tgbotapi.InlineKeyboardButton{}
-	for _, l := range letters {
-		row = append(row, tgbotapi.NewInlineKeyboardButtonData(l, prefix+l))
-	}
-	rows := [][]tgbotapi.InlineKeyboardButton{row, auctionBackCancelRow()}
-	edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID, "🔠 Выберите букву класса:", tgbotapi.NewInlineKeyboardMarkup(rows...))
-	if _, err := tg.Send(bot, edit); err != nil {
-		metrics.HandlerErrors.Inc()
-	}
-}
 
 func promptStudentSelect(ctx context.Context, cq *tgbotapi.CallbackQuery, bot *tgbotapi.BotAPI, database *sql.DB) {
 	chatID := cq.Message.Chat.ID

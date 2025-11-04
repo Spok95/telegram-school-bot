@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -42,6 +43,57 @@ type ExportFSMState struct {
 }
 
 var exportStates = make(map[int64]*ExportFSMState)
+
+func exportClassNumberRowsFromDB(ctx context.Context, database *sql.DB, prefix string) [][]tgbotapi.InlineKeyboardButton {
+	classes, err := db.ListVisibleClasses(ctx, database)
+	if err != nil || len(classes) == 0 {
+		return [][]tgbotapi.InlineKeyboardButton{
+			fsmutil.BackCancelRow("export_back", "export_cancel"),
+		}
+	}
+
+	numsSet := make(map[int]struct{})
+	for _, c := range classes {
+		numsSet[c.Number] = struct{}{}
+	}
+	var nums []int
+	for n := range numsSet {
+		nums = append(nums, n)
+	}
+	sort.Ints(nums)
+
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, n := range nums {
+		cb := fmt.Sprintf("%s%d", prefix, n)
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d класс", n), cb),
+		))
+	}
+	rows = append(rows, fsmutil.BackCancelRow("export_back", "export_cancel"))
+	return rows
+}
+
+func exportClassLetterRowsFromDB(ctx context.Context, database *sql.DB, prefix string, number int64) [][]tgbotapi.InlineKeyboardButton {
+	classes, err := db.ListVisibleClasses(ctx, database)
+	if err != nil || len(classes) == 0 {
+		return [][]tgbotapi.InlineKeyboardButton{
+			fsmutil.BackCancelRow("export_back", "export_cancel"),
+		}
+	}
+
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, c := range classes {
+		if int64(c.Number) != number {
+			continue
+		}
+		cb := fmt.Sprintf("%s%s", prefix, strings.ToUpper(c.Letter))
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(strings.ToUpper(c.Letter), cb),
+		))
+	}
+	rows = append(rows, fsmutil.BackCancelRow("export_back", "export_cancel"))
+	return rows
+}
 
 // StartExportFSM стартовое меню (новое сообщение)
 func StartExportFSM(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) {
@@ -113,11 +165,13 @@ func HandleExportCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *s
 			return
 		case ExportStepClassLetter:
 			state.Step = ExportStepClassNumber
-			editMenu(bot, chatID, cq.Message.MessageID, "🔢 Выберите номер класса:", classNumberRows("export_class_number_"))
+			rows := exportClassNumberRowsFromDB(ctx, database, "export_class_number_")
+			editMenu(bot, chatID, cq.Message.MessageID, "🔢 Выберите номер класса:", rows)
 			return
 		case ExportStepStudentSelect:
 			state.Step = ExportStepClassLetter
-			editMenu(bot, chatID, cq.Message.MessageID, "🔠 Выберите букву класса:", classLetterRows("export_class_letter_"))
+			rows := exportClassLetterRowsFromDB(ctx, database, "export_class_letter_", state.ClassNumber)
+			editMenu(bot, chatID, cq.Message.MessageID, "🔠 Выберите букву класса:", rows)
 			return
 		case ExportStepCustomStartDate:
 			// Назад со старта → к выбору режима периода
@@ -227,14 +281,16 @@ func HandleExportCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *s
 			}
 			// student / class → выбор номера класса (редактирование)
 			state.Step = ExportStepClassNumber
-			editMenu(bot, chatID, cq.Message.MessageID, "🔢 Выберите номер класса:", classNumberRows("export_class_number_"))
+			rows := exportClassNumberRowsFromDB(ctx, database, "export_class_number_")
+			editMenu(bot, chatID, cq.Message.MessageID, "🔢 Выберите номер класса:", rows)
 		}
 
 	case ExportStepClassNumber:
 		if strings.HasPrefix(data, "export_class_number_") {
 			state.ClassNumber, _ = strconv.ParseInt(strings.TrimPrefix(data, "export_class_number_"), 10, 64)
 			state.Step = ExportStepClassLetter
-			editMenu(bot, chatID, cq.Message.MessageID, "🔠 Выберите букву класса:", classLetterRows("export_class_letter_"))
+			rows := exportClassLetterRowsFromDB(ctx, database, "export_class_letter_", state.ClassNumber)
+			editMenu(bot, chatID, cq.Message.MessageID, "🔠 Выберите букву класса:", rows)
 		}
 
 	case ExportStepClassLetter:
@@ -293,15 +349,15 @@ func HandleExportCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *s
 			// Дальше поведение как в «произвольном» диапазоне:
 			switch state.ReportType {
 			case "student":
-				// СНАЧАЛА выбираем класс → потом ученика
 				state.SelectedStudentIDs = nil
 				state.Step = ExportStepClassNumber
-				editMenu(bot, chatID, cq.Message.MessageID, "🔢 Выберите номер класса:", classNumberRows("export_class_number_"))
+				rows := exportClassNumberRowsFromDB(ctx, database, "export_class_number_")
+				editMenu(bot, chatID, cq.Message.MessageID, "🔢 Выберите номер класса:", rows)
 				return
 			case "class":
-				// выбираем класс
 				state.Step = ExportStepClassNumber
-				editMenu(bot, chatID, cq.Message.MessageID, "🔢 Выберите номер класса:", classNumberRows("export_class_number_"))
+				rows := exportClassNumberRowsFromDB(ctx, database, "export_class_number_")
+				editMenu(bot, chatID, cq.Message.MessageID, "🔢 Выберите номер класса:", rows)
 				return
 			case "school":
 				// формируем отчёт немедленно
@@ -383,9 +439,9 @@ func HandleExportText(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.D
 			return
 		}
 		state.Step = ExportStepClassNumber
-		// после текстового шага нет message_id для редактирования — отправляем новое меню
 		msgOut := tgbotapi.NewMessage(chatID, "🔢 Выберите номер класса:")
-		msgOut.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(classNumberRows("export_class_number_")...)
+		rows := exportClassNumberRowsFromDB(ctx, database, "export_class_number_")
+		msgOut.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
 		if _, err := tg.Send(bot, msgOut); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
@@ -423,26 +479,6 @@ func periodModeRows() [][]tgbotapi.InlineKeyboardButton {
 		),
 		fsmutil.BackCancelRow("export_back", "export_cancel"),
 	}
-}
-
-func classNumberRows(prefix string) [][]tgbotapi.InlineKeyboardButton {
-	var rows [][]tgbotapi.InlineKeyboardButton
-	for i := 1; i <= 11; i++ {
-		btn := tgbotapi.NewInlineKeyboardButtonData(strconv.Itoa(i), fmt.Sprintf("%s%d", prefix, i))
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(btn))
-	}
-	rows = append(rows, fsmutil.BackCancelRow("export_back", "export_cancel"))
-	return rows
-}
-
-func classLetterRows(prefix string) [][]tgbotapi.InlineKeyboardButton {
-	letters := []string{"А", "Б", "В", "Г", "Д"}
-	var rows [][]tgbotapi.InlineKeyboardButton
-	for _, l := range letters {
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(l, prefix+l)))
-	}
-	rows = append(rows, fsmutil.BackCancelRow("export_back", "export_cancel"))
-	return rows
 }
 
 // Единый редактор текста + клавиатуры

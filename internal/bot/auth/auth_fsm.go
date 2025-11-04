@@ -25,9 +25,9 @@ func StartRegistration(ctx context.Context, chatID int64, role string, bot *tgbo
 func HandleFSMMessage(ctx context.Context, chatID int64, msg string, role string, bot *tgbotapi.BotAPI, database *sql.DB) {
 	switch role {
 	case string(models.Student):
-		HandleStudentFSM(ctx, chatID, msg, bot)
+		HandleStudentFSM(ctx, chatID, msg, bot, database)
 	case string(models.Parent):
-		HandleParentFSM(ctx, chatID, msg, bot)
+		HandleParentFSM(ctx, chatID, msg, bot, database)
 	case string(models.Teacher), string(models.Administration):
 		HandleStaffFSM(ctx, chatID, msg, bot, database, role)
 	}

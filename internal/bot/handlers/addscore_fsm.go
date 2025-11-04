@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -42,15 +43,6 @@ func addBackCancelRow() []tgbotapi.InlineKeyboardButton {
 	return row
 }
 
-func backCancelRowFor(actionOrPrefix string) []tgbotapi.InlineKeyboardButton {
-	// если передали "remove_class_letter_", вытащим "remove"
-	action := actionOrPrefix
-	if i := strings.Index(actionOrPrefix, "_"); i > 0 {
-		action = actionOrPrefix[:i]
-	}
-	return fsmutil.BackCancelRow(action+"_back", action+"_cancel")
-}
-
 func addEditMenu(bot *tgbotapi.BotAPI, chatID int64, messageID int, text string, rows [][]tgbotapi.InlineKeyboardButton) {
 	cfg := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	mk := tgbotapi.NewInlineKeyboardMarkup(rows...)
@@ -58,30 +50,6 @@ func addEditMenu(bot *tgbotapi.BotAPI, chatID int64, messageID int, text string,
 	if _, err := tg.Send(bot, cfg); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
-}
-
-func ClassNumberRows(action string) [][]tgbotapi.InlineKeyboardButton {
-	var buttons [][]tgbotapi.InlineKeyboardButton
-	for _, num := range []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11} {
-		callback := fmt.Sprintf("%s_class_num_%d", action, num)
-		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d класс", num), callback),
-		))
-	}
-	buttons = append(buttons, backCancelRowFor(action))
-	return buttons
-}
-
-func ClassLetterRows(action string) [][]tgbotapi.InlineKeyboardButton {
-	letters := []string{"А", "Б", "В", "Г", "Д"}
-	var rows [][]tgbotapi.InlineKeyboardButton
-	for _, l := range letters {
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(l, action+l),
-		))
-	}
-	rows = append(rows, backCancelRowFor(action))
-	return rows
 }
 
 // ==== start ====
@@ -103,7 +71,37 @@ func StartAddScoreFSM(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.D
 	}
 
 	out := tgbotapi.NewMessage(chatID, "Выберите номер класса:")
-	out.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(ClassNumberRows("add")...)
+
+	classes, err := db.ListVisibleClasses(ctx, database)
+	if err != nil || len(classes) == 0 {
+		out.Text = "Нет доступных классов для начисления."
+		if _, err := tg.Send(bot, out); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
+		return
+	}
+
+	// соберём уникальные номера
+	numsSet := make(map[int]struct{})
+	for _, c := range classes {
+		numsSet[c.Number] = struct{}{}
+	}
+	var nums []int
+	for n := range numsSet {
+		nums = append(nums, n)
+	}
+	sort.Ints(nums)
+
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, n := range nums {
+		cb := fmt.Sprintf("add_class_num_%d", n)
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d класс", n), cb),
+		))
+	}
+	rows = append(rows, addBackCancelRow())
+
+	out.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
 	if _, err := tg.Send(bot, out); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
@@ -221,13 +219,57 @@ func HandleAddScoreCallback(ctx context.Context, bot *tgbotapi.BotAPI, database 
 	// ⬅ Назад
 	if data == "add_back" {
 		switch state.Step {
-		case 2: // выбирали букву → вернёмся к номеру
+		case 2:
 			state.Step = 1
-			addEditMenu(bot, chatID, cq.Message.MessageID, "Выберите номер класса:", ClassNumberRows("add"))
+
+			classes, err := db.ListVisibleClasses(ctx, database)
+			if err != nil || len(classes) == 0 {
+				addEditMenu(bot, chatID, cq.Message.MessageID, "Нет доступных классов для начисления.", [][]tgbotapi.InlineKeyboardButton{addBackCancelRow()})
+				return
+			}
+
+			numsSet := make(map[int]struct{})
+			for _, c := range classes {
+				numsSet[c.Number] = struct{}{}
+			}
+			var nums []int
+			for n := range numsSet {
+				nums = append(nums, n)
+			}
+			sort.Ints(nums)
+
+			var rows [][]tgbotapi.InlineKeyboardButton
+			for _, n := range nums {
+				cb := fmt.Sprintf("add_class_num_%d", n)
+				rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d класс", n), cb),
+				))
+			}
+			rows = append(rows, addBackCancelRow())
+
+			addEditMenu(bot, chatID, cq.Message.MessageID, "Выберите номер класса:", rows)
 			return
 		case 3: // выбирали учеников → вернёмся к букве
 			state.Step = 2
-			addEditMenu(bot, chatID, cq.Message.MessageID, "Выберите букву класса:", ClassLetterRows("add_class_letter_"))
+
+			classes, err := db.ListVisibleClasses(ctx, database)
+			if err != nil || len(classes) == 0 {
+				addEditMenu(bot, chatID, cq.Message.MessageID, "Нет букв для этого класса.", [][]tgbotapi.InlineKeyboardButton{addBackCancelRow()})
+				return
+			}
+
+			var rows [][]tgbotapi.InlineKeyboardButton
+			for _, c := range classes {
+				if int64(c.Number) != state.ClassNumber {
+					continue
+				}
+				rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData(strings.ToUpper(c.Letter), "add_class_letter_"+strings.ToUpper(c.Letter)),
+				))
+			}
+			rows = append(rows, addBackCancelRow())
+
+			addEditMenu(bot, chatID, cq.Message.MessageID, "Выберите букву класса:", rows)
 			return
 		case 4: // выбирали категорию → назад к ученикам
 			state.Step = 3
@@ -312,7 +354,25 @@ func HandleAddScoreCallback(ctx context.Context, bot *tgbotapi.BotAPI, database 
 		state.ClassNumber = num
 		state.Step = 2
 
-		addEditMenu(bot, chatID, cq.Message.MessageID, "Выберите букву класса:", ClassLetterRows("add_class_letter_"))
+		// тянем видимые классы и рисуем только буквы этого номера
+		classes, err := db.ListVisibleClasses(ctx, database)
+		if err != nil || len(classes) == 0 {
+			addEditMenu(bot, chatID, cq.Message.MessageID, "Нет букв для этого класса.", [][]tgbotapi.InlineKeyboardButton{addBackCancelRow()})
+			return
+		}
+
+		var rows [][]tgbotapi.InlineKeyboardButton
+		for _, c := range classes {
+			if int64(c.Number) != state.ClassNumber {
+				continue
+			}
+			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData(strings.ToUpper(c.Letter), "add_class_letter_"+strings.ToUpper(c.Letter)),
+			))
+		}
+		rows = append(rows, addBackCancelRow())
+
+		addEditMenu(bot, chatID, cq.Message.MessageID, "Выберите букву класса:", rows)
 		return
 	}
 

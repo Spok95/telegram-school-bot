@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -186,20 +187,17 @@ func TryHandleTeacherSlotsCallback(ctx context.Context, bot *tgbotapi.BotAPI, da
 			upsertStepMsg(bot, chatID, st, "Шаг 3/5. Введите шаг в минутах, необходимый на одну консультацию (например, 15)", &kb)
 			return true
 		case 4:
-			// вернуться к выбору номера
-			st.Step = 4
+			st.Step = 3
 			setTeacherFSM(chatID, st)
-			showClassNumberMenu(ctx, bot, database, chatID, st)
+			kb := tgbotapi.NewInlineKeyboardMarkup(
+				kbRow(
+					tgbotapi.NewInlineKeyboardButtonData("Назад", "t_slots:back:2"),
+					tgbotapi.NewInlineKeyboardButtonData("Отмена", "t_slots:cancel"),
+				),
+			)
+			nextStepBelowInput(bot, chatID, st, "Шаг 3/5. Введите шаг в минутах, необходимый на одну консультацию (например, 15)", &kb)
 			return true
 		}
-		return true
-
-	case "cnum": // выбор номера класса
-		num, _ := strconv.Atoi(parts[2])
-		st.TempNumber = num
-		st.Step = 5
-		setTeacherFSM(chatID, st)
-		showClassMultiMenu(ctx, bot, database, chatID, st)
 		return true
 
 	case "toggle_class": // t_slots:toggle_class:<id>
@@ -340,7 +338,7 @@ func TryHandleTeacherSlotsText(ctx context.Context, bot *tgbotapi.BotAPI, databa
 		st.StepMin = stepMin
 		st.Step = 4
 		setTeacherFSM(msg.Chat.ID, st)
-		showClassNumberMenu(ctx, bot, database, msg.Chat.ID, st)
+		showClassMultiMenu(ctx, bot, database, msg.Chat.ID, st)
 		return true
 	}
 	return false
@@ -348,54 +346,57 @@ func TryHandleTeacherSlotsText(ctx context.Context, bot *tgbotapi.BotAPI, databa
 
 // ====== CLASS MENUS ======
 
-func showClassNumberMenu(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, st *teacherFSMState) {
-	nums, err := db.ListClassNumbers(ctx, database)
-	if err != nil || len(nums) == 0 {
+func showClassMultiMenu(
+	ctx context.Context,
+	bot *tgbotapi.BotAPI,
+	database *sql.DB,
+	chatID int64,
+	st *teacherFSMState,
+) {
+	classes, err := db.ListVisibleClasses(ctx, database)
+	if err != nil || len(classes) == 0 {
 		upsertStepMsg(bot, chatID, st, "Классы не найдены.", nil)
 		return
 	}
-	var rows [][]tgbotapi.InlineKeyboardButton
-	for _, n := range nums {
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d", n), fmt.Sprintf("t_slots:cnum:%d", n)),
-		))
-	}
-	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-		tgbotapi.NewInlineKeyboardButtonData("Назад", "t_slots:back:3"),
-		tgbotapi.NewInlineKeyboardButtonData("Отмена", "t_slots:cancel"),
-	))
-	kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
-	upsertStepMsg(bot, chatID, st, "Шаг 4/5. Выберите номер класса:", &kb)
-}
 
-func showClassMultiMenu(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, chatID int64, st *teacherFSMState) {
-	cls, err := db.ListClassesByNumber(ctx, database, st.TempNumber)
-	if err != nil || len(cls) == 0 {
-		upsertStepMsg(bot, chatID, st, "Буквы для выбранного номера не найдены.", nil)
-		return
-	}
-	// быстрый lookup выбранных
-	sel := map[int64]bool{}
+	// сделаем быстрый lookup уже выбранных
+	selected := make(map[int64]bool, len(st.SelectedClassIDs))
 	for _, id := range st.SelectedClassIDs {
-		sel[id] = true
+		selected[id] = true
 	}
+
+	// отсортируем по номеру, потом по букве
+	sort.Slice(classes, func(i, j int) bool {
+		if classes[i].Number == classes[j].Number {
+			return classes[i].Letter < classes[j].Letter
+		}
+		return classes[i].Number < classes[j].Number
+	})
+
 	var rows [][]tgbotapi.InlineKeyboardButton
-	for _, c := range cls {
-		title := strings.ToUpper(c.Letter)
-		if sel[c.ID] {
+	for _, c := range classes {
+		title := fmt.Sprintf("%d%s", c.Number, strings.ToUpper(c.Letter))
+		if selected[c.ID] {
 			title = "✅ " + title
 		}
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(title, fmt.Sprintf("t_slots:toggle_class:%d", c.ID)),
 		))
 	}
-	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-		tgbotapi.NewInlineKeyboardButtonData("✅ Готово", "t_slots:classes_done"),
-		tgbotapi.NewInlineKeyboardButtonData("Назад", "t_slots:back:4"),
-		tgbotapi.NewInlineKeyboardButtonData("Отмена", "t_slots:cancel"),
-	))
+
+	// нижние кнопки
+	rows = append(rows,
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("✅ Готово", "t_slots:classes_done"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("Назад", "t_slots:back:3"),
+			tgbotapi.NewInlineKeyboardButtonData("Отмена", "t_slots:cancel"),
+		),
+	)
+
 	kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
-	upsertStepMsg(bot, chatID, st, "Шаг 5/5. Выберите буквы классов (можно несколько):", &kb)
+	upsertStepMsg(bot, chatID, st, "Шаг 4/5. Выберите один или несколько классов:", &kb)
 }
 
 // nextStepBelowInput отправить следующий шаг ниже пользовательского ввода: удалить старое бот-сообщение и прислать новое
