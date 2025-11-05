@@ -288,21 +288,48 @@ func HandleCatalogCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *
 
 		cls, err := db.GetClassByID(ctx, database, clsID)
 		if err != nil || cls == nil {
-			// просто перерисуем список
+			// если что-то пошло не так, просто перерисуем всё как раньше
 			showClassesList(ctx, bot, chatID, cq.Message.MessageID, true, database)
 			return
 		}
 
-		// инвертируем
+		// 1. инвертируем флаг
 		newHidden := !cls.Hidden
 		if err := db.SetClassHidden(ctx, database, clsID, newHidden); err != nil {
 			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Не удалось изменить видимость класса.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
+			return
 		}
 
-		// и перерисуем список
-		showClassesList(ctx, bot, chatID, cq.Message.MessageID, true, database)
+		// 2. заново читаем ВСЕ классы, чтобы перерисовать список
+		classes, err := db.ListAllClasses(ctx, database)
+		if err != nil {
+			// fallback — старое поведение
+			showClassesList(ctx, bot, chatID, cq.Message.MessageID, true, database)
+			return
+		}
+
+		// 3. собираем только клавиатуру
+		var rows [][]tgbotapi.InlineKeyboardButton
+		for _, c := range classes {
+			label := fmt.Sprintf("%d%s", c.Number, strings.ToUpper(c.Letter))
+			if c.Hidden {
+				label += " (скрыт)"
+			}
+			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData(label, fmt.Sprintf("catalog_cls_toggle_%d", c.ID)),
+			))
+		}
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", "catalog_backroot"),
+		))
+
+		// 4. меняем ТОЛЬКО reply_markup
+		edit := tgbotapi.NewEditMessageReplyMarkup(chatID, cq.Message.MessageID, tgbotapi.NewInlineKeyboardMarkup(rows...))
+		if _, err := tg.Send(bot, edit); err != nil {
+			metrics.HandlerErrors.Inc()
+		}
 		return
 	}
 }
