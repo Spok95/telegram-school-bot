@@ -60,9 +60,14 @@ func ListClassesByNumber(ctx context.Context, database *sql.DB, number int) ([]C
 }
 
 func GetClassByID(ctx context.Context, database *sql.DB, id int64) (*Class, error) {
-	row := database.QueryRowContext(ctx, `SELECT id, number, letter FROM classes WHERE id = $1`, id)
+	row := database.QueryRowContext(ctx, `
+        SELECT id, number, letter, hidden
+        FROM classes
+        WHERE id = $1
+    `, id)
+
 	var c Class
-	if err := row.Scan(&c.ID, &c.Number, &c.Letter); err != nil {
+	if err := row.Scan(&c.ID, &c.Number, &c.Letter, &c.Hidden); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
