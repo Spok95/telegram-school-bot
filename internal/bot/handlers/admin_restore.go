@@ -23,7 +23,6 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/ctxutil"
 	"github.com/Spok95/telegram-school-bot/internal/db"
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
-	"github.com/Spok95/telegram-school-bot/internal/observability"
 	"github.com/Spok95/telegram-school-bot/internal/tg"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/pressly/goose/v3"
@@ -36,27 +35,38 @@ func HandleAdminRestoreLatest(ctx context.Context, bot *tgbotapi.BotAPI, databas
 
 	user, _ := db.GetUserByTelegramID(ctx, database, chatID)
 	if user == nil || user.Role == nil || *user.Role != "admin" {
-		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Только для администратора")); err != nil {
-			metrics.HandlerErrors.Inc()
-			observability.CaptureErr(err)
-		}
+		_, _ = tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Только для администратора"))
 		return
 	}
 
-	if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "🛠 Восстанавливаю БД из последнего бэкапа…")); err != nil {
-		metrics.HandlerErrors.Inc()
-		observability.CaptureErr(err)
-	}
+	_, _ = tg.Send(bot, tgbotapi.NewMessage(chatID, "🛠 Восстанавливаю БД из последнего бэкапа…"))
 
-	path, err := backupclient.RestoreLatest(ctx)
+	body, err := backupclient.RestoreLatest(ctx)
 	if err != nil {
-		metrics.HandlerErrors.Inc()
-		observability.CaptureErr(err)
 		_, _ = tg.Send(bot, tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Не удалось восстановить: %v", err)))
 		return
 	}
 
-	_, _ = tg.Send(bot, tgbotapi.NewMessage(chatID, "✅ Готово. Восстановлено из: "+path))
+	// уберём простыню — возьмём только первую строку
+	log.Printf("restore-latest output:\n%s", body)
+	line := strings.SplitN(body, "\n", 2)[0]
+
+	// если CGI написал, что restore failed — покажем красным
+	lower := strings.ToLower(line)
+	if strings.Contains(lower, "failed") || strings.Contains(lower, "error") {
+		_, _ = tg.Send(bot, tgbotapi.NewMessage(chatID, "❌ Восстановление завершилось с ошибкой: "+line))
+		return
+	}
+
+	// если всё норм — после восстановления прогоняем миграции
+	if err := runMigrations(ctx, database); err != nil {
+		// покажем, что восстановили, но миграции не доехали
+		_, _ = tg.Send(bot, tgbotapi.NewMessage(chatID,
+			"✅ Восстановлено, но не удалось применить миграции: "+err.Error()))
+		return
+	}
+
+	_, _ = tg.Send(bot, tgbotapi.NewMessage(chatID, "✅ Готово. Восстановлено из: "+line))
 }
 
 // простейший FSM по chatID
@@ -123,12 +133,15 @@ func HandleAdminRestoreCallback(ctx context.Context, bot *tgbotapi.BotAPI, datab
 	if cb.Data == "restore_cancel" {
 		delete(restoreWaiting, chatID)
 
-		// Снимем клавиатуру у сообщения с приглашением, чтобы не висела
-		_, _ = tg.Send(bot, tgbotapi.NewEditMessageReplyMarkup(
-			chatID, cb.Message.MessageID, tgbotapi.InlineKeyboardMarkup{}),
-		)
+		// отредактировать сообщение и убрать кнопки
+		emptyKB := tgbotapi.InlineKeyboardMarkup{
+			InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{},
+		}
+		edit := tgbotapi.NewEditMessageReplyMarkup(chatID, cb.Message.MessageID, emptyKB)
+		_, _ = tg.Send(bot, edit)
 
 		_, _ = tg.Send(bot, tgbotapi.NewMessage(chatID, "🚫 Восстановление из файла отменено."))
+		return
 	}
 }
 
@@ -590,4 +603,9 @@ func restoreFromUpload(ctx context.Context, database *sql.DB, localPath string) 
 		return fmt.Errorf("restore-latest: %w", err)
 	}
 	return nil
+}
+
+func runMigrations(ctx context.Context, database *sql.DB) error {
+	goose.SetBaseFS(migrations.FS)
+	return goose.UpContext(ctx, database, ".")
 }
