@@ -17,7 +17,7 @@ func ConsultationsExcelExport(ctx context.Context, database *sql.DB, teacherID i
 	// НОРМАЛИЗУЕМ ОКНО: с полуночи "from" и до полуночи +14 дней
 	from = time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, loc)
 	to14 := from.AddDate(0, 0, 14) // именно 14 суток вперёд
-	now := time.Now().In(loc)
+	now := time.Now()
 
 	// Собираем классы, по которым у учителя есть слоты в окне (без дублей)
 	classRows, err := database.QueryContext(ctx, `
@@ -124,8 +124,6 @@ func ConsultationsExcelExport(ctx context.Context, database *sql.DB, teacherID i
 				_ = rows.Close()
 				return "", err
 			}
-			start = start.In(loc)
-			end = end.In(loc)
 
 			_ = f.SetCellValue(sheet, fmt.Sprintf("A%d", r), start.Format("02.01.2006"))
 			_ = f.SetCellValue(sheet, fmt.Sprintf("B%d", r), fmt.Sprintf("%s–%s", start.Format("15:04"), end.Format("15:04")))
@@ -198,7 +196,7 @@ func ConsultationsExcelExportAdmin(
 	_ = f.SetSheetName(f.GetSheetName(0), "Сводка")
 	_ = f.SetCellValue("Сводка", "A1", "Период")
 	_ = f.SetCellValue("Сводка", "B1",
-		fmt.Sprintf("%s — %s", from.In(loc).Format("02.01.2006"), to14.In(loc).Format("02.01.2006")))
+		fmt.Sprintf("%s — %s", from.Format("02.01.2006"), to14.Format("02.01.2006")))
 	_ = f.SetColWidth("Сводка", "A", "B", 28)
 
 	ensureSheet := func(sheet string) error {
@@ -224,7 +222,7 @@ func ConsultationsExcelExportAdmin(
 
 	rowSum := 3
 	firstDataSheetIdx := -1
-	now := time.Now().In(loc)
+	now := time.Now()
 
 	for _, t := range teachers {
 		sheet := t.Name
@@ -274,8 +272,8 @@ func ConsultationsExcelExportAdmin(
 				continue
 			}
 			data = append(data, rec{
-				Date:   st.In(loc).Format("02.01.2006"),
-				Time:   fmt.Sprintf("%s—%s", st.In(loc).Format("15:04"), et.In(loc).Format("15:04")),
+				Date:   st.Format("02.01.2006"),
+				Time:   fmt.Sprintf("%s—%s", st.Format("15:04"), et.Format("15:04")),
 				Class:  fmt.Sprintf("%d%s", num, strings.ToUpper(letter)),
 				Parent: parent.String,
 				Child:  child.String,

@@ -38,8 +38,8 @@ func SendConsultReminder(ctx context.Context, bot *tgbotapi.BotAPI, database *sq
 		return nil
 	}
 
-	whenStart := slot.StartAt.In(loc)
-	whenEnd := slot.EndAt.In(loc)
+	whenStart := slot.StartAt
+	whenEnd := slot.EndAt
 
 	var prefix string
 	switch due {
@@ -84,8 +84,8 @@ func SendConsultBookedNotification(ctx context.Context, bot *tgbotapi.BotAPI, da
 		return nil
 	}
 
-	whenStart := slot.StartAt.In(loc)
-	whenEnd := slot.EndAt.In(loc)
+	whenStart := slot.StartAt
+	whenEnd := slot.EndAt
 	win := fmt.Sprintf("%s–%s", whenStart.Format("02.01.2006 15:04"), whenEnd.Format("15:04"))
 
 	textParent := fmt.Sprintf("Запись подтверждена: консультация у учителя %s.", win)
@@ -109,8 +109,8 @@ func SendConsultBookedCard(ctx context.Context, bot *tgbotapi.BotAPI, database *
 	class, _ := db.GetClassByID(ctx, database, slot.ClassID)
 
 	when := fmt.Sprintf("%s — %s",
-		slot.StartAt.In(loc).Format("02.01.2006 15:04"),
-		slot.EndAt.In(loc).Format("15:04"),
+		slot.StartAt.Format("02.01.2006 15:04"),
+		slot.EndAt.Format("15:04"),
 	)
 	className := ""
 	if class != nil {
@@ -163,8 +163,8 @@ func SendConsultCancelCards(ctx context.Context, bot *tgbotapi.BotAPI, database 
 	}
 
 	classLabel := fmt.Sprintf("%d%s", class.Number, class.Letter)
-	start := slot.StartAt.In(loc).Format("02.01.2006 15:04")
-	end := slot.EndAt.In(loc).Format("15:04")
+	start := slot.StartAt.Format("02.01.2006 15:04")
+	end := slot.EndAt.Format("15:04")
 
 	// --- учителю
 	if teacher.TelegramID != 0 {

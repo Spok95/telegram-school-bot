@@ -165,7 +165,7 @@ func TryHandleParentFlowCallbacks(ctx context.Context, bot *tgbotapi.BotAPI, dat
 				classID = cls.ID
 			}
 		}
-		days, err := db.ListDaysWithFreeSlotsByTeacherForClass(ctx, database, teacherID, classID, from, to, loc, 30)
+		days, err := db.ListDaysWithFreeSlotsByTeacherForClass(ctx, database, teacherID, classID, from, to, 30)
 		if err != nil {
 			_ = sendCb(bot, cb, "Ошибка при получении дат")
 			return true
@@ -237,7 +237,7 @@ func TryHandleParentFlowCallbacks(ctx context.Context, bot *tgbotapi.BotAPI, dat
 		for _, s := range free {
 			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData(
-					fmt.Sprintf("%s–%s", s.StartAt.In(loc).Format("15:04"), s.EndAt.In(loc).Format("15:04")),
+					fmt.Sprintf("%s–%s", s.StartAt.Format("15:04"), s.EndAt.Format("15:04")),
 					fmt.Sprintf("p_book:%d:%d", s.ID, childID),
 				),
 			))

@@ -267,8 +267,8 @@ func renderTeacherDaySlots(ctx context.Context, bot *tgbotapi.BotAPI, database *
 		}
 		label := fmt.Sprintf("%s %s–%s (класс: %s) #%d",
 			mark,
-			s.StartAt.In(loc).Format("15:04"),
-			s.EndAt.In(loc).Format("15:04"),
+			s.StartAt.Format("15:04"),
+			s.EndAt.Format("15:04"),
 			strings.Join(classLabels, ", "),
 			s.ID)
 

@@ -29,7 +29,7 @@ func CreateSlots(ctx context.Context, database *sql.DB, teacherID, classID int64
 
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO consult_slots (teacher_id, class_id, start_at, end_at)
-		VALUES ($1, $2, $3, $4)
+		VALUES ($1, $2, $3::timestamp without time zone, $4::timestamp without time zone)
 		ON CONFLICT (teacher_id, start_at) DO NOTHING
 	`)
 	if err != nil {
@@ -129,8 +129,6 @@ func ListFreeSlotsByTeacherOnDate(ctx context.Context, database *sql.DB, teacher
 	// начало и конец дня в локали → переводим в UTC
 	startLocal := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
 	endLocal := startLocal.Add(24 * time.Hour)
-	from := startLocal.UTC()
-	to := endLocal.UTC()
 
 	rows, err := database.QueryContext(ctx, `
 		SELECT id, teacher_id, class_id, start_at, end_at, booked_by_id
@@ -140,7 +138,7 @@ func ListFreeSlotsByTeacherOnDate(ctx context.Context, database *sql.DB, teacher
 		  AND start_at >= $2 AND start_at < $3
 		ORDER BY start_at
 		LIMIT $4
-	`, teacherID, from, to, limit)
+	`, teacherID, startLocal, endLocal, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +163,7 @@ func ListTeacherSlotsRange(ctx context.Context, database *sql.DB, teacherID int6
 		WHERE teacher_id = $1 AND start_at >= $2 AND start_at < $3
 		ORDER BY start_at
 		LIMIT $4
-	`, teacherID, from.UTC(), to.UTC(), limit)
+	`, teacherID, from, to, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +248,7 @@ func CreateSlotsMultiClasses(ctx context.Context, dbx *sql.DB, teacherID int64, 
 		var slotID int64
 		err = tx.QueryRowContext(ctx, `
 			INSERT INTO consult_slots (teacher_id, class_id, start_at, end_at)
-			VALUES ($1, $2, $3, $4)
+			VALUES ($1, $2, $3::timestamp without time zone, $4::timestamp without time zone)
 			ON CONFLICT (teacher_id, start_at) DO NOTHING
 			RETURNING id
 		`, teacherID, primaryClassID, st, end).Scan(&slotID)
@@ -288,10 +286,10 @@ func CreateSlotsMultiClasses(ctx context.Context, dbx *sql.DB, teacherID int64, 
 }
 
 // ListDaysWithFreeSlotsByTeacherForClass — даты (YYYY-MM-DD) cо свободными слотами для данного учителя и класса в интервале.
-func ListDaysWithFreeSlotsByTeacherForClass(ctx context.Context, database *sql.DB, teacherID, classID int64, from, to time.Time, loc *time.Location, limit int) ([]time.Time, error) {
+func ListDaysWithFreeSlotsByTeacherForClass(ctx context.Context, database *sql.DB, teacherID, classID int64, from, to time.Time, limit int) ([]time.Time, error) {
 	rows, err := database.QueryContext(ctx, `
 	    SELECT DISTINCT
-	        (s.start_at AT TIME ZONE 'UTC' AT TIME ZONE $5)::date AS day_local
+	        s.start_at::date AS day_local
 	    FROM consult_slots s
 	    WHERE s.booked_by_id IS NULL
 	      AND s.teacher_id = $1
@@ -305,8 +303,8 @@ func ListDaysWithFreeSlotsByTeacherForClass(ctx context.Context, database *sql.D
 	         )
 	      )
 	    ORDER BY day_local
-	    LIMIT $6
-	`, teacherID, from.UTC(), to.UTC(), classID, loc.String(), limit)
+	    LIMIT $5
+	`, teacherID, from, to, classID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -327,8 +325,6 @@ func ListDaysWithFreeSlotsByTeacherForClass(ctx context.Context, database *sql.D
 func ListFreeSlotsByTeacherOnDateForClass(ctx context.Context, database *sql.DB, teacherID, classID int64, day time.Time, loc *time.Location, limit int) ([]ConsultSlot, error) {
 	startLocal := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
 	endLocal := startLocal.Add(24 * time.Hour)
-	from := startLocal.UTC()
-	to := endLocal.UTC()
 
 	rows, err := database.QueryContext(ctx, `
 	SELECT s.id, s.teacher_id, s.class_id, s.start_at, s.end_at, s.booked_by_id
@@ -345,7 +341,7 @@ func ListFreeSlotsByTeacherOnDateForClass(ctx context.Context, database *sql.DB,
 	  )
 	ORDER BY s.start_at
 	LIMIT $5
-`, teacherID, from, to, classID, limit)
+`, teacherID, startLocal, endLocal, classID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -418,18 +414,30 @@ func ListParentBookings(ctx context.Context, database *sql.DB, parentID int64, f
 		  AND s.start_at >= $2
 		ORDER BY s.start_at
 		LIMIT $3`
-	rows, err := database.QueryContext(ctx, q, parentID, from.UTC(), limit)
+	rows, err := database.QueryContext(ctx, q, parentID, from, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 
+	loc := time.Local
 	var out []ParentBooking
 	for rows.Next() {
 		var r ParentBooking
 		if err := rows.Scan(&r.SlotID, &r.StartAt, &r.EndAt, &r.TeacherID, &r.Teacher, &r.ClassID, &r.ClassLabel, &r.ChildName); err != nil {
 			return nil, err
 		}
+
+		r.StartAt = time.Date(
+			r.StartAt.Year(), r.StartAt.Month(), r.StartAt.Day(),
+			r.StartAt.Hour(), r.StartAt.Minute(), r.StartAt.Second(), r.StartAt.Nanosecond(),
+			loc,
+		)
+		r.EndAt = time.Date(
+			r.EndAt.Year(), r.EndAt.Month(), r.EndAt.Day(),
+			r.EndAt.Hour(), r.EndAt.Minute(), r.EndAt.Second(), r.EndAt.Nanosecond(),
+			loc,
+		)
 		out = append(out, r)
 	}
 	return out, rows.Err()
