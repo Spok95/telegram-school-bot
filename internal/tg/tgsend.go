@@ -1,6 +1,7 @@
 package tg
 
 import (
+	"log"
 	"strings"
 
 	"github.com/Spok95/telegram-school-bot/internal/observability"
@@ -27,6 +28,9 @@ func isSystemErr(err error) bool {
 
 func Send(bot *tgbotapi.BotAPI, msg tgbotapi.Chattable) (tgbotapi.Message, error) {
 	m, err := bot.Send(msg)
+	if err != nil {
+		log.Printf("[telegram_send_error] kind=%T err=%v", msg, err)
+	}
 	if isSystemErr(err) {
 		observability.CaptureErr(err)
 	}

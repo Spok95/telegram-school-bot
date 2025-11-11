@@ -37,6 +37,11 @@ func CaptureErr(err error) {
 	if err == nil {
 		return
 	}
+	if lg != nil {
+		lg.Sugar.Errorw("captured error", "err", err)
+	} else {
+		log.Printf("captured error: %v", err)
+	}
 	if curEnv != "prod" {
 		if id := sentry.CaptureException(err); id != nil {
 			idStr := string(*id)

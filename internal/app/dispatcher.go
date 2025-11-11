@@ -368,6 +368,7 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 
 				path, err := export.ConsultationsExcelExport(ctxExp, database, user.ID, from, to, loc)
 				if err != nil {
+					log.Printf("[report_consultations] chat=%d user=%d err=%v", chatID, user.ID, err)
 					observability.CaptureErr(err)
 					if _, e := tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Не удалось сформировать отчёт.")); e != nil {
 						metrics.HandlerErrors.Inc()
@@ -395,6 +396,7 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 				defer cancel()
 				path, err := export.ConsultationsExcelExportAdmin(ctxExp, database, from, to, loc)
 				if err != nil {
+					log.Printf("[report_consultations] chat=%d user=%d err=%v", chatID, user.ID, err)
 					observability.CaptureErr(err)
 					if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Не удалось сформировать отчёт.")); err != nil {
 						metrics.HandlerErrors.Inc()
