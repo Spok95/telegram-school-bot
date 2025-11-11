@@ -12,6 +12,18 @@ import (
 	"github.com/xuri/excelize/v2"
 )
 
+// excelSheetName обрезает имя до 31 символа и чистит запрещённые.
+func excelSheetName(s string) string {
+	// Excel не любит: : \ / ? * [ ]
+	replacer := strings.NewReplacer(":", " ", "\\", " ", "/", " ", "?", " ", "*", " ", "[", " ", "]", " ")
+	s = replacer.Replace(s)
+	const maxLen = 31
+	if len(s) > maxLen {
+		s = s[:maxLen]
+	}
+	return s
+}
+
 // ConsultationsExcelExport — XLSX-отчёт «Расписание консультаций». Один лист на класс. Колонки: Дата | Время | ФИО родителя | ФИО ребёнка.
 func ConsultationsExcelExport(ctx context.Context, database *sql.DB, teacherID int64, from, _ time.Time, loc *time.Location) (string, error) {
 	// НОРМАЛИЗУЕМ ОКНО: с полуночи "from" и до полуночи +14 дней
@@ -84,9 +96,10 @@ func ConsultationsExcelExport(ctx context.Context, database *sql.DB, teacherID i
 
 	// Для каждого класса — отдельный лист и выборка БЕЗ дублей
 	for _, cl := range classes {
-		sheet := fmt.Sprintf("%d%s — %s—%s",
+		sheetRaw := fmt.Sprintf("%d%s %s-%s",
 			cl.Number, strings.ToUpper(cl.Letter),
 			from.Format("02.01.2006"), to14.Format("02.01.2006"))
+		sheet := excelSheetName(sheetRaw)
 		if err := ensureSheet(sheet); err != nil {
 			return "", err
 		}
@@ -136,9 +149,11 @@ func ConsultationsExcelExport(ctx context.Context, database *sql.DB, teacherID i
 
 	// Активный лист — первый реальный (если есть)
 	if len(classes) > 0 {
-		first := fmt.Sprintf("%d%s — %s—%s",
+		firstRaw := fmt.Sprintf("%d%s %s-%s",
 			classes[0].Number, strings.ToUpper(classes[0].Letter),
 			from.Format("02.01.2006"), to14.Format("02.01.2006"))
+		first := excelSheetName(firstRaw)
+
 		if idx, err := f.GetSheetIndex(first); err == nil && idx >= 0 {
 			f.SetActiveSheet(idx)
 		}
@@ -225,7 +240,7 @@ func ConsultationsExcelExportAdmin(
 	now := time.Now()
 
 	for _, t := range teachers {
-		sheet := t.Name
+		sheet := excelSheetName(t.Name)
 
 		// Данные по учителю: только реальные брони и конкретный ребёнок/класс
 		rows, err := database.QueryContext(ctx, `
