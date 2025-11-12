@@ -125,7 +125,10 @@ func handleParentBook(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.D
 		reply(bot, chatID, "Нельзя записаться: учитель не привязан к классу вашего ребёнка.")
 		return true
 	}
-
+	if !slot.StartAt.After(time.Now()) {
+		reply(bot, chatID, "Слот уже в прошлом.")
+		return true
+	}
 	ok, err := db.TryBookSlot(ctx, database, slotID, u.ID)
 	if err != nil {
 		observability.CaptureErr(err)
@@ -139,7 +142,7 @@ func handleParentBook(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.D
 
 	// перечитываем слот (теперь booked_by_id заполнен)
 	slot, _ = db.GetSlotByID(ctx, database, slotID)
-	_ = SendConsultBookedNotification(ctx, bot, database, *slot, time.Local)
+	_ = SendConsultBookedNotification(ctx, bot, database, *slot)
 
 	when := slot.StartAt.In(time.Local).Format("02.01.2006 15:04")
 	reply(bot, chatID, "Запись оформлена на "+when+". Напоминание придёт за 24ч и за 1ч.")

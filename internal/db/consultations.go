@@ -54,8 +54,13 @@ func CreateSlots(ctx context.Context, database *sql.DB, teacherID, classID int64
 func TryBookSlot(ctx context.Context, database *sql.DB, slotID, parentUserID int64) (bool, error) {
 	res, err := database.ExecContext(ctx, `
 		UPDATE consult_slots
-		SET booked_by_id = $1, booked_at = now(), updated_at = now()
-		WHERE id = $2 AND booked_by_id IS NULL
+		SET booked_by_id  = $1,
+		    booked_at     = NOW(),
+		    cancel_reason = NULL,
+		    updated_at    = NOW()
+		WHERE id = $2
+		  AND booked_by_id IS NULL
+		  AND start_at > NOW()
 	`, parentUserID, slotID)
 	if err != nil {
 		return false, err
@@ -460,14 +465,18 @@ func SlotHasClass(ctx context.Context, database *sql.DB, slotID, classID int64) 
 // Возвращает true, если удалось (слот был свободен).
 func TryBookSlotWithChild(ctx context.Context, dbx *sql.DB, slotID, parentID, childID, classID int64) (bool, error) {
 	res, err := dbx.ExecContext(ctx, `
-		UPDATE consult_slots
-		SET booked_by_id   = $2,
-		    booked_at      = NOW(),
-		    booked_child_id = $3,
-		    booked_class_id = $4
-		WHERE id = $1
-		  AND booked_by_id IS NULL
-	`, slotID, parentID, childID, classID)
+	UPDATE consult_slots
+	SET booked_by_id    = $2,
+	    booked_at       = NOW(),
+	    booked_child_id = $3,
+	    booked_class_id = $4,
+	    cancel_reason   = NULL,
+	    updated_at      = NOW()
+	WHERE id = $1
+	  AND booked_by_id IS NULL
+	  AND start_at > NOW()
+`, slotID, parentID, childID, classID)
+
 	if err != nil {
 		return false, err
 	}

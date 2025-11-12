@@ -76,7 +76,7 @@ func main() {
 	bot.Debug = (cfg.Env == "dev")
 
 	// === DB ===
-	os.Setenv("DATABASE_URL", cfg.DatabaseURL) // db.MustOpen читает из ENV
+	_ = os.Setenv("DATABASE_URL", cfg.DatabaseURL) // db.MustOpen читает из ENV
 	database, err := db.MustOpen()
 	if err != nil {
 		lg.Sugar.Fatalw("db open", "err", err)
@@ -115,9 +115,7 @@ func main() {
 	lg.Sugar.Infow("http started", "addr", cfg.HTTPAddr)
 
 	// === REMINDERS ===
-	// Если есть конфиг таймзоны — подставь, иначе используем локаль сервера
-	loc := time.Local
-	jobs.StartConsultReminderLoop(ctx, bot, database, loc)
+	jobs.StartConsultReminderLoop(ctx, bot, database)
 
 	// === Фоновые задачи ===
 	// app.StartSchoolYearNotifier(bot, database, cfg.Location) // если функция поддерживает tz

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
 	"github.com/Spok95/telegram-school-bot/internal/models"
@@ -15,7 +14,7 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/db"
 )
 
-func SendConsultReminder(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, slot db.ConsultSlot, due string, loc *time.Location) error {
+func SendConsultReminder(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, slot db.ConsultSlot, due string) error {
 	if !slot.BookedByID.Valid {
 		// слот не забронирован — слать нечего
 		return nil
@@ -65,7 +64,7 @@ func SendConsultReminder(ctx context.Context, bot *tgbotapi.BotAPI, database *sq
 }
 
 // SendConsultBookedNotification — моментальная нотификация о записи (оба адресата)
-func SendConsultBookedNotification(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, slot db.ConsultSlot, loc *time.Location) error {
+func SendConsultBookedNotification(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, slot db.ConsultSlot) error {
 	if !slot.BookedByID.Valid {
 		return nil
 	}
@@ -101,12 +100,18 @@ func SendConsultBookedNotification(ctx context.Context, bot *tgbotapi.BotAPI, da
 }
 
 // SendConsultBookedCard карточки при брони
-func SendConsultBookedCard(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, slot db.ConsultSlot, parent models.User, child models.User, loc *time.Location) error {
+func SendConsultBookedCard(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, slot db.ConsultSlot, parent models.User, child models.User) error {
 	teacher, err := db.GetUserByID(ctx, database, slot.TeacherID)
 	if err != nil {
 		return err
 	}
-	class, _ := db.GetClassByID(ctx, database, slot.ClassID)
+	var classID int64
+	if child.ClassID != nil {
+		classID = *child.ClassID
+	} else {
+		classID = slot.ClassID
+	}
+	class, _ := db.GetClassByID(ctx, database, classID)
 
 	when := fmt.Sprintf("%s — %s",
 		slot.StartAt.Format("02.01.2006 15:04"),
@@ -141,7 +146,7 @@ func SendConsultBookedCard(ctx context.Context, bot *tgbotapi.BotAPI, database *
 }
 
 // SendConsultCancelCards — карточки об отмене: учителю и родителю + бродкаст по классу.
-func SendConsultCancelCards(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, parentID int64, slot db.ConsultSlot, loc *time.Location) error {
+func SendConsultCancelCards(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, parentID int64, slot db.ConsultSlot) error {
 	// участники
 	parent, err := db.GetUserByID(ctx, database, parentID)
 	if err != nil {
@@ -151,15 +156,38 @@ func SendConsultCancelCards(ctx context.Context, bot *tgbotapi.BotAPI, database 
 	if err != nil {
 		return err
 	}
-	class, err := db.GetClassByID(ctx, database, slot.ClassID)
+
+	// дочитываем, что именно было забронировано
+	var bookedClassID sql.NullInt64
+	var bookedChildID sql.NullInt64
+	_ = database.QueryRowContext(ctx, `
+	    SELECT booked_class_id, booked_child_id
+	    FROM consult_slots
+	    WHERE id = $1
+	`, slot.ID).Scan(&bookedClassID, &bookedChildID)
+
+	// определяем класс для сообщения
+	classID := slot.ClassID
+	if bookedClassID.Valid {
+		classID = bookedClassID.Int64
+	}
+	class, err := db.GetClassByID(ctx, database, classID)
 	if err != nil {
 		return err
 	}
 
-	// ребёнок родителя в этом классе (если есть)
+	// определяем имя ребёнка
 	var childName string
-	if child, err := db.GetChildByParentAndClass(ctx, database, parentID, slot.ClassID); err == nil && child != nil {
-		childName = child.Name
+	if bookedChildID.Valid {
+		ch, err := db.GetUserByID(ctx, database, bookedChildID.Int64)
+		if err == nil {
+			childName = ch.Name
+		}
+	} else {
+		// старый fallback: поиск ребёнка этого родителя в этом классе
+		if ch, err := db.GetChildByParentAndClass(ctx, database, parentID, classID); err == nil && ch != nil {
+			childName = ch.Name
+		}
 	}
 
 	classLabel := fmt.Sprintf("%d%s", class.Number, class.Letter)

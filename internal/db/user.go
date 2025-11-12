@@ -337,12 +337,24 @@ func ChangeRoleToStudentWithAudit(ctx context.Context, database *sql.DB, targetU
 		}
 	}
 
+	var classID sql.NullInt64
+	err = tx.QueryRowContext(ctx, `
+        SELECT id
+        FROM classes
+        WHERE number = $1 AND lower(letter) = lower($2)
+        LIMIT 1
+    `, classNumber, classLetter).Scan(&classID)
+	if err == sql.ErrNoRows {
+		classID.Valid = false
+	} else if err != nil {
+		return err
+	}
 	// Назначаем роль student и класс
 	if _, err = tx.ExecContext(ctx, `
 		UPDATE users
-		SET role='student', class_number=$1, class_letter=$2, class_name=NULL, class_id=NULL
+		SET role='student', class_number=$1, class_letter=$2, class_name=NULL, class_id=$4
 		WHERE id=$3
-	`, classNumber, classLetter, targetUserID); err != nil {
+	`, classNumber, classLetter, targetUserID, classID); err != nil {
 		return err
 	}
 

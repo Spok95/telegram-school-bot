@@ -13,9 +13,9 @@ import (
 	"github.com/Spok95/telegram-school-bot/internal/observability"
 )
 
-func StartConsultReminderLoop(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, loc *time.Location) {
-	go runEvery(ctx, time.Minute, func(c context.Context) { process(c, bot, database, loc, "24 hours") })
-	go runEvery(ctx, time.Minute, func(c context.Context) { process(c, bot, database, loc, "1 hours") })
+func StartConsultReminderLoop(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB) {
+	go runEvery(ctx, time.Minute, func(c context.Context) { process(c, bot, database, "24 hours") })
+	go runEvery(ctx, time.Minute, func(c context.Context) { process(c, bot, database, "1 hours") })
 }
 
 func runEvery(ctx context.Context, d time.Duration, fn func(context.Context)) {
@@ -38,7 +38,7 @@ func runEvery(ctx context.Context, d time.Duration, fn func(context.Context)) {
 	}
 }
 
-func process(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, loc *time.Location, intervalText string) {
+func process(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, intervalText string) {
 	// 1) Кандидаты на напоминание
 	slots, err := db.DueForReminder(ctx, database, intervalText, 100)
 	if err != nil {
@@ -55,7 +55,7 @@ func process(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, loc *t
 		if !s.BookedByID.Valid {
 			continue
 		}
-		if err := app.SendConsultReminder(ctx, bot, database, s, intervalText, loc); err != nil {
+		if err := app.SendConsultReminder(ctx, bot, database, s, intervalText); err != nil {
 			observability.CaptureErr(err)
 			continue
 		}

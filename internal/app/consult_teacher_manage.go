@@ -203,7 +203,7 @@ func TryHandleTeacherManageCallback(ctx context.Context, bot *tgbotapi.BotAPI, d
 		}
 
 		// Карточки + бродкаст используем ДАННЫЕ ДО отмены
-		_ = SendConsultCancelCards(ctx, bot, database, parentID, *slotBefore, time.Local)
+		_ = SendConsultCancelCards(ctx, bot, database, parentID, *slotBefore)
 
 		day := slotBefore.StartAt.In(time.Local)
 		day = time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, time.Local)

@@ -115,6 +115,11 @@ func TryHandleParentBookCallback(ctx context.Context, bot *tgbotapi.BotAPI, data
 		}
 		return true
 	}
+	now := time.Now()
+	if !slot.StartAt.After(now) {
+		_ = sendCb(bot, cb, "Время слота уже прошло")
+		return true
+	}
 	child, _ := db.GetUserByID(ctx, database, childID) // значение, не указатель
 	if child.ID == 0 {
 		if _, err := tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Неверный ребёнок")); err != nil {
@@ -153,7 +158,7 @@ func TryHandleParentBookCallback(ctx context.Context, bot *tgbotapi.BotAPI, data
 	slot, _ = db.GetSlotByID(ctx, database, slotID)
 
 	// уведомления карточками (parent/child — значения)
-	_ = SendConsultBookedCard(ctx, bot, database, *slot, *u, child, time.Local)
+	_ = SendConsultBookedCard(ctx, bot, database, *slot, *u, child)
 
 	edit := tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "Запись оформлена.")
 	if _, err := tg.Send(bot, edit); err != nil {
@@ -231,7 +236,7 @@ func TryHandleParentCancelCallback(ctx context.Context, bot *tgbotapi.BotAPI, da
 	}
 	// уведомления: карточки тому, кого это касается (широковещалку мы убрали в notifications)
 	if slot, _ := db.GetSlotByID(ctx, database, slotID); slot != nil {
-		_ = SendConsultCancelCards(ctx, bot, database, u.ID, *slot, time.Local)
+		_ = SendConsultCancelCards(ctx, bot, database, u.ID, *slot)
 	}
 	_ = sendCb(bot, cb, "Отменено")
 	return true
