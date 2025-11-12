@@ -476,7 +476,6 @@ func TryBookSlotWithChild(ctx context.Context, dbx *sql.DB, slotID, parentID, ch
 	  AND booked_by_id IS NULL
 	  AND start_at > NOW()
 `, slotID, parentID, childID, classID)
-
 	if err != nil {
 		return false, err
 	}
