@@ -81,8 +81,8 @@ func administrationMenu() tgbotapi.ReplyKeyboardMarkup {
 
 	// отчёт по консультациям — только если включены
 	if consultationsEnabled {
-		kbRows[2] = tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("📈 Отчёт консультаций"),
+		kbRows = append(kbRows, tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("📈 Отчёт консультаций")),
 		)
 	}
 

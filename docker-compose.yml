@@ -36,6 +36,8 @@ services:
       LOG_LEVEL: "info"     # или "debug"
       ENV: "prod"           # dev|prod
       SENTRY_DSN: ${SENTRY_DSN}
+    volumes:
+      - ./backups:/backups:ro
     ports:
       - "8080:8080"         # /healthz и /metrics
     restart: unless-stopped
