@@ -212,7 +212,11 @@ func TryHandleParentMyConsultsCallback(ctx context.Context, bot *tgbotapi.BotAPI
 	}
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for _, it := range items {
-		label := it.StartAt.Format("02.01 15:04") + " — " + it.Teacher
+		fmtLabel := "оффлайн"
+		if it.ConsultFormat == "online" {
+			fmtLabel = "онлайн"
+		}
+		label := fmt.Sprintf("%s • %s — %s", it.StartAt.Format("02.01 15:04"), fmtLabel, it.Teacher)
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("❌ Отменить: "+label, fmt.Sprintf("p_cancel:%d", it.SlotID)),
 		))

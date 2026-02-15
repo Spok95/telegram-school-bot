@@ -422,6 +422,7 @@ type ParentBooking struct {
 	ClassID    int64
 	ClassLabel string
 	ChildName  string
+	ConsultFormat string
 }
 
 // ListParentBookings — предстоящие записи родителя (на будущее).
@@ -432,7 +433,8 @@ func ListParentBookings(ctx context.Context, database *sql.DB, parentID int64, f
 		       t.id, t.name,
 		       COALESCE(cls.id, 0),
 		       COALESCE(cls.number::text || cls.letter, ''),
-		       COALESCE(ch.name, '')
+		       COALESCE(ch.name, ''),
+       		   COALESCE(s.consult_format, 'offline')
 		FROM consult_slots s
 		JOIN users t ON t.id = s.teacher_id
 		LEFT JOIN classes cls ON cls.id = s.class_id
@@ -463,7 +465,7 @@ func ListParentBookings(ctx context.Context, database *sql.DB, parentID int64, f
 	var out []ParentBooking
 	for rows.Next() {
 		var r ParentBooking
-		if err := rows.Scan(&r.SlotID, &r.StartAt, &r.EndAt, &r.TeacherID, &r.Teacher, &r.ClassID, &r.ClassLabel, &r.ChildName); err != nil {
+		if err := rows.Scan(&r.SlotID, &r.StartAt, &r.EndAt, &r.TeacherID, &r.Teacher, &r.ClassID, &r.ClassLabel, &r.ChildName, &r.ConsultFormat); err != nil {
 			return nil, err
 		}
 
