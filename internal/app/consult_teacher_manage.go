@@ -46,6 +46,7 @@ type teacherLinkState struct {
 var teacherLinkFSM sync.Map // chatID -> teacherLinkState
 
 func setTeacherLinkFSM(chatID int64, st teacherLinkState) { teacherLinkFSM.Store(chatID, st) }
+
 func getTeacherLinkFSM(chatID int64) (teacherLinkState, bool) {
 	v, ok := teacherLinkFSM.Load(chatID)
 	if !ok {
@@ -98,6 +99,11 @@ func TryHandleTeacherMySlots(ctx context.Context, bot *tgbotapi.BotAPI, database
 func TryHandleTeacherManageCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) bool {
 	if cb == nil || cb.Data == "" {
 		return false
+	}
+
+	if cb.Data == "t_noop" {
+		_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, ""))
+		return true
 	}
 
 	// 1) День → показать слоты за день (уже работает у тебя)
@@ -336,7 +342,7 @@ func renderTeacherDaySlots(ctx context.Context, bot *tgbotapi.BotAPI, database *
 			linkMark = "🔗"
 		}
 
-		label := fmt.Sprintf("%s %s–%s • %s %s (класс: %s) #%d",
+		info := fmt.Sprintf("%s %s–%s • %s%s\nкласс: %s  #%d",
 			mark,
 			s.StartAt.Format("15:04"),
 			s.EndAt.Format("15:04"),
@@ -345,29 +351,33 @@ func renderTeacherDaySlots(ctx context.Context, bot *tgbotapi.BotAPI, database *
 			strings.Join(classLabels, ", "),
 			s.ID,
 		)
-		label = strings.ReplaceAll(label, "  ", " ")
 
-		// кнопки
+		// 1) строка с инфой (кнопка “пустышка”, чтобы показать текст)
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(info, "t_noop"),
+		))
+
+		// 2) строка с действиями (короткие подписи)
 		if s.BookedByID.Valid {
 			if s.ConsultFormat == "online" {
 				rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("Отменить "+label, fmt.Sprintf("t_cancel:%d", s.ID)),
-					tgbotapi.NewInlineKeyboardButtonData("Ссылка", fmt.Sprintf("t_link:%d", s.ID)),
+					tgbotapi.NewInlineKeyboardButtonData("Отменить", fmt.Sprintf("t_cancel:%d", s.ID)),
+					tgbotapi.NewInlineKeyboardButtonData("🔗", fmt.Sprintf("t_link:%d", s.ID)),
 				))
 			} else {
 				rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("Отменить "+label, fmt.Sprintf("t_cancel:%d", s.ID)),
+					tgbotapi.NewInlineKeyboardButtonData("Отменить", fmt.Sprintf("t_cancel:%d", s.ID)),
 				))
 			}
 		} else {
 			if s.ConsultFormat == "online" {
 				rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("Удалить "+label, fmt.Sprintf("t_del:%d", s.ID)),
-					tgbotapi.NewInlineKeyboardButtonData("Ссылка", fmt.Sprintf("t_link:%d", s.ID)),
+					tgbotapi.NewInlineKeyboardButtonData("Удалить", fmt.Sprintf("t_del:%d", s.ID)),
+					tgbotapi.NewInlineKeyboardButtonData("🔗", fmt.Sprintf("t_link:%d", s.ID)),
 				))
 			} else {
 				rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("Удалить "+label, fmt.Sprintf("t_del:%d", s.ID)),
+					tgbotapi.NewInlineKeyboardButtonData("Удалить", fmt.Sprintf("t_del:%d", s.ID)),
 				))
 			}
 		}

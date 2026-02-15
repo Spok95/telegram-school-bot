@@ -10,14 +10,14 @@ import (
 )
 
 type ConsultSlot struct {
-	ID         int64
-	TeacherID  int64
-	ClassID    int64
-	StartAt    time.Time
-	EndAt      time.Time
-	BookedByID sql.NullInt64
+	ID            int64
+	TeacherID     int64
+	ClassID       int64
+	StartAt       time.Time
+	EndAt         time.Time
+	BookedByID    sql.NullInt64
 	ConsultFormat string
-	OnlineURL sql.NullString
+	OnlineURL     sql.NullString
 }
 
 // CreateSlots — пачечная вставка готовых стартов слотов с длительностью dur.
@@ -234,7 +234,7 @@ func CancelBookedSlot(ctx context.Context, database *sql.DB, teacherID, slotID i
 
 // CreateSlotsMultiClasses — создаёт/переиспользует слоты учителя на конкретных стартах
 // и добавляет привязки слотов к нескольким классам (consult_slot_classes).
-func CreateSlotsMultiClasses(ctx context.Context, dbx *sql.DB, teacherID int64, classIDs []int64, starts []time.Time, stepMin int) (int64, error) {
+func CreateSlotsMultiClasses(ctx context.Context, dbx *sql.DB, teacherID int64, classIDs []int64, starts []time.Time, stepMin int, consultFormat string) (int64, error) {
 	if len(classIDs) == 0 || len(starts) == 0 {
 		return 0, nil
 	}
@@ -254,11 +254,28 @@ func CreateSlotsMultiClasses(ctx context.Context, dbx *sql.DB, teacherID int64, 
 		// 1) пытаемся вставить слот: если уже есть такой (teacher_id, start_at) — не падаем
 		var slotID int64
 		err = tx.QueryRowContext(ctx, `
-			INSERT INTO consult_slots (teacher_id, class_id, start_at, end_at)
-			VALUES ($1, $2, $3::timestamp without time zone, $4::timestamp without time zone)
+			INSERT INTO consult_slots (teacher_id, class_id, start_at, end_at, consult_format, online_url)
+			VALUES ($1, $2, $3::timestamp without time zone, $4::timestamp without time zone, $5, NULL)
 			ON CONFLICT (teacher_id, start_at) DO NOTHING
 			RETURNING id
-		`, teacherID, primaryClassID, st, end).Scan(&slotID)
+		`, teacherID, primaryClassID, st, end, consultFormat).Scan(&slotID)
+
+		if consultFormat != "online" {
+			consultFormat = "offline"
+		}
+
+		_, err = tx.ExecContext(ctx, `
+			UPDATE consult_slots
+			SET consult_format = $1,
+	    		online_url      = CASE WHEN $1 = 'online' THEN online_url ELSE NULL END,
+	    		updated_at      = NOW()
+			WHERE id = $2
+	  			AND teacher_id = $3
+	  			AND booked_by_id IS NULL
+		`, consultFormat, slotID, teacherID)
+		if err != nil {
+			return 0, err
+		}
 
 		if err == sql.ErrNoRows {
 			// слот уже существовал — возьмём его id

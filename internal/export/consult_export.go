@@ -141,7 +141,6 @@ func ConsultationsExcelExport(ctx context.Context, database *sql.DB, teacherID i
 			  )
 			ORDER BY s.start_at
 		`, teacherID, fromOrNow, to14, cl.ID)
-
 		if err != nil {
 			return "", err
 		}
@@ -263,7 +262,7 @@ func ConsultationsExcelExportAdmin(
 
 	rowSum := 3
 	firstDataSheetIdx := -1
-	//now := time.Now()
+	// now := time.Now()
 
 	for _, t := range teachers {
 		sheet := excelSheetName(t.Name)
