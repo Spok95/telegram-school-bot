@@ -414,14 +414,14 @@ func ParentCancelBookedSlot(ctx context.Context, database *sql.DB, parentID, slo
 }
 
 type ParentBooking struct {
-	SlotID     int64
-	StartAt    time.Time
-	EndAt      time.Time
-	TeacherID  int64
-	Teacher    string
-	ClassID    int64
-	ClassLabel string
-	ChildName  string
+	SlotID        int64
+	StartAt       time.Time
+	EndAt         time.Time
+	TeacherID     int64
+	Teacher       string
+	ClassID       int64
+	ClassLabel    string
+	ChildName     string
 	ConsultFormat string
 }
 
@@ -539,8 +539,10 @@ func SetSlotOnlineURL(ctx context.Context, dbx *sql.DB, teacherID, slotID int64,
 	return aff == 1, nil
 }
 
-var ErrTeacherSlotOverlap = errors.New("teacher slot overlaps existing")
-var ErrParentBookingOverlap = errors.New("parent booking overlaps existing")
+var (
+	ErrTeacherSlotOverlap   = errors.New("teacher slot overlaps existing")
+	ErrParentBookingOverlap = errors.New("parent booking overlaps existing")
+)
 
 func isExclusionConstraint(err error, constraint string) bool {
 	var pqErr *pq.Error
