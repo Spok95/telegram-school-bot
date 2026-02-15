@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/lib/pq"
@@ -34,7 +35,10 @@ func CreateSlots(ctx context.Context, database *sql.DB, teacherID, classID int64
 		VALUES ($1, $2, $3::timestamp without time zone, $4::timestamp without time zone)
 		ON CONFLICT (teacher_id, start_at) DO NOTHING
 	`)
-	if err != nil {
+	if err != nil && err != sql.ErrNoRows {
+		if isExclusionConstraint(err, "consult_slots_no_overlap_teacher") {
+			return 0, ErrTeacherSlotOverlap
+		}
 		return 0, err
 	}
 	defer func() { _ = stmt.Close() }()
@@ -65,8 +69,12 @@ func TryBookSlot(ctx context.Context, database *sql.DB, slotID, parentUserID int
 		  AND start_at > NOW()
 	`, parentUserID, slotID)
 	if err != nil {
+		if isExclusionConstraint(err, "consult_slots_no_overlap_parent") {
+			return false, ErrParentBookingOverlap
+		}
 		return false, err
 	}
+
 	n, _ := res.RowsAffected()
 	return n == 1, nil
 }
@@ -259,6 +267,13 @@ func CreateSlotsMultiClasses(ctx context.Context, dbx *sql.DB, teacherID int64, 
 			ON CONFLICT (teacher_id, start_at) DO NOTHING
 			RETURNING id
 		`, teacherID, primaryClassID, st, end, consultFormat).Scan(&slotID)
+
+		if err != nil && err != sql.ErrNoRows {
+			if isExclusionConstraint(err, "consult_slots_no_overlap_teacher") {
+				return 0, ErrTeacherSlotOverlap
+			}
+			return 0, err
+		}
 
 		if consultFormat != "online" {
 			consultFormat = "offline"
@@ -484,38 +499,26 @@ func SlotHasClass(ctx context.Context, database *sql.DB, slotID, classID int64) 
 // Возвращает true, если удалось (слот был свободен).
 func TryBookSlotWithChild(ctx context.Context, dbx *sql.DB, slotID, parentID, childID, classID int64) (bool, error) {
 	res, err := dbx.ExecContext(ctx, `
-	UPDATE consult_slots
-	SET booked_by_id    = $2,
-	    booked_at       = NOW(),
-	    booked_child_id = $3,
-	    booked_class_id = $4,
-	    cancel_reason   = NULL,
-	    updated_at      = NOW()
-	WHERE id = $1
-	  AND booked_by_id IS NULL
-	  AND start_at > NOW()
-`, slotID, parentID, childID, classID)
+		UPDATE consult_slots
+		SET booked_by_id    = $2,
+	    	booked_at       = NOW(),
+	    	booked_child_id = $3,
+	    	booked_class_id = $4,
+	    	cancel_reason   = NULL,
+	    	updated_at      = NOW()
+		WHERE id = $1
+	  		AND booked_by_id IS NULL
+	  		AND start_at > NOW()
+	`, slotID, parentID, childID, classID)
 	if err != nil {
+		if isExclusionConstraint(err, "consult_slots_no_overlap_parent") {
+			return false, ErrParentBookingOverlap
+		}
 		return false, err
 	}
+
 	aff, _ := res.RowsAffected()
 	return aff > 0, nil
-}
-
-// ChildIDSlot получаем id ученика из слота
-func ChildIDSlot(ctx context.Context, database *sql.DB, slotID int64) (int64, error) {
-	var sid sql.NullInt64
-	err := database.QueryRowContext(ctx, `
-	SELECT booked_child_id FROM consult_slots
-	WHERE id = $1`, slotID).Scan(&sid)
-	if err != nil {
-		return 0, err
-	}
-	if sid.Valid {
-		studentID := sid.Int64
-		return studentID, nil
-	}
-	return 0, nil
 }
 
 func SetSlotOnlineURL(ctx context.Context, dbx *sql.DB, teacherID, slotID int64, url string) (bool, error) {
@@ -532,4 +535,19 @@ func SetSlotOnlineURL(ctx context.Context, dbx *sql.DB, teacherID, slotID int64,
 	}
 	aff, _ := res.RowsAffected()
 	return aff == 1, nil
+}
+
+var ErrTeacherSlotOverlap = errors.New("teacher slot overlaps existing")
+var ErrParentBookingOverlap = errors.New("parent booking overlaps existing")
+
+func isExclusionConstraint(err error, constraint string) bool {
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) {
+		// 23P01 = exclusion_violation
+		if string(pqErr.Code) == "23P01" && pqErr.Constraint == constraint {
+			return true
+		}
+	}
+	// fallback на всякий случай (если драйвер/обёртка режет pq.Error)
+	return strings.Contains(err.Error(), constraint)
 }

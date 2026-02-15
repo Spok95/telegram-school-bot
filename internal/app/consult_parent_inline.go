@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -155,6 +156,12 @@ func TryHandleParentBookCallback(ctx context.Context, bot *tgbotapi.BotAPI, data
 
 	ok, err := db.TryBookSlotWithChild(ctx, database, slot.ID, u.ID, child.ID, *child.ClassID)
 	if err != nil {
+		if errors.Is(err, db.ErrParentBookingOverlap) {
+			_, _ = tg.Send(bot, tgbotapi.NewMessage(chatID,
+				"Запись невозможна: у вас уже есть консультация на это время.",
+			))
+			return true
+		}
 		observability.CaptureErr(err)
 		_ = sendCb(bot, cb, "Ошибка бронирования")
 		return true

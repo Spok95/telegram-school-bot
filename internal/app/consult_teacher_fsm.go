@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -277,7 +278,14 @@ func TryHandleTeacherSlotsCallback(ctx context.Context, bot *tgbotapi.BotAPI, da
 		}
 		inserted, err := db.CreateSlotsMultiClasses(ctx, database, u.ID, classIDs, starts, st.StepMin, st.ConsultFormat)
 		if err != nil {
-			upsertStepMsg(bot, chatID, st, "Ошибка при создании слотов.", nil)
+			if errors.Is(err, db.ErrTeacherSlotOverlap) {
+				upsertStepMsg(bot, chatID, st,
+					"Нельзя создать пересекающиеся слоты: в выбранном окне уже есть слот, который пересекается по времени.\nИзмените окно времени/шаг или удалите конфликтующий слот.",
+					nil,
+				)
+			} else {
+				upsertStepMsg(bot, chatID, st, "Ошибка при создании слотов.", nil)
+			}
 			clearTeacherFSM(chatID)
 			return true
 		}
@@ -321,7 +329,14 @@ func TryHandleTeacherSlotsCallback(ctx context.Context, bot *tgbotapi.BotAPI, da
 
 		inserted, err := db.CreateSlotsMultiClasses(ctx, database, u.ID, classIDs, starts, st.StepMin, st.ConsultFormat)
 		if err != nil {
-			upsertStepMsg(bot, chatID, st, "Ошибка при создании слотов.", nil)
+			if errors.Is(err, db.ErrTeacherSlotOverlap) {
+				upsertStepMsg(bot, chatID, st,
+					"Нельзя создать пересекающиеся слоты: в выбранном окне уже есть слот, который пересекается по времени.\nИзмените окно времени/шаг или удалите конфликтующий слот.",
+					nil,
+				)
+			} else {
+				upsertStepMsg(bot, chatID, st, "Ошибка при создании слотов.", nil)
+			}
 			clearTeacherFSM(chatID)
 			return true
 		}
