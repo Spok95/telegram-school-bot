@@ -56,7 +56,7 @@ func teacherMenu() tgbotapi.ReplyKeyboardMarkup {
 			tgbotapi.NewKeyboardButtonRow(
 				tgbotapi.NewKeyboardButton("🗓 Создать слоты"),
 				tgbotapi.NewKeyboardButton("📋 Мои слоты"),
-				tgbotapi.NewKeyboardButton("📘 Расписание консультаций"),
+				tgbotapi.NewKeyboardButton("📘 Мои консультации"),
 			),
 		)
 	}

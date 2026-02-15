@@ -355,7 +355,7 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 			return
 		}
 
-	case "📘 Расписание", "📘 Расписание консультаций", "Расписание", "Расписание консультаций":
+	case "📘 Расписание", "📘 Мои консультации", "Расписание", "Мои консультации":
 		if user.Role != nil && *user.Role == models.Teacher {
 			loc := time.Local
 			now := time.Now().In(loc)
@@ -377,7 +377,7 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 				}
 
 				doc := tgbotapi.NewDocument(chatID, tgbotapi.FilePath(path))
-				doc.Caption = "📘 Расписание консультаций"
+				doc.Caption = "📘 Мои консультации"
 				if _, e := tg.Send(bot, doc); e != nil {
 					metrics.HandlerErrors.Inc()
 				}

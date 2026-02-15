@@ -482,3 +482,19 @@ func TryBookSlotWithChild(ctx context.Context, dbx *sql.DB, slotID, parentID, ch
 	aff, _ := res.RowsAffected()
 	return aff > 0, nil
 }
+
+// ChildIDSlot получаем id ученика из слота
+func ChildIDSlot(ctx context.Context, database *sql.DB, slotID int64) (int64, error) {
+	var sid sql.NullInt64
+	err := database.QueryRowContext(ctx, `
+	SELECT booked_child_id FROM consult_slots
+	WHERE id = $1`, slotID).Scan(&sid)
+	if err != nil {
+		return 0, err
+	}
+	if sid.Valid {
+		studentID := sid.Int64
+		return studentID, nil
+	}
+	return 0, nil
+}

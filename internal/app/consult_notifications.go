@@ -29,6 +29,14 @@ func SendConsultReminder(ctx context.Context, bot *tgbotapi.BotAPI, database *sq
 	if err != nil {
 		return err
 	}
+	studentID, err := db.ChildIDSlot(ctx, database, slot.ID)
+	if err != nil {
+		return err
+	}
+	studentName, err := db.GetUserByID(ctx, database, studentID)
+	if err != nil {
+		return err
+	}
 
 	parentChat := parent.TelegramID
 	teacherChat := teacher.TelegramID
@@ -43,16 +51,16 @@ func SendConsultReminder(ctx context.Context, bot *tgbotapi.BotAPI, database *sq
 	var prefix string
 	switch due {
 	case "24 hours":
-		prefix = "Напоминание за 24 часа"
+		prefix = "Напоминаем, что завтра"
 	default:
-		prefix = "Напоминание за 1 час"
+		prefix = "Напоминаем, что через час"
 	}
 
 	timeWindow := fmt.Sprintf("%s–%s", whenStart.Format("02.01.2006 15:04"), whenEnd.Format("15:04"))
 
 	// Тексты: можно обогатить именами/классами — сейчас минимально, чтобы не зависеть от лишних join'ов
-	textParent := fmt.Sprintf("%s: консультация у учителя %s.", prefix, timeWindow)
-	textTeacher := fmt.Sprintf("%s: консультация с родителем %s.", prefix, timeWindow)
+	textParent := fmt.Sprintf("%s Вы записаны на консультацию %s, учитель: %s.", prefix, timeWindow, teacher.Name)
+	textTeacher := fmt.Sprintf("%s к Вам записаны на консультацию %s, родитель: %s, ученик: %s.", prefix, timeWindow, parent.Name, studentName.Name)
 
 	if _, err := tg.Send(bot, tgbotapi.NewMessage(parentChat, textParent)); err != nil {
 		metrics.HandlerErrors.Inc()
