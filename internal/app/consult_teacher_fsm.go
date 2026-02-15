@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -31,6 +32,7 @@ type teacherFSMState struct {
 	MsgID            int // последний message id, который редактируем
 	TempNumber       int // выбранный номер класса (для шага выбора буквы)
 	SelectedClassIDs []int64
+	ConsultFormat    string // 'online' | 'offline'
 }
 
 var teacherFSM sync.Map // key: chatID(int64) -> *teacherFSMState
@@ -187,15 +189,9 @@ func TryHandleTeacherSlotsCallback(ctx context.Context, bot *tgbotapi.BotAPI, da
 			upsertStepMsg(bot, chatID, st, "Шаг 3/5. Введите шаг в минутах, необходимый на одну консультацию (например, 15)", &kb)
 			return true
 		case 4:
-			st.Step = 3
+			st.Step = 4
 			setTeacherFSM(chatID, st)
-			kb := tgbotapi.NewInlineKeyboardMarkup(
-				kbRow(
-					tgbotapi.NewInlineKeyboardButtonData("Назад", "t_slots:back:2"),
-					tgbotapi.NewInlineKeyboardButtonData("Отмена", "t_slots:cancel"),
-				),
-			)
-			nextStepBelowInput(bot, chatID, st, "Шаг 3/5. Введите шаг в минутах, необходимый на одну консультацию (например, 15)", &kb)
+			showClassMultiMenu(ctx, bot, database, chatID, st)
 			return true
 		}
 		return true
@@ -218,12 +214,42 @@ func TryHandleTeacherSlotsCallback(ctx context.Context, bot *tgbotapi.BotAPI, da
 		showClassMultiMenu(ctx, bot, database, chatID, st)
 		return true
 
-	case "classes_done": // завершить выбор букв
+	case "classes_done":
 		if len(st.SelectedClassIDs) == 0 {
 			_ = sendCb(bot, cb, "Выберите хотя бы один класс")
 			return true
 		}
-		// генерируем слоты сразу здесь
+		st.Step = 5
+		setTeacherFSM(chatID, st)
+
+		rows := [][]tgbotapi.InlineKeyboardButton{
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("Онлайн", "t_slots:fmt:online"),
+				tgbotapi.NewInlineKeyboardButtonData("Оффлайн", "t_slots:fmt:offline"),
+			),
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("Назад", "t_slots:back:4"),
+				tgbotapi.NewInlineKeyboardButtonData("Отмена", "t_slots:cancel"),
+			),
+		}
+		kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
+		upsertStepMsg(bot, chatID, st, "Шаг 5/6. Выберите формат консультаций для создаваемых слотов:", &kb)
+		return true
+
+	case "fmt": // t_slots:fmt:online|offline
+		if len(parts) < 3 {
+			_ = sendCb(bot, cb, "Неверный формат")
+			return true
+		}
+		fmtVal := parts[2]
+		if fmtVal != "online" && fmtVal != "offline" {
+			_ = sendCb(bot, cb, "Неверный формат")
+			return true
+		}
+		st.ConsultFormat = fmtVal
+		setTeacherFSM(chatID, st)
+
+		// генерируем старты
 		loc := time.Local
 		makeDayTime := func(day time.Time, hh, mm int) time.Time {
 			return time.Date(day.Year(), day.Month(), day.Day(), hh, mm, 0, 0, loc)
@@ -243,13 +269,27 @@ func TryHandleTeacherSlotsCallback(ctx context.Context, bot *tgbotapi.BotAPI, da
 			clearTeacherFSM(chatID)
 			return true
 		}
+
 		u, _ := db.GetUserByTelegramID(ctx, database, chatID)
-		inserted, err := db.CreateSlotsMultiClasses(ctx, database, u.ID, st.SelectedClassIDs, starts, st.StepMin)
+
+		classIDs := st.SelectedClassIDs
+		if len(classIDs) == 0 && st.ClassID != 0 {
+			classIDs = []int64{st.ClassID}
+		}
+		inserted, err := db.CreateSlotsMultiClasses(ctx, database, u.ID, classIDs, starts, st.StepMin, st.ConsultFormat)
 		if err != nil {
-			upsertStepMsg(bot, chatID, st, "Ошибка при создании слотов.", nil)
+			if errors.Is(err, db.ErrTeacherSlotOverlap) {
+				upsertStepMsg(bot, chatID, st,
+					"Нельзя создать пересекающиеся слоты: в выбранном окне уже есть слот, который пересекается по времени.\nИзмените окно времени/шаг или удалите конфликтующий слот.",
+					nil,
+				)
+			} else {
+				upsertStepMsg(bot, chatID, st, "Ошибка при создании слотов.", nil)
+			}
 			clearTeacherFSM(chatID)
 			return true
 		}
+
 		nextStepBelowInput(bot, chatID, st, fmt.Sprintf("Готово. Создано слотов: %d.", inserted), nil)
 		clearTeacherFSM(chatID)
 		return true
@@ -287,9 +327,16 @@ func TryHandleTeacherSlotsCallback(ctx context.Context, bot *tgbotapi.BotAPI, da
 			classIDs = []int64{st.ClassID}
 		}
 
-		inserted, err := db.CreateSlotsMultiClasses(ctx, database, u.ID, classIDs, starts, st.StepMin)
+		inserted, err := db.CreateSlotsMultiClasses(ctx, database, u.ID, classIDs, starts, st.StepMin, st.ConsultFormat)
 		if err != nil {
-			upsertStepMsg(bot, chatID, st, "Ошибка при создании слотов.", nil)
+			if errors.Is(err, db.ErrTeacherSlotOverlap) {
+				upsertStepMsg(bot, chatID, st,
+					"Нельзя создать пересекающиеся слоты: в выбранном окне уже есть слот, который пересекается по времени.\nИзмените окно времени/шаг или удалите конфликтующий слот.",
+					nil,
+				)
+			} else {
+				upsertStepMsg(bot, chatID, st, "Ошибка при создании слотов.", nil)
+			}
 			clearTeacherFSM(chatID)
 			return true
 		}

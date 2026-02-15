@@ -16,11 +16,10 @@ import (
 
 func SendConsultReminder(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, slot db.ConsultSlot, due string) error {
 	if !slot.BookedByID.Valid {
-		// слот не забронирован — слать нечего
 		return nil
 	}
 
-	// кого оповещаем
+	// участники
 	parent, err := db.GetUserByID(ctx, database, slot.BookedByID.Int64)
 	if err != nil {
 		return err
@@ -33,26 +32,76 @@ func SendConsultReminder(ctx context.Context, bot *tgbotapi.BotAPI, database *sq
 	parentChat := parent.TelegramID
 	teacherChat := teacher.TelegramID
 	if parentChat == 0 || teacherChat == 0 {
-		// у кого-то нет telegram_id — просто вывалимся (можно залогировать в Sentry с деталями, если захочешь)
 		return nil
 	}
 
-	whenStart := slot.StartAt
-	whenEnd := slot.EndAt
+	// дочитываем, что именно было забронировано (класс/ребёнок)
+	var bookedClassID sql.NullInt64
+	var bookedChildID sql.NullInt64
+	_ = database.QueryRowContext(ctx, `
+		SELECT booked_class_id, booked_child_id
+		FROM consult_slots
+		WHERE id = $1
+	`, slot.ID).Scan(&bookedClassID, &bookedChildID)
 
-	var prefix string
-	switch due {
-	case "24 hours":
-		prefix = "Напоминание за 24 часа"
-	default:
-		prefix = "Напоминание за 1 час"
+	// класс
+	className := ""
+	if bookedClassID.Valid {
+		if cls, _ := db.GetClassByID(ctx, database, bookedClassID.Int64); cls != nil {
+			className = fmt.Sprintf("%d%s", cls.Number, strings.ToUpper(cls.Letter))
+		}
 	}
 
-	timeWindow := fmt.Sprintf("%s–%s", whenStart.Format("02.01.2006 15:04"), whenEnd.Format("15:04"))
+	// ребёнок
+	childName := ""
+	if bookedChildID.Valid {
+		if ch, err := db.GetUserByID(ctx, database, bookedChildID.Int64); err == nil {
+			childName = ch.Name
+		}
+	}
 
-	// Тексты: можно обогатить именами/классами — сейчас минимально, чтобы не зависеть от лишних join'ов
-	textParent := fmt.Sprintf("%s: консультация у учителя %s.", prefix, timeWindow)
-	textTeacher := fmt.Sprintf("%s: консультация с родителем %s.", prefix, timeWindow)
+	// префикс
+	var prefixParent string
+	var prefixTeacher string
+	switch due {
+	case "24 hours":
+		prefixParent = "Напоминаем, что завтра"
+		prefixTeacher = "Напоминаем, что завтра"
+	default:
+		prefixParent = "Напоминаем, что через час"
+		prefixTeacher = "Напоминаем, что через час"
+	}
+
+	timeWindow := fmt.Sprintf("%s–%s", slot.StartAt.Format("02.01.2006 15:04"), slot.EndAt.Format("15:04"))
+
+	// формат + ссылка
+	fmtLabel := "оффлайн"
+	if slot.ConsultFormat == "online" {
+		fmtLabel = "онлайн"
+	}
+	link := ""
+	if slot.ConsultFormat == "online" && slot.OnlineURL.Valid && strings.TrimSpace(slot.OnlineURL.String) != "" {
+		link = strings.TrimSpace(slot.OnlineURL.String)
+	}
+
+	// Родителю (строго по ТЗ)
+	textParent := fmt.Sprintf(
+		`%s Вы записаны на консультацию %s к %s, формат: %s`,
+		prefixParent, timeWindow, teacher.Name, fmtLabel,
+	)
+	if link != "" {
+		textParent += "\nСсылка: " + link
+	}
+
+	// Учителю (строго по ТЗ, без “фио учителя” внутри — учитель и так адресат)
+	// (если className/childName пустые — просто будут пустые поля, это нормально)
+	textTeacher := fmt.Sprintf(
+		`%s к Вам записаны на консультацию %s, родитель: %s, ребёнок: %s, класс: %s, формат: %s`,
+		prefixTeacher, timeWindow, parent.Name, childName, className, fmtLabel,
+	)
+	if link != "" {
+		textTeacher += "\nСсылка: " + link
+	}
 
 	if _, err := tg.Send(bot, tgbotapi.NewMessage(parentChat, textParent)); err != nil {
 		metrics.HandlerErrors.Inc()
@@ -60,6 +109,7 @@ func SendConsultReminder(ctx context.Context, bot *tgbotapi.BotAPI, database *sq
 	if _, err := tg.Send(bot, tgbotapi.NewMessage(teacherChat, textTeacher)); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
+
 	return nil
 }
 
@@ -105,6 +155,7 @@ func SendConsultBookedCard(ctx context.Context, bot *tgbotapi.BotAPI, database *
 	if err != nil {
 		return err
 	}
+
 	var classID int64
 	if child.ClassID != nil {
 		classID = *child.ClassID
@@ -122,26 +173,43 @@ func SendConsultBookedCard(ctx context.Context, bot *tgbotapi.BotAPI, database *
 		className = fmt.Sprintf("%d%s", class.Number, strings.ToUpper(class.Letter))
 	}
 
+	fmtLabel := "оффлайн"
+	if slot.ConsultFormat == "online" {
+		fmtLabel = "онлайн"
+	}
+	link := ""
+	if slot.ConsultFormat == "online" && slot.OnlineURL.Valid && strings.TrimSpace(slot.OnlineURL.String) != "" {
+		link = strings.TrimSpace(slot.OnlineURL.String)
+	}
+
 	// родителю
 	textParent := fmt.Sprintf(
-		"📌 Вы записаны на консультацию\nДата/время: %s\nУчитель: %s\nКласс: %s",
-		when, teacher.Name, className,
+		"📌 Вы записаны на консультацию\nДата/время: %s\nУчитель: %s\nКласс: %s\nФормат: %s",
+		when, teacher.Name, className, fmtLabel,
 	)
+	if link != "" {
+		textParent += "\nСсылка: " + link
+	}
 	if parent.TelegramID != 0 {
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(parent.TelegramID, textParent)); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 	}
+
 	// учителю
 	textTeacher := fmt.Sprintf(
-		"📌 Новая запись на консультацию\nДата/время: %s\nРодитель: %s\nРебёнок: %s\nКласс: %s",
-		when, parent.Name, child.Name, className,
+		"📌 Новая запись на консультацию\nДата/время: %s\nРодитель: %s\nРебёнок: %s\nКласс: %s\nФормат: %s",
+		when, parent.Name, child.Name, className, fmtLabel,
 	)
+	if link != "" {
+		textTeacher += "\nСсылка: " + link
+	}
 	if teacher.TelegramID != 0 {
 		if _, err := tg.Send(bot, tgbotapi.NewMessage(teacher.TelegramID, textTeacher)); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 	}
+
 	return nil
 }
 

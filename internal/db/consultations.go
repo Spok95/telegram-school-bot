@@ -4,18 +4,21 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/lib/pq"
 )
 
 type ConsultSlot struct {
-	ID         int64
-	TeacherID  int64
-	ClassID    int64
-	StartAt    time.Time
-	EndAt      time.Time
-	BookedByID sql.NullInt64
+	ID            int64
+	TeacherID     int64
+	ClassID       int64
+	StartAt       time.Time
+	EndAt         time.Time
+	BookedByID    sql.NullInt64
+	ConsultFormat string
+	OnlineURL     sql.NullString
 }
 
 // CreateSlots — пачечная вставка готовых стартов слотов с длительностью dur.
@@ -32,7 +35,10 @@ func CreateSlots(ctx context.Context, database *sql.DB, teacherID, classID int64
 		VALUES ($1, $2, $3::timestamp without time zone, $4::timestamp without time zone)
 		ON CONFLICT (teacher_id, start_at) DO NOTHING
 	`)
-	if err != nil {
+	if err != nil && err != sql.ErrNoRows {
+		if isExclusionConstraint(err, "consult_slots_no_overlap_teacher") {
+			return 0, ErrTeacherSlotOverlap
+		}
 		return 0, err
 	}
 	defer func() { _ = stmt.Close() }()
@@ -63,8 +69,12 @@ func TryBookSlot(ctx context.Context, database *sql.DB, slotID, parentUserID int
 		  AND start_at > NOW()
 	`, parentUserID, slotID)
 	if err != nil {
+		if isExclusionConstraint(err, "consult_slots_no_overlap_parent") {
+			return false, ErrParentBookingOverlap
+		}
 		return false, err
 	}
+
 	n, _ := res.RowsAffected()
 	return n == 1, nil
 }
@@ -74,7 +84,7 @@ func TryBookSlot(ctx context.Context, database *sql.DB, slotID, parentUserID int
 func DueForReminder(ctx context.Context, database *sql.DB, intervalText string, batch int) ([]ConsultSlot, error) {
 	is24h := intervalText == "24 hours"
 	q := `
-		SELECT id, teacher_id, class_id, start_at, end_at, booked_by_id
+		SELECT id, teacher_id, class_id, start_at, end_at, booked_by_id, consult_format, online_url
 		FROM consult_slots
 		WHERE booked_by_id IS NOT NULL
 		  AND start_at BETWEEN now() + $1::interval - interval '1 minute'
@@ -92,7 +102,7 @@ func DueForReminder(ctx context.Context, database *sql.DB, intervalText string, 
 	var out []ConsultSlot
 	for rows.Next() {
 		var s ConsultSlot
-		if err := rows.Scan(&s.ID, &s.TeacherID, &s.ClassID, &s.StartAt, &s.EndAt, &s.BookedByID); err != nil {
+		if err := rows.Scan(&s.ID, &s.TeacherID, &s.ClassID, &s.StartAt, &s.EndAt, &s.BookedByID, &s.ConsultFormat, &s.OnlineURL); err != nil {
 			return nil, err
 		}
 		out = append(out, s)
@@ -116,11 +126,11 @@ func MarkReminded(ctx context.Context, database *sql.DB, ids []int64, intervalTe
 // GetSlotByID — получить слот по id
 func GetSlotByID(ctx context.Context, database *sql.DB, slotID int64) (*ConsultSlot, error) {
 	row := database.QueryRowContext(ctx, `
-		SELECT id, teacher_id, class_id, start_at, end_at, booked_by_id
+		SELECT id, teacher_id, class_id, start_at, end_at, booked_by_id, consult_format, online_url
 		FROM consult_slots WHERE id = $1
 	`, slotID)
 	var s ConsultSlot
-	if err := row.Scan(&s.ID, &s.TeacherID, &s.ClassID, &s.StartAt, &s.EndAt, &s.BookedByID); err != nil {
+	if err := row.Scan(&s.ID, &s.TeacherID, &s.ClassID, &s.StartAt, &s.EndAt, &s.BookedByID, &s.ConsultFormat, &s.OnlineURL); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -136,7 +146,7 @@ func ListFreeSlotsByTeacherOnDate(ctx context.Context, database *sql.DB, teacher
 	endLocal := startLocal.Add(24 * time.Hour)
 
 	rows, err := database.QueryContext(ctx, `
-		SELECT id, teacher_id, class_id, start_at, end_at, booked_by_id
+		SELECT id, teacher_id, class_id, start_at, end_at, booked_by_id, consult_format, online_url
 		FROM consult_slots
 		WHERE booked_by_id IS NULL
 		  AND teacher_id = $1
@@ -152,7 +162,7 @@ func ListFreeSlotsByTeacherOnDate(ctx context.Context, database *sql.DB, teacher
 	var res []ConsultSlot
 	for rows.Next() {
 		var s ConsultSlot
-		if err := rows.Scan(&s.ID, &s.TeacherID, &s.ClassID, &s.StartAt, &s.EndAt, &s.BookedByID); err != nil {
+		if err := rows.Scan(&s.ID, &s.TeacherID, &s.ClassID, &s.StartAt, &s.EndAt, &s.BookedByID, &s.ConsultFormat, &s.OnlineURL); err != nil {
 			return nil, err
 		}
 		res = append(res, s)
@@ -163,7 +173,7 @@ func ListFreeSlotsByTeacherOnDate(ctx context.Context, database *sql.DB, teacher
 // ListTeacherSlotsRange — слоты учителя в интервале [from,to), свободные и занятые
 func ListTeacherSlotsRange(ctx context.Context, database *sql.DB, teacherID int64, from, to time.Time, limit int) ([]ConsultSlot, error) {
 	rows, err := database.QueryContext(ctx, `
-		SELECT id, teacher_id, class_id, start_at, end_at, booked_by_id
+		SELECT id, teacher_id, class_id, start_at, end_at, booked_by_id, consult_format, online_url
 		FROM consult_slots
 		WHERE teacher_id = $1 AND start_at >= $2 AND start_at < $3
 		ORDER BY start_at
@@ -177,7 +187,7 @@ func ListTeacherSlotsRange(ctx context.Context, database *sql.DB, teacherID int6
 	var res []ConsultSlot
 	for rows.Next() {
 		var s ConsultSlot
-		if err := rows.Scan(&s.ID, &s.TeacherID, &s.ClassID, &s.StartAt, &s.EndAt, &s.BookedByID); err != nil {
+		if err := rows.Scan(&s.ID, &s.TeacherID, &s.ClassID, &s.StartAt, &s.EndAt, &s.BookedByID, &s.ConsultFormat, &s.OnlineURL); err != nil {
 			return nil, err
 		}
 		res = append(res, s)
@@ -232,7 +242,7 @@ func CancelBookedSlot(ctx context.Context, database *sql.DB, teacherID, slotID i
 
 // CreateSlotsMultiClasses — создаёт/переиспользует слоты учителя на конкретных стартах
 // и добавляет привязки слотов к нескольким классам (consult_slot_classes).
-func CreateSlotsMultiClasses(ctx context.Context, dbx *sql.DB, teacherID int64, classIDs []int64, starts []time.Time, stepMin int) (int64, error) {
+func CreateSlotsMultiClasses(ctx context.Context, dbx *sql.DB, teacherID int64, classIDs []int64, starts []time.Time, stepMin int, consultFormat string) (int64, error) {
 	if len(classIDs) == 0 || len(starts) == 0 {
 		return 0, nil
 	}
@@ -252,11 +262,35 @@ func CreateSlotsMultiClasses(ctx context.Context, dbx *sql.DB, teacherID int64, 
 		// 1) пытаемся вставить слот: если уже есть такой (teacher_id, start_at) — не падаем
 		var slotID int64
 		err = tx.QueryRowContext(ctx, `
-			INSERT INTO consult_slots (teacher_id, class_id, start_at, end_at)
-			VALUES ($1, $2, $3::timestamp without time zone, $4::timestamp without time zone)
+			INSERT INTO consult_slots (teacher_id, class_id, start_at, end_at, consult_format, online_url)
+			VALUES ($1, $2, $3::timestamp without time zone, $4::timestamp without time zone, $5, NULL)
 			ON CONFLICT (teacher_id, start_at) DO NOTHING
 			RETURNING id
-		`, teacherID, primaryClassID, st, end).Scan(&slotID)
+		`, teacherID, primaryClassID, st, end, consultFormat).Scan(&slotID)
+
+		if err != nil && err != sql.ErrNoRows {
+			if isExclusionConstraint(err, "consult_slots_no_overlap_teacher") {
+				return 0, ErrTeacherSlotOverlap
+			}
+			return 0, err
+		}
+
+		if consultFormat != "online" {
+			consultFormat = "offline"
+		}
+
+		_, err = tx.ExecContext(ctx, `
+			UPDATE consult_slots
+			SET consult_format = $1,
+	    		online_url      = CASE WHEN $1 = 'online' THEN online_url ELSE NULL END,
+	    		updated_at      = NOW()
+			WHERE id = $2
+	  			AND teacher_id = $3
+	  			AND booked_by_id IS NULL
+		`, consultFormat, slotID, teacherID)
+		if err != nil {
+			return 0, err
+		}
 
 		if err == sql.ErrNoRows {
 			// слот уже существовал — возьмём его id
@@ -332,7 +366,7 @@ func ListFreeSlotsByTeacherOnDateForClass(ctx context.Context, database *sql.DB,
 	endLocal := startLocal.Add(24 * time.Hour)
 
 	rows, err := database.QueryContext(ctx, `
-	SELECT s.id, s.teacher_id, s.class_id, s.start_at, s.end_at, s.booked_by_id
+	SELECT s.id, s.teacher_id, s.class_id, s.start_at, s.end_at, s.booked_by_id, s.consult_format, s.online_url
 	FROM consult_slots s
 	WHERE s.booked_by_id IS NULL
 	  AND s.teacher_id = $1
@@ -354,7 +388,7 @@ func ListFreeSlotsByTeacherOnDateForClass(ctx context.Context, database *sql.DB,
 	var res []ConsultSlot
 	for rows.Next() {
 		var s ConsultSlot
-		if err := rows.Scan(&s.ID, &s.TeacherID, &s.ClassID, &s.StartAt, &s.EndAt, &s.BookedByID); err != nil {
+		if err := rows.Scan(&s.ID, &s.TeacherID, &s.ClassID, &s.StartAt, &s.EndAt, &s.BookedByID, &s.ConsultFormat, &s.OnlineURL); err != nil {
 			return nil, err
 		}
 		res = append(res, s)
@@ -380,14 +414,15 @@ func ParentCancelBookedSlot(ctx context.Context, database *sql.DB, parentID, slo
 }
 
 type ParentBooking struct {
-	SlotID     int64
-	StartAt    time.Time
-	EndAt      time.Time
-	TeacherID  int64
-	Teacher    string
-	ClassID    int64
-	ClassLabel string
-	ChildName  string
+	SlotID        int64
+	StartAt       time.Time
+	EndAt         time.Time
+	TeacherID     int64
+	Teacher       string
+	ClassID       int64
+	ClassLabel    string
+	ChildName     string
+	ConsultFormat string
 }
 
 // ListParentBookings — предстоящие записи родителя (на будущее).
@@ -398,7 +433,8 @@ func ListParentBookings(ctx context.Context, database *sql.DB, parentID int64, f
 		       t.id, t.name,
 		       COALESCE(cls.id, 0),
 		       COALESCE(cls.number::text || cls.letter, ''),
-		       COALESCE(ch.name, '')
+		       COALESCE(ch.name, ''),
+       		   COALESCE(s.consult_format, 'offline')
 		FROM consult_slots s
 		JOIN users t ON t.id = s.teacher_id
 		LEFT JOIN classes cls ON cls.id = s.class_id
@@ -429,7 +465,7 @@ func ListParentBookings(ctx context.Context, database *sql.DB, parentID int64, f
 	var out []ParentBooking
 	for rows.Next() {
 		var r ParentBooking
-		if err := rows.Scan(&r.SlotID, &r.StartAt, &r.EndAt, &r.TeacherID, &r.Teacher, &r.ClassID, &r.ClassLabel, &r.ChildName); err != nil {
+		if err := rows.Scan(&r.SlotID, &r.StartAt, &r.EndAt, &r.TeacherID, &r.Teacher, &r.ClassID, &r.ClassLabel, &r.ChildName, &r.ConsultFormat); err != nil {
 			return nil, err
 		}
 
@@ -465,20 +501,57 @@ func SlotHasClass(ctx context.Context, database *sql.DB, slotID, classID int64) 
 // Возвращает true, если удалось (слот был свободен).
 func TryBookSlotWithChild(ctx context.Context, dbx *sql.DB, slotID, parentID, childID, classID int64) (bool, error) {
 	res, err := dbx.ExecContext(ctx, `
-	UPDATE consult_slots
-	SET booked_by_id    = $2,
-	    booked_at       = NOW(),
-	    booked_child_id = $3,
-	    booked_class_id = $4,
-	    cancel_reason   = NULL,
-	    updated_at      = NOW()
-	WHERE id = $1
-	  AND booked_by_id IS NULL
-	  AND start_at > NOW()
-`, slotID, parentID, childID, classID)
+		UPDATE consult_slots
+		SET booked_by_id    = $2,
+	    	booked_at       = NOW(),
+	    	booked_child_id = $3,
+	    	booked_class_id = $4,
+	    	cancel_reason   = NULL,
+	    	updated_at      = NOW()
+		WHERE id = $1
+	  		AND booked_by_id IS NULL
+	  		AND start_at > NOW()
+	`, slotID, parentID, childID, classID)
+	if err != nil {
+		if isExclusionConstraint(err, "consult_slots_no_overlap_parent") {
+			return false, ErrParentBookingOverlap
+		}
+		return false, err
+	}
+
+	aff, _ := res.RowsAffected()
+	return aff > 0, nil
+}
+
+func SetSlotOnlineURL(ctx context.Context, dbx *sql.DB, teacherID, slotID int64, url string) (bool, error) {
+	res, err := dbx.ExecContext(ctx, `
+		UPDATE consult_slots
+		SET online_url = NULLIF(TRIM($1), ''),
+		    updated_at = NOW()
+		WHERE id = $2
+		  AND teacher_id = $3
+		  AND start_at > NOW()
+	`, url, slotID, teacherID)
 	if err != nil {
 		return false, err
 	}
 	aff, _ := res.RowsAffected()
-	return aff > 0, nil
+	return aff == 1, nil
+}
+
+var (
+	ErrTeacherSlotOverlap   = errors.New("teacher slot overlaps existing")
+	ErrParentBookingOverlap = errors.New("parent booking overlaps existing")
+)
+
+func isExclusionConstraint(err error, constraint string) bool {
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) {
+		// 23P01 = exclusion_violation
+		if string(pqErr.Code) == "23P01" && pqErr.Constraint == constraint {
+			return true
+		}
+	}
+	// fallback на всякий случай (если драйвер/обёртка режет pq.Error)
+	return strings.Contains(err.Error(), constraint)
 }

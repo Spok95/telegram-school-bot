@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -73,7 +74,16 @@ func TryHandleParentSlotsCommand(ctx context.Context, bot *tgbotapi.BotAPI, data
 
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for _, s := range free {
-		label := fmt.Sprintf("%s–%s (#%d)", s.StartAt.In(loc).Format("15:04"), s.EndAt.In(loc).Format("15:04"), s.ID)
+		fmtLabel := "оффлайн"
+		if s.ConsultFormat == "online" {
+			fmtLabel = "онлайн"
+		}
+		label := fmt.Sprintf("%s–%s • %s (#%d)",
+			s.StartAt.In(loc).Format("15:04"),
+			s.EndAt.In(loc).Format("15:04"),
+			fmtLabel,
+			s.ID,
+		)
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(label, fmt.Sprintf("p_book:%d", s.ID)),
 		))
@@ -146,6 +156,12 @@ func TryHandleParentBookCallback(ctx context.Context, bot *tgbotapi.BotAPI, data
 
 	ok, err := db.TryBookSlotWithChild(ctx, database, slot.ID, u.ID, child.ID, *child.ClassID)
 	if err != nil {
+		if errors.Is(err, db.ErrParentBookingOverlap) {
+			_, _ = tg.Send(bot, tgbotapi.NewMessage(chatID,
+				"Запись невозможна: у вас уже есть консультация на это время.",
+			))
+			return true
+		}
 		observability.CaptureErr(err)
 		_ = sendCb(bot, cb, "Ошибка бронирования")
 		return true
@@ -196,7 +212,11 @@ func TryHandleParentMyConsultsCallback(ctx context.Context, bot *tgbotapi.BotAPI
 	}
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for _, it := range items {
-		label := it.StartAt.Format("02.01 15:04") + " — " + it.Teacher
+		fmtLabel := "оффлайн"
+		if it.ConsultFormat == "online" {
+			fmtLabel = "онлайн"
+		}
+		label := fmt.Sprintf("%s • %s — %s", it.StartAt.Format("02.01 15:04"), fmtLabel, it.Teacher)
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("❌ Отменить: "+label, fmt.Sprintf("p_cancel:%d", it.SlotID)),
 		))

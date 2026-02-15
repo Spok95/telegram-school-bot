@@ -235,9 +235,13 @@ func TryHandleParentFlowCallbacks(ctx context.Context, bot *tgbotapi.BotAPI, dat
 		}
 		var rows [][]tgbotapi.InlineKeyboardButton
 		for _, s := range free {
+			fmtLabel := "оффлайн"
+			if s.ConsultFormat == "online" {
+				fmtLabel = "онлайн"
+			}
 			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData(
-					fmt.Sprintf("%s–%s", s.StartAt.Format("15:04"), s.EndAt.Format("15:04")),
+					fmt.Sprintf("%s–%s • %s", s.StartAt.Format("15:04"), s.EndAt.Format("15:04"), fmtLabel),
 					fmt.Sprintf("p_book:%d:%d", s.ID, childID),
 				),
 			))
