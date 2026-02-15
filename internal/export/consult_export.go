@@ -30,6 +30,10 @@ func ConsultationsExcelExport(ctx context.Context, database *sql.DB, teacherID i
 	from = time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, loc)
 	to14 := from.AddDate(0, 0, 14) // именно 14 суток вперёд
 	now := time.Now()
+	fromOrNow := from
+	if now.After(fromOrNow) {
+		fromOrNow = now
+	}
 
 	// Собираем классы, по которым у учителя есть слоты в окне (без дублей)
 	classRows, err := database.QueryContext(ctx, `
@@ -114,17 +118,30 @@ func ConsultationsExcelExport(ctx context.Context, database *sql.DB, teacherID i
 			SELECT 
 				s.start_at, s.end_at,
 				up.name AS parent_name,
-				COALESCE(uc.name, '') AS child_name
+				uc.name AS child_name
 			FROM consult_slots s
-			JOIN users up ON up.id = s.booked_by_id
+			LEFT JOIN users up ON up.id = s.booked_by_id
 			LEFT JOIN users uc ON uc.id = s.booked_child_id
 			WHERE s.teacher_id = $1
 			  AND s.start_at >= $2
 			  AND s.start_at <  $3
-			  AND s.booked_by_id IS NOT NULL
-			  AND s.booked_class_id = $4
+			  AND (
+					-- ЗАНЯТЫЙ слот: показываем только на листе того класса, который реально записался
+					(s.booked_by_id IS NOT NULL AND s.booked_class_id = $4)
+					OR
+					-- СВОБОДНЫЙ слот: показываем, если слот доступен этому классу
+					(s.booked_by_id IS NULL AND (
+						s.class_id = $4
+						OR EXISTS (
+							SELECT 1
+							FROM consult_slot_classes csc
+							WHERE csc.slot_id = s.id AND csc.class_id = $4
+						)
+					))
+			  )
 			ORDER BY s.start_at
-		`, teacherID, now, to14, cl.ID)
+		`, teacherID, fromOrNow, to14, cl.ID)
+
 		if err != nil {
 			return "", err
 		}
@@ -132,16 +149,25 @@ func ConsultationsExcelExport(ctx context.Context, database *sql.DB, teacherID i
 		r := 2
 		for rows.Next() {
 			var start, end time.Time
-			var parentName, childName string
+			var parentName, childName sql.NullString
 			if err := rows.Scan(&start, &end, &parentName, &childName); err != nil {
 				_ = rows.Close()
 				return "", err
 			}
 
+			pn := ""
+			if parentName.Valid {
+				pn = parentName.String
+			}
+			cn := ""
+			if childName.Valid {
+				cn = childName.String
+			}
+
 			_ = f.SetCellValue(sheet, fmt.Sprintf("A%d", r), start.Format("02.01.2006"))
 			_ = f.SetCellValue(sheet, fmt.Sprintf("B%d", r), fmt.Sprintf("%s–%s", start.Format("15:04"), end.Format("15:04")))
-			_ = f.SetCellValue(sheet, fmt.Sprintf("C%d", r), parentName)
-			_ = f.SetCellValue(sheet, fmt.Sprintf("D%d", r), childName)
+			_ = f.SetCellValue(sheet, fmt.Sprintf("C%d", r), pn)
+			_ = f.SetCellValue(sheet, fmt.Sprintf("D%d", r), cn)
 			r++
 		}
 		_ = rows.Close()
