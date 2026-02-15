@@ -237,30 +237,43 @@ func ConsultationsExcelExportAdmin(
 
 	rowSum := 3
 	firstDataSheetIdx := -1
-	now := time.Now()
+	//now := time.Now()
 
 	for _, t := range teachers {
 		sheet := excelSheetName(t.Name)
 
-		// Данные по учителю: только реальные брони и конкретный ребёнок/класс
+		// Данные по учителю: ВСЕ слоты (и пустые, и занятые).
+		// Для занятых показываем booked_*; для пустых — список классов, которым доступен слот.
 		rows, err := database.QueryContext(ctx, `
 			SELECT
 				(s.start_at AT TIME ZONE $3) AS st,
 				(s.end_at   AT TIME ZONE $3) AS et,
-				cls.number, cls.letter,
-				up.name AS parent_name,
-				uc.name AS child_name
+				CASE
+                    WHEN s.booked_class_id IS NOT NULL THEN (bcls.number::text || UPPER(bcls.letter))
+                    ELSE COALESCE((
+                        SELECT string_agg(DISTINCT (cc.number::text || UPPER(cc.letter)), ', ' ORDER BY (cc.number::text || UPPER(cc.letter)))
+                        FROM (
+                            SELECT c1.number, c1.letter
+                            FROM classes c1
+                            WHERE c1.id = s.class_id
+                            UNION
+                            SELECT c2.number, c2.letter
+                            FROM consult_slot_classes csc
+                            JOIN classes c2 ON c2.id = csc.class_id
+                            WHERE csc.slot_id = s.id
+                        ) cc
+                    ), '')
+                END AS class_name,
+                up.name AS parent_name,
+                uc.name AS child_name
 			FROM consult_slots s
-			JOIN classes cls ON cls.id = s.booked_class_id
-			LEFT JOIN users up ON up.id = s.booked_by_id
-			LEFT JOIN users uc ON uc.id = s.booked_child_id
+            LEFT JOIN classes bcls ON bcls.id = s.booked_class_id
+            LEFT JOIN users up ON up.id = s.booked_by_id
+            LEFT JOIN users uc ON uc.id = s.booked_child_id
 			WHERE s.teacher_id = $1
 			  AND s.start_at >= $2 AND s.start_at < $4
-			  AND s.booked_by_id   IS NOT NULL
-			  AND s.booked_class_id IS NOT NULL
-			  AND s.booked_child_id IS NOT NULL
-			ORDER BY st ASC, et ASC, cls.number ASC, LOWER(cls.letter) ASC
-		`, t.ID, now, loc.String(), to14)
+			ORDER BY st ASC, et ASC
+		`, t.ID, from, loc.String(), to14)
 		if err != nil {
 			return "", err
 		}
@@ -276,22 +289,18 @@ func ConsultationsExcelExportAdmin(
 
 		for rows.Next() {
 			var st, et time.Time
-			var num int
-			var letter string
+			var className sql.NullString
 			var parent, child sql.NullString
-			if err := rows.Scan(&st, &et, &num, &letter, &parent, &child); err != nil {
+			if err := rows.Scan(&st, &et, &className, &parent, &child); err != nil {
 				_ = rows.Close()
 				return "", err
-			}
-			if !child.Valid {
-				continue
 			}
 			data = append(data, rec{
 				Date:   st.Format("02.01.2006"),
 				Time:   fmt.Sprintf("%s—%s", st.Format("15:04"), et.Format("15:04")),
-				Class:  fmt.Sprintf("%d%s", num, strings.ToUpper(letter)),
-				Parent: parent.String,
-				Child:  child.String,
+				Class:  strOrEmpty(className),
+				Parent: strOrEmpty(parent),
+				Child:  strOrEmpty(child),
 			})
 		}
 		_ = rows.Close()
@@ -338,4 +347,11 @@ func ConsultationsExcelExportAdmin(
 		return "", err
 	}
 	return path, nil
+}
+
+func strOrEmpty(ns sql.NullString) string {
+	if ns.Valid {
+		return ns.String
+	}
+	return ""
 }
