@@ -150,6 +150,9 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 		auth.HandleAddChildText(ctx, bot, database, msg)
 		return
 	}
+	if TryHandleTeacherLinkText(ctx, bot, database, msg) {
+		return
+	}
 	if TryHandleTeacherAddSlots(ctx, bot, database, msg) {
 		return
 	}

@@ -73,7 +73,16 @@ func TryHandleParentSlotsCommand(ctx context.Context, bot *tgbotapi.BotAPI, data
 
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for _, s := range free {
-		label := fmt.Sprintf("%s–%s (#%d)", s.StartAt.In(loc).Format("15:04"), s.EndAt.In(loc).Format("15:04"), s.ID)
+		fmtLabel := "оффлайн"
+		if s.ConsultFormat == "online" {
+			fmtLabel = "онлайн"
+		}
+		label := fmt.Sprintf("%s–%s • %s (#%d)",
+			s.StartAt.In(loc).Format("15:04"),
+			s.EndAt.In(loc).Format("15:04"),
+			fmtLabel,
+			s.ID,
+		)
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(label, fmt.Sprintf("p_book:%d", s.ID)),
 		))

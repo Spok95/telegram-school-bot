@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Spok95/telegram-school-bot/internal/metrics"
@@ -35,6 +36,24 @@ func ruDayShort(wd time.Weekday) string {
 		return "Вс"
 	}
 }
+
+type teacherLinkState struct {
+	SlotID int64
+	Day    time.Time
+	MsgID  int
+}
+
+var teacherLinkFSM sync.Map // chatID -> teacherLinkState
+
+func setTeacherLinkFSM(chatID int64, st teacherLinkState) { teacherLinkFSM.Store(chatID, st) }
+func getTeacherLinkFSM(chatID int64) (teacherLinkState, bool) {
+	v, ok := teacherLinkFSM.Load(chatID)
+	if !ok {
+		return teacherLinkState{}, false
+	}
+	return v.(teacherLinkState), true
+}
+func clearTeacherLinkFSM(chatID int64) { teacherLinkFSM.Delete(chatID) }
 
 // TryHandleTeacherMySlots /t_myslots — сначала дни текущей недели
 func TryHandleTeacherMySlots(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) bool {
@@ -118,6 +137,47 @@ func TryHandleTeacherManageCallback(ctx context.Context, bot *tgbotapi.BotAPI, d
 			}
 			return true
 		}
+	}
+
+	if strings.HasPrefix(cb.Data, "t_link:") {
+		u, _ := db.GetUserByTelegramID(ctx, database, cb.Message.Chat.ID)
+		if u == nil || u.Role == nil || *u.Role != models.Teacher {
+			_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, ""))
+			return true
+		}
+
+		sid := strings.TrimPrefix(cb.Data, "t_link:")
+		slotID, err := strconv.ParseInt(sid, 10, 64)
+		if err != nil || slotID <= 0 {
+			_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Неверный слот"))
+			return true
+		}
+
+		slot, err := db.GetSlotByID(ctx, database, slotID)
+		if err != nil || slot == nil || slot.TeacherID != u.ID {
+			_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Слот не найден"))
+			return true
+		}
+		if slot.ConsultFormat != "online" {
+			_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, "Ссылка нужна только для онлайн"))
+			return true
+		}
+
+		day := slot.StartAt.In(time.Local)
+		day = time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, time.Local)
+
+		setTeacherLinkFSM(cb.Message.Chat.ID, teacherLinkState{
+			SlotID: slotID,
+			Day:    day,
+			MsgID:  cb.Message.MessageID,
+		})
+
+		// Попросить ссылку отдельным сообщением (проще, чем редактировать текущий список)
+		_, _ = tg.Send(bot, tgbotapi.NewMessage(cb.Message.Chat.ID,
+			fmt.Sprintf("Отправьте ссылку для онлайн-консультации (слот #%d).\nМожно отправить пустое сообщение «-», чтобы очистить.", slotID),
+		))
+		_, _ = tg.Request(bot, tgbotapi.NewCallback(cb.ID, ""))
+		return true
 	}
 
 	// 2) Собственно удаление / отмена
@@ -265,21 +325,51 @@ func renderTeacherDaySlots(ctx context.Context, bot *tgbotapi.BotAPI, database *
 		if s.BookedByID.Valid {
 			mark = "✅"
 		}
-		label := fmt.Sprintf("%s %s–%s (класс: %s) #%d",
+
+		// формат + признак ссылки
+		fmtLabel := "оффлайн"
+		if s.ConsultFormat == "online" {
+			fmtLabel = "онлайн"
+		}
+		linkMark := ""
+		if s.ConsultFormat == "online" && s.OnlineURL.Valid && strings.TrimSpace(s.OnlineURL.String) != "" {
+			linkMark = "🔗"
+		}
+
+		label := fmt.Sprintf("%s %s–%s • %s %s (класс: %s) #%d",
 			mark,
 			s.StartAt.Format("15:04"),
 			s.EndAt.Format("15:04"),
+			fmtLabel,
+			linkMark,
 			strings.Join(classLabels, ", "),
-			s.ID)
+			s.ID,
+		)
+		label = strings.ReplaceAll(label, "  ", " ")
 
+		// кнопки
 		if s.BookedByID.Valid {
-			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("Отменить "+label, fmt.Sprintf("t_cancel:%d", s.ID)),
-			))
+			if s.ConsultFormat == "online" {
+				rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("Отменить "+label, fmt.Sprintf("t_cancel:%d", s.ID)),
+					tgbotapi.NewInlineKeyboardButtonData("Ссылка", fmt.Sprintf("t_link:%d", s.ID)),
+				))
+			} else {
+				rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("Отменить "+label, fmt.Sprintf("t_cancel:%d", s.ID)),
+				))
+			}
 		} else {
-			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("Удалить "+label, fmt.Sprintf("t_del:%d", s.ID)),
-			))
+			if s.ConsultFormat == "online" {
+				rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("Удалить "+label, fmt.Sprintf("t_del:%d", s.ID)),
+					tgbotapi.NewInlineKeyboardButtonData("Ссылка", fmt.Sprintf("t_link:%d", s.ID)),
+				))
+			} else {
+				rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("Удалить "+label, fmt.Sprintf("t_del:%d", s.ID)),
+				))
+			}
 		}
 	}
 
@@ -296,4 +386,52 @@ func renderTeacherDaySlots(ctx context.Context, bot *tgbotapi.BotAPI, database *
 	if _, err := tg.Send(bot, edit); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
+}
+
+func TryHandleTeacherLinkText(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, msg *tgbotapi.Message) bool {
+	if msg == nil || msg.Text == "" {
+		return false
+	}
+	st, ok := getTeacherLinkFSM(msg.Chat.ID)
+	if !ok {
+		return false
+	}
+
+	u, _ := db.GetUserByTelegramID(ctx, database, msg.Chat.ID)
+	if u == nil || u.Role == nil || *u.Role != models.Teacher {
+		clearTeacherLinkFSM(msg.Chat.ID)
+		return false
+	}
+
+	text := strings.TrimSpace(msg.Text)
+	if text == "-" {
+		text = ""
+	}
+
+	// Проверим формат слота ещё раз
+	slot, err := db.GetSlotByID(ctx, database, st.SlotID)
+	if err != nil || slot == nil || slot.TeacherID != u.ID {
+		clearTeacherLinkFSM(msg.Chat.ID)
+		_, _ = tg.Send(bot, tgbotapi.NewMessage(msg.Chat.ID, "Слот не найден или уже недоступен."))
+		return true
+	}
+	if slot.ConsultFormat != "online" {
+		clearTeacherLinkFSM(msg.Chat.ID)
+		_, _ = tg.Send(bot, tgbotapi.NewMessage(msg.Chat.ID, "Это не онлайн-слот, ссылку сохранить нельзя."))
+		return true
+	}
+
+	okUpd, err := db.SetSlotOnlineURL(ctx, database, u.ID, st.SlotID, text)
+	if err != nil || !okUpd {
+		clearTeacherLinkFSM(msg.Chat.ID)
+		_, _ = tg.Send(bot, tgbotapi.NewMessage(msg.Chat.ID, "Не удалось сохранить ссылку (возможно слот уже начался)."))
+		return true
+	}
+
+	clearTeacherLinkFSM(msg.Chat.ID)
+	_, _ = tg.Send(bot, tgbotapi.NewMessage(msg.Chat.ID, "Ссылка сохранена."))
+
+	// Перерисовать список слотов на тот же день в том же сообщении
+	renderTeacherDaySlots(ctx, bot, database, msg.Chat.ID, st.MsgID, u.ID, st.Day, time.Local)
+	return true
 }
