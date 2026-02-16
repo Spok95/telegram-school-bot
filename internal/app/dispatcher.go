@@ -340,7 +340,11 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 			// Есть записи — соберём кнопки отмены и «Обновить список»
 			var rows [][]tgbotapi.InlineKeyboardButton
 			for _, it := range items {
-				label := it.StartAt.In(time.Local).Format("02.01 15:04") + " — " + it.Teacher
+				fmtLabel := "оффлайн"
+				if it.ConsultFormat == "online" {
+					fmtLabel = "онлайн"
+				}
+				label := fmt.Sprintf("%s • %s — %s", it.StartAt.Format("02.01 15:04"), fmtLabel, it.Teacher)
 				rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 					tgbotapi.NewInlineKeyboardButtonData("❌ Отменить: "+label, fmt.Sprintf("p_cancel:%d", it.SlotID)),
 				))
