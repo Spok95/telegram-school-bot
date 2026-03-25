@@ -43,7 +43,7 @@ jobs:
       - name: Deploy on server
         shell: bash
         run: |
-          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << 'EOF'
+          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} <<EOF
             set -e
 
             apt-get update
@@ -64,7 +64,7 @@ jobs:
             tar -xzf /opt/school-bot/deploy.tar.gz -C /opt/school-bot/prod
             rm -f /opt/school-bot/deploy.tar.gz
 
-            cat > /opt/school-bot/prod/.env << 'EOT'
+            cat > /opt/school-bot/prod/.env <<EOT
             DATABASE_URL=postgres://school:schoolpass@postgres:5432/school?sslmode=disable
             BOT_TOKEN=${{ secrets.BOT_TOKEN }}
             ADMIN_IDS=${{ secrets.ADMIN_IDS }}
