@@ -44,44 +44,50 @@ jobs:
         shell: bash
         run: |
           ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} <<EOF
-            set -e
+          set -e
 
-            apt-get update
-            apt-get install -y docker.io docker-compose-v2 tar
-            systemctl enable docker
-            systemctl start docker
+          apt-get update
+          apt-get install -y docker.io docker-compose-v2 tar
+          systemctl enable docker
+          systemctl start docker
 
-            mkdir -p /opt/school-bot/prod
-            mkdir -p /opt/school-bot/backups
-            mkdir -p /opt/school-bot/prod/db_data
+          mkdir -p /opt/school-bot/prod
+          mkdir -p /opt/school-bot/backups
+          mkdir -p /opt/school-bot/prod/db_data
 
-            cd /opt/school-bot/prod
-            find . -mindepth 1 -maxdepth 1 \
-              ! -name 'db_data' \
-              ! -name '.env' \
-              -exec rm -rf {} +
+          cd /opt/school-bot/prod
+          find . -mindepth 1 -maxdepth 1 \
+            ! -name 'db_data' \
+            ! -name '.env' \
+            -exec rm -rf {} +
 
-            tar -xzf /opt/school-bot/deploy.tar.gz -C /opt/school-bot/prod
-            rm -f /opt/school-bot/deploy.tar.gz
+          tar -xzf /opt/school-bot/deploy.tar.gz -C /opt/school-bot/prod
+          rm -f /opt/school-bot/deploy.tar.gz
 
-            cat > /opt/school-bot/prod/.env <<EOT
-            DATABASE_URL=postgres://school:schoolpass@postgres:5432/school?sslmode=disable
-            BOT_TOKEN=${{ secrets.BOT_TOKEN }}
-            ADMIN_IDS=${{ secrets.ADMIN_IDS }}
-            TZ=Europe/Moscow
-            HTTP_ADDR=:8080
-            LOG_LEVEL=info
-            ENV=prod
-            SENTRY_DSN=${{ secrets.SENTRY_DSN }}
-            CONSULTATIONS_ENABLED=true
-            PG_BACKUP_URL=http://pgbackup:8081
-            EOT
-
-            cd /opt/school-bot/prod
-            docker compose \
-              -f docker-compose.yml \
-              -f docker-compose.prod.override.yml \
-              up -d --build
-
-            docker ps -a
+          cat > /opt/school-bot/prod/.env <<ENVFILE
+          DATABASE_URL=postgres://school:schoolpass@postgres:5432/school?sslmode=disable
+          BOT_TOKEN=${{ secrets.BOT_TOKEN }}
+          ADMIN_IDS=${{ secrets.ADMIN_IDS }}
+          TZ=Europe/Moscow
+          HTTP_ADDR=:8080
+          LOG_LEVEL=info
+          ENV=prod
+          SENTRY_DSN=${{ secrets.SENTRY_DSN }}
+          CONSULTATIONS_ENABLED=true
+          PG_BACKUP_URL=http://pgbackup:8081
+          ENVFILE
+      
+          chmod +x /opt/school-bot/prod/ops/pgbackup/start.sh
+          chmod +x /opt/school-bot/prod/ops/pgbackup/backup.sh
+          chmod +x /opt/school-bot/prod/ops/pgbackup/restore-latest.sh
+          chmod +x /opt/school-bot/prod/ops/pgbackup/cgi-bin/backup
+          chmod +x /opt/school-bot/prod/ops/pgbackup/cgi-bin/restore-latest
+      
+          cd /opt/school-bot/prod
+          docker compose \
+          -f docker-compose.yml \
+          -f docker-compose.prod.override.yml \
+          up -d --build
+      
+          docker ps -a
           EOF
