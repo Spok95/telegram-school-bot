@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-umask 077
+umask 022
 
 : "${PGHOST:=postgres}"
 : "${PGPORT:=5432}"
@@ -24,6 +24,7 @@ file="$BACKUP_DIR/school-$ts.sql.gz"
 pg_dump -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" --no-owner --no-privileges \
   | gzip -9 > "$file"
 
+chmod 644 "$file"
 ln -sfn "$(basename "$file")" "$BACKUP_DIR/latest.sql.gz"
 
 # вот это бот и покажет
