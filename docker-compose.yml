@@ -6,8 +6,6 @@ services:
       POSTGRES_USER: school
       POSTGRES_PASSWORD: schoolpass
       TZ: Europe/Moscow
-    ports:
-      - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U school -d school"]
       interval: 5s
@@ -36,8 +34,11 @@ services:
       LOG_LEVEL: "info"     # или "debug"
       ENV: "prod"           # dev|prod
       SENTRY_DSN: ${SENTRY_DSN}
+      PG_BACKUP_URL: ${PG_BACKUP_URL}
+      CONSULTATIONS_ENABLED: ${CONSULTATIONS_ENABLED:-false}
     volumes:
-      - ./backups:/backups:ro
+      - /opt/school-bot/backups:/opt/school-bot/backups:rw
+      - /opt/school-bot/backups:/app/backups:rw
     ports:
       - "8080:8080"         # /healthz и /metrics
     restart: unless-stopped
@@ -68,7 +69,9 @@ services:
       - ./ops/pgbackup/backup.sh:/usr/local/bin/backup.sh:ro
       - ./ops/pgbackup/restore-latest.sh:/usr/local/bin/restore-latest.sh:ro
       - ./ops/pgbackup/cgi-bin:/seed/cgi-bin:ro
-      - ./backups:/backups
+      - /opt/school-bot/backups:/backups
+    ports:
+      - "8081:8081"
     depends_on:
       - postgres
     restart: unless-stopped

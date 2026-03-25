@@ -8,6 +8,10 @@ services:
       - /opt/school-bot/backups:/backups
     ports:
       - "8081:8081"
+
   bot:
     environment:
       CONSULTATIONS_ENABLED: "true"
+    volumes:
+      - /opt/school-bot/backups:/opt/school-bot/backups:rw
+      - /opt/school-bot/backups:/app/backups:rw

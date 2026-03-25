@@ -1,0 +1,85 @@
+name: Deploy prod
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup SSH key
+        shell: bash
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Prepare archive
+        shell: bash
+        run: |
+          tar \
+            --exclude=.git \
+            --exclude=.github \
+            --exclude=backups \
+            --exclude=db_data \
+            -czf deploy.tar.gz .
+
+      - name: Upload project to server
+        shell: bash
+        run: |
+          scp deploy.tar.gz ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/opt/school-bot/deploy.tar.gz
+
+      - name: Deploy on server
+        shell: bash
+        run: |
+          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << 'EOF'
+            set -e
+
+            apt-get update
+            apt-get install -y docker.io docker-compose-v2 tar
+            systemctl enable docker
+            systemctl start docker
+
+            mkdir -p /opt/school-bot/prod
+            mkdir -p /opt/school-bot/backups
+            mkdir -p /opt/school-bot/prod/db_data
+
+            cd /opt/school-bot/prod
+            find . -mindepth 1 -maxdepth 1 \
+              ! -name 'db_data' \
+              ! -name '.env' \
+              -exec rm -rf {} +
+
+            tar -xzf /opt/school-bot/deploy.tar.gz -C /opt/school-bot/prod
+            rm -f /opt/school-bot/deploy.tar.gz
+
+            cat > /opt/school-bot/prod/.env << 'EOT'
+            DATABASE_URL=postgres://school:schoolpass@postgres:5432/school?sslmode=disable
+            BOT_TOKEN=${{ secrets.BOT_TOKEN }}
+            ADMIN_IDS=${{ secrets.ADMIN_IDS }}
+            TZ=Europe/Moscow
+            HTTP_ADDR=:8080
+            LOG_LEVEL=info
+            ENV=prod
+            SENTRY_DSN=${{ secrets.SENTRY_DSN }}
+            CONSULTATIONS_ENABLED=true
+            PG_BACKUP_URL=http://pgbackup:8081
+            EOT
+
+            cd /opt/school-bot/prod
+            docker compose \
+              -f docker-compose.yml \
+              -f docker-compose.prod.override.yml \
+              up -d --build
+
+            docker ps -a
+          EOF
