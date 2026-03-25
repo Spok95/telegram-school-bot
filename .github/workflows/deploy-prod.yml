@@ -31,7 +31,9 @@ jobs:
             --exclude=.github \
             --exclude=backups \
             --exclude=db_data \
-            -czf deploy.tar.gz .
+            --exclude=deploy.tar.gz \
+            -czf /tmp/deploy.tar.gz .
+          cp /tmp/deploy.tar.gz ./deploy.tar.gz
 
       - name: Upload project to server
         shell: bash
