@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/Spok95/telegram-school-bot/internal/bot/shared/fsmutil"
@@ -168,6 +169,9 @@ func HandleSetPeriodCallback(ctx context.Context, bot *tgbotapi.BotAPI, database
 			)
 			perReplace(bot, chatID, state, fmt.Sprintf("❌ Ошибка сохранения: %v", err), mk)
 			return
+		}
+		if err := db.SetActivePeriod(ctx, database); err != nil {
+			log.Println("❌ Ошибка пересчёта активного периода:", err)
 		}
 		perClearMarkup(bot, chatID, state)
 		perSend(bot, chatID, state, "✅ Новый период успешно создан.", tgbotapi.NewInlineKeyboardMarkup())
