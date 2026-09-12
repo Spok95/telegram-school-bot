@@ -35,7 +35,7 @@ func ShowPendingUsers(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.D
 	}
 
 	if count == 0 {
-		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "✅ Нет ожидающих подтверждения заявок.")); err != nil {
+		if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "✅ Нет новых заявок на регистрацию.")); err != nil {
 			metrics.HandlerErrors.Inc()
 		}
 		return
