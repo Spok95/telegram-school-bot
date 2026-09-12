@@ -50,20 +50,20 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 	// Обработка команды /start без проверки регистрации
 	if text == "/start" {
 		user, err := db.GetUserByTelegramID(ctx, database, chatID)
-		if err != nil || user == nil || user.Role == nil {
-			msg := tgbotapi.NewMessage(chatID, "Выберите роль для регистрации:")
-			roles := tgbotapi.NewInlineKeyboardMarkup(
-				tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("Ученик", "reg_student"),
-					tgbotapi.NewInlineKeyboardButtonData("Родитель", "reg_parent"),
-				),
-				tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("Учитель", "reg_teacher"),
-					tgbotapi.NewInlineKeyboardButtonData("Администрация", "reg_administration"),
-				),
-			)
-			msg.ReplyMarkup = roles
-			if _, err := tg.Send(bot, msg); err != nil {
+		if err != nil {
+			if _, sendErr := tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Не удалось проверить учётную запись. Попробуйте позже.")); sendErr != nil {
+				metrics.HandlerErrors.Inc()
+			}
+			return
+		}
+		if user == nil || user.Role == nil {
+			auth.CancelRecovery(chatID)
+			db.ClearUserFSMRole(chatID)
+			sendAuthEntryMenu(bot, chatID)
+			return
+		}
+		if !user.Confirmed {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⏳ Ваша заявка на регистрацию ещё ожидает подтверждения администратора.")); err != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
@@ -92,11 +92,21 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 	// Все остальные команды требуют регистрации
 	user, err := db.GetUserByTelegramID(ctx, database, chatID)
 	registered := false
-	if err == nil && user != nil && user.Role != nil {
+	if err == nil && user != nil && user.Role != nil && user.Confirmed {
 		registered = true
 	}
 
 	if !registered {
+		if auth.GetRecoveryFSMState(chatID) != "" {
+			auth.HandleRecoveryMessage(ctx, chatID, text, bot, database)
+			return
+		}
+		if user != nil && user.Role != nil && !user.Confirmed {
+			if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⏳ Ваша заявка на регистрацию ещё ожидает подтверждения администратора.")); err != nil {
+				metrics.HandlerErrors.Inc()
+			}
+			return
+		}
 		role := getUserFSMRole(chatID)
 		if role != "" {
 			auth.HandleFSMMessage(ctx, chatID, text, role, bot, database)
@@ -212,6 +222,7 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 	case "📥 Заявки на авторизацию":
 		if db.IsAdminID(chatID) {
 			handlers.ShowPendingUsers(ctx, bot, database, chatID)
+			handlers.ShowPendingAccountRecoveryRequests(ctx, bot, database, chatID)
 			handlers.ShowPendingParentLinks(ctx, bot, database, chatID)
 		}
 	case "/periods", "📅 Периоды":
@@ -436,6 +447,10 @@ func HandleMessage(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, 
 }
 
 func HandleCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB, cb *tgbotapi.CallbackQuery) {
+	if cb == nil || cb.Message == nil || cb.From == nil {
+		return
+	}
+
 	data := cb.Data
 	chatID := cb.Message.Chat.ID
 
@@ -456,22 +471,72 @@ func HandleCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB,
 		chatID,
 	)
 
-	// 🔒 Глобальная защёлка для inline-кнопок: неактивным всё режем
-	// берём пользователя по Telegram ID отправителя колбэка.
-	if cb.From != nil {
-		if u, err := db.GetUserByTelegramID(ctx, database, cb.From.ID); err == nil && u != nil && !u.IsActive {
-			// И даём явное сообщение в чат (на случай, если кнопка была из старого меню)
+	// Публичными остаются только кнопки первичной регистрации и восстановления доступа.
+	// Они разрешены только Telegram ID, который ещё не привязан к подтверждённой учётной записи.
+	// Все остальные inline-действия требуют существующего, подтверждённого и активного пользователя.
+	actor, actorErr := db.GetUserByTelegramID(ctx, database, cb.From.ID)
+	publicAuth := isPublicAuthCallback(data, chatID)
+	if publicAuth {
+		if actorErr != nil {
+			if _, sendErr := tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Не удалось проверить учётную запись. Попробуйте позже.")); sendErr != nil {
+				metrics.HandlerErrors.Inc()
+			}
+			return
+		}
+		if actor != nil && actor.Role != nil {
+			text := "⚠️ Эта кнопка больше недействительна. Нажмите /start."
+			if !actor.Confirmed {
+				text = "⏳ Ваша заявка на регистрацию ещё ожидает подтверждения администратора."
+			}
+			if _, sendErr := tg.Send(bot, tgbotapi.NewMessage(chatID, text)); sendErr != nil {
+				metrics.HandlerErrors.Inc()
+			}
+			return
+		}
+	} else {
+		if actorErr != nil || actor == nil || actor.Role == nil || !actor.Confirmed {
+			if _, sendErr := tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Доступ к этой кнопке больше недействителен. Нажмите /start.")); sendErr != nil {
+				metrics.HandlerErrors.Inc()
+			}
+			return
+		}
+		if !actor.IsActive {
 			msg := tgbotapi.NewMessage(chatID, "🚫 Доступ к боту временно закрыт. Обратитесь к администратору.")
-			// Уберём возможную «залипшую» клавиатуру
 			msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
-			if _, err := tg.Send(bot, msg); err != nil {
+			if _, sendErr := tg.Send(bot, msg); sendErr != nil {
 				metrics.HandlerErrors.Inc()
 			}
 			return
 		}
 	}
 
+	if isSystemAdminOnlyCallback(data) && !db.IsAdminID(cb.From.ID) {
+		if _, sendErr := tg.Send(bot, tgbotapi.NewMessage(chatID, "⛔ Недостаточно прав для выполнения этого действия.")); sendErr != nil {
+			metrics.HandlerErrors.Inc()
+		}
+		return
+	}
+
 	log.Printf("CB from %d: %s (msgID=%d)\n", cb.From.ID, cb.Data, cb.Message.MessageID)
+
+	if data == "auth_new" {
+		auth.CancelRecovery(chatID)
+		db.ClearUserFSMRole(chatID)
+		sendRegistrationRoleMenu(bot, chatID, cb.Message.MessageID)
+		return
+	}
+	if data == "auth_existing" {
+		db.ClearUserFSMRole(chatID)
+		auth.StartAccountRecovery(ctx, chatID, bot)
+		return
+	}
+	if strings.HasPrefix(data, "recovery_role_") ||
+		strings.HasPrefix(data, "recovery_class_num_") ||
+		strings.HasPrefix(data, "recovery_class_letter_") ||
+		data == "recovery_back" || data == "recovery_cancel" {
+		auth.HandleRecoveryCallback(ctx, bot, database, cb)
+		return
+	}
 
 	if strings.HasPrefix(data, "reg_") {
 		role := strings.TrimPrefix(data, "reg_")
@@ -481,6 +546,11 @@ func HandleCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB,
 		} else {
 			auth.StartRegistration(ctx, chatID, role, bot)
 		}
+		return
+	}
+
+	if strings.HasPrefix(data, "recovery_approve_") || strings.HasPrefix(data, "recovery_reject_") {
+		handlers.HandleAccountRecoveryAdminCallback(ctx, bot, database, cb)
 		return
 	}
 
@@ -701,6 +771,92 @@ func HandleCallback(ctx context.Context, bot *tgbotapi.BotAPI, database *sql.DB,
 	if _, err := tg.Send(bot, tgbotapi.NewMessage(chatID, "⚠️ Неизвестная команда. Используйте /start")); err != nil {
 		metrics.HandlerErrors.Inc()
 	}
+}
+
+func sendAuthEntryMenu(bot *tgbotapi.BotAPI, chatID int64) {
+	msg := tgbotapi.NewMessage(chatID, "Добро пожаловать! Выберите действие:")
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🆕 Новый пользователь", "auth_new"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🔑 Войти в существующую учётную запись", "auth_existing"),
+		),
+	)
+	if _, err := tg.Send(bot, msg); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
+}
+
+func sendRegistrationRoleMenu(bot *tgbotapi.BotAPI, chatID int64, messageID int) {
+	edit := tgbotapi.NewEditMessageText(chatID, messageID, "Выберите роль для регистрации:")
+	roles := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("Ученик", "reg_student"),
+			tgbotapi.NewInlineKeyboardButtonData("Родитель", "reg_parent"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("Учитель", "reg_teacher"),
+			tgbotapi.NewInlineKeyboardButtonData("Администрация", "reg_administration"),
+		),
+	)
+	edit.ReplyMarkup = &roles
+	if _, err := tg.Send(bot, edit); err != nil {
+		metrics.HandlerErrors.Inc()
+	}
+}
+
+func isPublicAuthCallback(data string, chatID int64) bool {
+	if data == "auth_new" || data == "auth_existing" || data == "recovery_back" || data == "recovery_cancel" {
+		return true
+	}
+	alwaysPublicPrefixes := []string{
+		"reg_",
+		"recovery_role_",
+		"recovery_class_num_",
+		"recovery_class_letter_",
+	}
+	for _, prefix := range alwaysPublicPrefixes {
+		if strings.HasPrefix(data, prefix) {
+			return true
+		}
+	}
+
+	role := getUserFSMRole(chatID)
+	if role == string(models.Student) {
+		return strings.HasPrefix(data, "student_class_num_") ||
+			strings.HasPrefix(data, "student_class_letter_") ||
+			data == "student_back" || data == "student_cancel"
+	}
+	if role == string(models.Parent) && auth.GetAddChildFSMState(chatID) == "" {
+		return strings.HasPrefix(data, "parent_class_num_") ||
+			strings.HasPrefix(data, "parent_class_letter_") ||
+			data == "parent_back" || data == "parent_cancel"
+	}
+	return false
+}
+
+func isSystemAdminOnlyCallback(data string) bool {
+	if data == "restore_cancel" || strings.HasPrefix(data, "restore_latest:") {
+		return true
+	}
+	prefixes := []string{
+		"confirm_",
+		"reject_",
+		"link_confirm_",
+		"link_reject_",
+		"admusr_",
+		"peradm_",
+		"per_",
+		"recovery_approve_",
+		"recovery_reject_",
+	}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(data, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func getUserFSMRole(chatID int64) string {

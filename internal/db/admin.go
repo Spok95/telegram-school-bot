@@ -66,3 +66,7 @@ func EnsureAdmin(ctx context.Context, chatID int64, database *sql.DB, text strin
 func SetUserFSMRole(chatID int64, role string) {
 	UserFSMRole[chatID] = role
 }
+
+func ClearUserFSMRole(chatID int64) {
+	delete(UserFSMRole, chatID)
+}
